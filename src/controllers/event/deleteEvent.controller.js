@@ -3,6 +3,9 @@ const { findEventById, validateEventId } = require('../../utils/eventHelper');
 const fs = require('fs');
 const path = require('path');
 const { getDB } = require('../../config/database');
+const Notification = require('../../models/Notification');
+const User = require('../../models/User');
+const { ObjectId } = require('mongodb');
 
 /**
  * @desc    Delete event (Public and Private events)
@@ -45,6 +48,68 @@ const deleteEvent = async (req, res, next) => {
         visibility: event.visibility,
       });
     }
+
+    // ✅ CANCEL NOTIFICATION: notify all joined players BEFORE deleting joins
+try {
+  const db = getDB();
+  const eventObjectId = event._id; // MongoDB ObjectId
+
+  const joinsCollection = db.collection('eventJoins');
+
+  // Pull participants who joined this event
+  const joins = await joinsCollection
+    .find({ eventId: eventObjectId })
+    .project({ userId: 1 })
+    .toArray();
+
+  // Unique player ids
+  const recipientIds = [
+    ...new Set(
+      joins
+        .map(j => j.userId)
+        .filter(Boolean)
+        .map(id => (id instanceof ObjectId ? id.toString() : String(id)))
+    ),
+  ].map(id => new ObjectId(id));
+
+  if (recipientIds.length > 0) {
+    const notificationsCollection = db.collection('notifications');
+
+    const now = new Date();
+
+    // Optional: Fetch organiser name for nicer message (fast + safe)
+    let organiserName = null;
+    try {
+      const organiser = await User.findById(organiserId);
+      organiserName = organiser?.fullName || organiser?.communityName || null;
+    } catch (_) {}
+
+    const title = 'Event cancelled';
+    const message = organiserName
+      ? `${organiserName} cancelled: ${event.eventName || 'this event'}`
+      : `Event cancelled: ${event.eventName || 'this event'}`;
+
+    const docs = recipientIds.map((rid) => ({
+      recipientId: rid,               // ✅ matches player notifications query
+      type: 'event-cancelled',
+      title,
+      message,
+      isRead: false,
+      createdAt: now,
+      data: {
+        eventId: eventObjectId.toString(),   // player controller supports string
+        organiserId: organiserId,            // used to enrich organiser details
+        eventTitle: event.eventName || null,
+        eventDateTime: event.eventDateTime || null,
+      },
+    }));
+
+    await notificationsCollection.insertMany(docs, { ordered: false });
+  }
+} catch (error) {
+  console.error('Error sending cancel notifications:', error);
+  // IMPORTANT: do not fail delete because of notification issue
+}
 
     // Cascade delete: remove all records linked to this event (so nothing is left behind)
     const db = getDB();
@@ -125,13 +190,18 @@ const deleteEvent = async (req, res, next) => {
     // Remove notifications tied to this event (inbox + payload references)
     try {
       const notificationsCollection = db.collection('notifications');
-      await notificationsCollection.deleteMany({
-        $or: [
-          { 'data.eventId': eventIdString },
-          { 'data.eventId': eventObjectId },
-          { 'data.eventTitle': event.eventName || null }, // best-effort cleanup for older payloads
-        ],
-      });
+     await notificationsCollection.deleteMany({
+  $and: [
+    { type: { $ne: 'event-cancelled' } },
+    {
+      $or: [
+        { 'data.eventId': eventIdString },
+        { 'data.eventId': eventObjectId },
+        { 'data.eventTitle': event.eventName || null },
+      ],
+    },
+  ],
+});
     } catch (error) {
       console.error('Error cleaning up notifications:', error);
     }

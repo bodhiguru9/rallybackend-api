@@ -169,18 +169,26 @@ const findStoredData = (normalizedIdentifier, isEmail, context = '') => {
  * @param {string} context - Context for OTP
  */
 const sendOTP = async (normalizedIdentifier, isEmail, otp, context = 'signup') => {
-  const emailOTPEnabled = process.env.EMAIL_OTP === 'true' || 
-                          process.env.EMAIL_OTP === '1' || 
-                          process.env.EMAIL_OTP === 'enabled' ||
-                          process.env.EMAIL_OTP === 'yes';
-  
+  const emailOTPEnabled =
+    process.env.EMAIL_OTP === 'true' ||
+    process.env.EMAIL_OTP === '1' ||
+    process.env.EMAIL_OTP === 'enabled' ||
+    process.env.EMAIL_OTP === 'yes';
+
   if (isEmail) {
-    if (emailOTPEnabled) {
+    if (!emailOTPEnabled) return;
+
+    // ✅ choose correct email template/subject
+    if (context === 'forgot-password') {
       await sendPasswordResetOTP(normalizedIdentifier, otp);
+    } else {
+      await sendEmailSignupOTP(normalizedIdentifier, otp); // ✅ signup email subject/template
     }
-  } else {
-    await sendWhatsAppOTP(normalizedIdentifier, otp, context);
+    return;
   }
+
+  // WhatsApp OTP keeps using context already
+  await sendWhatsAppOTP(normalizedIdentifier, otp, context);
 };
 
 /**

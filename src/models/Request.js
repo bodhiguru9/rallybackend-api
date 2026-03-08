@@ -49,6 +49,26 @@ class Request {
     };
   }
 
+    /**
+   * Delete accepted/pending request for a user-organiser pair
+   * Used when a user unfollows a private organiser and we want a clean re-request flow
+   */
+  static async deleteByUserAndOrganiser(userId, organiserId) {
+    const db = getDB();
+    const requestsCollection = db.collection('requests');
+
+    const userObjectId = typeof userId === 'string' ? new ObjectId(userId) : userId;
+    const organiserObjectId = typeof organiserId === 'string' ? new ObjectId(organiserId) : organiserId;
+
+    const result = await requestsCollection.deleteMany({
+      userId: userObjectId,
+      organiserId: organiserObjectId,
+      status: { $in: ['pending', 'accepted'] },
+    });
+
+    return result.deletedCount;
+  }
+
   /**
    * Get pending requests for an organiser
    */

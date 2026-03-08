@@ -120,6 +120,15 @@ const requestToJoin = async (req, res, next) => {
       },
     });
   } catch (error) {
+    if (
+      error.message === 'Request already sent and pending' ||
+      error.message === 'Request already accepted'
+    ) {
+      return res.status(400).json({
+        success: false,
+        error: error.message,
+      });
+    }
     next(error);
   }
 };

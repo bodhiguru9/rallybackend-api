@@ -1,5 +1,6 @@
 const Follow = require('../../models/Follow');
 const User = require('../../models/User');
+const Request = require('../../models/Request');
 const Notification = require('../../models/Notification');
 const { getPaginationParams, createPaginationResponse } = require('../../utils/pagination');
 const { getDB } = require('../../config/database');
@@ -121,17 +122,15 @@ const unfollowOrganiser = async (req, res, next) => {
 
     // Find organiser by sequential userId or MongoDB ObjectId
     let organiser = null;
-    
-    // Check if it's a number (sequential userId)
+
     if (!isNaN(organiserId) && parseInt(organiserId).toString() === organiserId) {
       organiser = await User.findByUserId(organiserId);
     }
-    
-    // If not found by userId, try MongoDB ObjectId
+
     if (!organiser) {
       organiser = await User.findById(organiserId);
     }
-    
+
     if (!organiser) {
       return res.status(404).json({
         success: false,
@@ -140,7 +139,6 @@ const unfollowOrganiser = async (req, res, next) => {
       });
     }
 
-    // Use MongoDB ObjectId for Follow operations
     const organiserMongoId = organiser._id.toString();
 
     // Remove follow relationship
@@ -153,12 +151,19 @@ const unfollowOrganiser = async (req, res, next) => {
       });
     }
 
-    // Get updated counts (use MongoDB ObjectId)
+    // IMPORTANT:
+    // If organiser is private, also delete old accepted/pending request record
+    // so user can send a fresh join request later.
+    if (organiser.profileVisibility === 'private') {
+      await Request.deleteByUserAndOrganiser(followerId, organiserMongoId);
+    }
+
+    // Get updated counts
     const followerCount = await Follow.getFollowerCount(organiserMongoId);
     const followingCount = await Follow.getFollowingCount(followerId);
 
-    // Update organiser's followersCount in database
-    await Follow.updateFollowerCount(organiserMongoId, 0); // Sync count
+    // Sync organiser followersCount in database
+    await Follow.updateFollowerCount(organiserMongoId, 0);
 
     res.status(200).json({
       success: true,

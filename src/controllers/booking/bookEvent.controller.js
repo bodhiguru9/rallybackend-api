@@ -272,7 +272,8 @@ const bookEvent = async (req, res, next) => {
     }
 
     // Get original price
-    let originalAmount = event.gameJoinPrice || 0;
+    const eventPrice = Number(event?.gameJoinPrice ?? event?.eventPricePerGuest ?? 0);
+  let originalAmount = Number.isNaN(eventPrice) ? 0 : eventPrice;
     let discountAmount = 0;
     let finalAmount = originalAmount;
     let promoCodeId = null;

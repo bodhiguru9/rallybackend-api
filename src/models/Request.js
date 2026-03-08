@@ -182,58 +182,54 @@ class Request {
    * Update request status (accept/reject)
    * Accepts sequential requestId (R1, R2, etc.) or MongoDB ObjectId
    */
-  static async updateStatus(requestId, organiserId, status) {
-    const db = getDB();
-    const requestsCollection = db.collection('requests');
+static async updateStatus(requestId, organiserId, status) {
+  const db = getDB();
+  const requestsCollection = db.collection('requests');
 
-    // Find request by sequential requestId or MongoDB ObjectId
-    const request = await this.findByRequestId(requestId);
-    if (!request) {
-      throw new Error('Request not found');
-    }
-
-    const requestObjectId = request._id;
-    const organiserObjectId = typeof organiserId === 'string' ? new ObjectId(organiserId) : organiserId;
-
-    // Verify request belongs to this organiser
-    if (request.organiserId.toString() !== organiserObjectId.toString()) {
-      throw new Error('Not authorized to update this request');
-    }
-
-    // Verify request is still pending
-    if (request.status !== 'pending') {
-      throw new Error('Request already processed');
-    }
-
-    if (!['accepted', 'rejected'].includes(status)) {
-      throw new Error('Invalid status. Must be "accepted" or "rejected"');
-    }
-
-    const result = await requestsCollection.updateOne(
-      { _id: requestObjectId },
-      {
-        $set: {
-          status: status,
-          updatedAt: new Date(),
-        },
-      }
-    );
-
-    // If accepted, create a follow relationship
-    if (status === 'accepted') {
-      const Follow = require('./Follow');
-      try {
-        await Follow.create(request.userId, request.organiserId);
-      } catch (error) {
-        // If follow already exists, that's okay
-        if (!error.message.includes('Already following')) {
-          console.error('Error creating follow after request acceptance:', error);
-        }
-      }
-    }
-
-    return result.modifiedCount > 0;
+  const request = await this.findByRequestId(requestId);
+  if (!request) {
+    throw new Error('Request not found');
   }
+
+  const organiserObjectId =
+    typeof organiserId === 'string' ? new ObjectId(organiserId) : organiserId;
+
+  if (request.organiserId.toString() !== organiserObjectId.toString()) {
+    throw new Error('Not authorized to update this request');
+  }
+
+  if (request.status !== 'pending') {
+    throw new Error('Request already processed');
+  }
+
+  if (!['accepted', 'rejected'].includes(status)) {
+    throw new Error('Invalid status. Must be "accepted" or "rejected"');
+  }
+
+  // If accepting, ensure follow exists first
+  if (status === 'accepted') {
+    const Follow = require('./Follow');
+    try {
+      await Follow.create(request.userId, request.organiserId);
+    } catch (error) {
+      if (!error.message.includes('Already following')) {
+        throw error;
+      }
+    }
+  }
+
+  const result = await requestsCollection.updateOne(
+    { _id: request._id },
+    {
+      $set: {
+        status,
+        updatedAt: new Date(),
+      },
+    }
+  );
+
+  return result.modifiedCount > 0;
+}
 
   /**
    * Check if user has pending request

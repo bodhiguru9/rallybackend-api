@@ -153,6 +153,19 @@ const getCommunityDetails = async (req, res, next) => {
           eventImages: event.eventImages || event.gameImages || [],
           participants: participants,
           participantsCount: participantsCount,
+          spotsInfo: {
+            totalSpots: maxGuest,
+            spotsBooked: spotsBooked,
+            spotsLeft: spotsLeft,
+            spotsFull: spotsFull,
+          },
+          creator: {
+            userId: organiser.userId,
+            fullName: organiser.fullName,
+            profilePic: organiser.profilePic,
+          },
+          eventCreatorName: organiser.fullName,
+          eventCreatorProfilePic: organiser.profilePic,
         };
       })
     );

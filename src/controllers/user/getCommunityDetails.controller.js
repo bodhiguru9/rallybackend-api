@@ -178,6 +178,7 @@ const getCommunityDetails = async (req, res, next) => {
           totalSubscribers: totalSubscribers,
           bio: organiser.bio || null,
           sports: organiserSports,
+          isVerified: !!(organiser.isEmailVerified || organiser.isMobileVerified),
         },
         events: paginatedEvents,
         pagination,

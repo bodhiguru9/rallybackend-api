@@ -147,6 +147,7 @@ const getCommunityDetails = async (req, res, next) => {
           eventId: event.eventId || null,
           eventName: event.eventName || null,
           eventSports: event.eventSports || [],
+          eventType: event.eventType || null,
           eventDateTime: event.eventDateTime || event.gameStartDate || null,
           eventLocation: event.eventLocation || null,
           eventImages: event.eventImages || event.gameImages || [],

@@ -151,6 +151,7 @@ const getCommunityDetails = async (req, res, next) => {
           eventDateTime: event.eventDateTime || event.gameStartDate || null,
           eventLocation: event.eventLocation || null,
           eventImages: event.eventImages || event.gameImages || [],
+          eventPricePerGuest: event.eventPricePerGuest || event.gameJoinPrice || 0,
           participants: participants,
           participantsCount: participantsCount,
           spotsInfo: {

@@ -120,10 +120,12 @@ const getCommunityDetails = async (req, res, next) => {
         if (req.user) {
           if (!isPrivate) {
             const hasJoined = await EventJoin.hasJoined(req.user.id, event._id);
+            const inWaitlist = await Waitlist.isInWaitlist(req.user.id, event._id);
             userJoinStatus = {
               hasJoined,
-              canJoin: !hasJoined && !spotsFull,
-              action: hasJoined ? 'joined' : spotsFull ? 'join-waitlist' : 'join',
+              inWaitlist,
+              canJoin: !hasJoined && !spotsFull && !inWaitlist,
+              action: hasJoined ? 'joined' : inWaitlist ? 'requested' : spotsFull ? 'join-waitlist' : 'join',
             };
           } else {
             const inWaitlist = await Waitlist.isInWaitlist(req.user.id, event._id);

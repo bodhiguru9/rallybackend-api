@@ -195,7 +195,7 @@ const getCommunityDetails = async (req, res, next) => {
           bio: organiser.bio || null,
           sports: organiserSports,
           isVerified: !!(organiser.isEmailVerified || organiser.isMobileVerified),
-          instagramLink: organiser.instagramLink || null,
+          instagramLink: organiser.instagramLink || organiser.instagram_link || null,
         },
         events: paginatedEvents,
         pagination,

@@ -254,14 +254,16 @@ const getEventDetails = async (req, res, next) => {
     if (req.user) {
       if (!isPrivate && !approvalRequired) {
         const hasJoined = await EventJoin.hasJoined(req.user.id, mongoEventId);
+        const inWaitlist = await Waitlist.isInWaitlist(req.user.id, mongoEventId);
         userJoinStatus = {
           hasJoined,
-          canJoin: !hasJoined && !spotsFull,
-          action: hasJoined ? 'joined' : spotsFull ? 'join-waitlist' : 'join', // 'join', 'join-waitlist', or 'joined'
+          inWaitlist,
+          canJoin: !hasJoined && !spotsFull && !inWaitlist,
+          action: hasJoined ? 'joined' : inWaitlist ? 'requested' : spotsFull ? 'join-waitlist' : 'join',
         };
         isJoined = hasJoined;
-        isPending = false;
-        isLeave = !hasJoined;
+        isPending = inWaitlist;
+        isLeave = !hasJoined && !inWaitlist;
       } else {
         // Private or approval-required event
         const inWaitlist = await Waitlist.isInWaitlist(req.user.id, mongoEventId);

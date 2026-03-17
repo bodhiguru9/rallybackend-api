@@ -112,9 +112,16 @@ const getFilterOptions = async (req, res, next) => {
       prices: []
     };
 
-    // Combine sports from API and events, then filter, format and sort
-    // Start with sports from API (priority), then add sports from events
+    // Default sports that should always be available, even if not yet in the database
+    const defaultSports = [
+      'Tennis', 'Badminton', 'Basketball', 'Padel', 'Football',
+      'Cricket', 'Volleyball', 'Pilates', 'Running', 'Pickleball',
+      'Table-tennis',
+    ];
+
+    // Combine sports from API, events, and defaults, then filter, format and sort
     const allSports = [
+      ...defaultSports,
       ...(sportsFromAPI || []).map(sport => sport.name || sport).filter(name => name), // Sports from API
       ...(sportsData || []).filter(sport => 
         sport && typeof sport === 'string' && sport.trim().length > 0

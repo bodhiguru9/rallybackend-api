@@ -314,71 +314,81 @@ const bookEvent = async (req, res, next) => {
     const booking = await Booking.create(bookingData);
 
     // If it's a free event, skip Stripe payment and directly add user to event
-    if (isFreeEvent) {
-      try {
-        await EventJoin.join(userId, event._id);
-      } catch (joinError) {
-        if (joinError.message !== 'Already joined this event') {
-          console.error('Error joining event:', joinError);
-        }
-      }
-
-      const updatedBooking = await Booking.findById(booking.bookingId);
-
-      const frontendUrl = process.env.FRONTEND_URL;
-      let bookingConfirmationUrl = null;
-
-      if (frontendUrl && frontendUrl.trim() !== '') {
-        const backendHost = req.get('host');
-        if (!frontendUrl.includes(backendHost)) {
-          bookingConfirmationUrl = `${frontendUrl}/booking/confirmed?booking_id=${updatedBooking.bookingId}`;
-        }
-      }
-
-      const userDetails = {
-        userId: user?.userId || null,
-        userType: user?.userType || null,
-        email: user?.email || null,
-        fullName: user?.fullName || null,
-        mobileNumber: user?.mobileNumber || null,
-        profilePic: user?.profilePic || null,
-      };
-
-      const eventDetails = {
-        eventId: event.eventId,
-        eventTitle: event.eventName || null,
-        eventName: event.eventName || null,
-        eventCategory: Array.isArray(event.eventSports) && event.eventSports.length > 0 ? event.eventSports[0] : null,
-        eventType: event.eventType || null,
-        eventDateTime: event.eventDateTime,
-        eventLocation: event.eventLocation,
-        eventImages: event.eventImages || event.gameImages || [],
-        gameJoinPrice: safeEventPrice,
-      };
-
-      return res.status(201).json({
-        success: true,
-        message: 'Free event booked successfully',
-        data: {
-          user: userDetails,
-          event: eventDetails,
-          booking: {
-            bookingId: updatedBooking.bookingId,
-            status: updatedBooking.status,
-            amount: updatedBooking.amount,
-            discountAmount: updatedBooking.discountAmount,
-            finalAmount: updatedBooking.finalAmount,
-            promoCode: updatedBooking.promoCode,
-            bookedAt: updatedBooking.bookedAt,
-            createdAt: updatedBooking.createdAt,
-          },
-          bookingConfirmationUrl: bookingConfirmationUrl,
-          isFreeEvent: true,
-          paymentRequired: false,
-          paymentStatus: 'not_required',
-        },
-      });
+   if (isFreeEvent) {
+  try {
+    await EventJoin.join(userId, event._id);
+  } catch (joinError) {
+    if (joinError.message !== 'Already joined this event') {
+      console.error('Error joining event:', joinError);
     }
+  }
+
+  const updatedBooking = await Booking.findById(booking._id); // or Booking.findByBookingId(booking.bookingId)
+
+  let bookingConfirmationUrl = null;
+  const frontendUrl = process.env.FRONTEND_URL;
+
+  if (frontendUrl && frontendUrl.trim() !== '') {
+    const backendHost = req.get('host');
+    if (!frontendUrl.includes(backendHost)) {
+      bookingConfirmationUrl = `${frontendUrl}/booking/confirmed?booking_id=${updatedBooking.bookingId}`;
+    }
+  }
+
+  const userDetails = {
+    userId: user?.userId || null,
+    userType: user?.userType || null,
+    email: user?.email || null,
+    fullName: user?.fullName || null,
+    mobileNumber: user?.mobileNumber || null,
+    profilePic: user?.profilePic || null,
+  };
+
+  const eventDetails = {
+    eventId: event.eventId,
+    eventTitle: event.eventName || null,
+    eventName: event.eventName || null,
+    eventCategory: Array.isArray(event.eventSports) && event.eventSports.length > 0 ? event.eventSports[0] : null,
+    eventType: event.eventType || null,
+    eventDateTime: event.eventDateTime,
+    eventLocation: event.eventLocation,
+    eventImages: event.eventImages || event.gameImages || [],
+    gameJoinPrice: safeEventPrice,
+  };
+
+  try {
+    await sendBookingConfirmedNotification({
+      user,
+      event,
+      booking: updatedBooking,
+    });
+  } catch (notificationError) {
+    console.error('Booking confirmation notification failed:', notificationError);
+  }
+
+  return res.status(201).json({
+    success: true,
+    message: 'Free event booked successfully',
+    data: {
+      user: userDetails,
+      event: eventDetails,
+      booking: {
+        bookingId: updatedBooking.bookingId,
+        status: updatedBooking.status,
+        amount: updatedBooking.amount,
+        discountAmount: updatedBooking.discountAmount,
+        finalAmount: updatedBooking.finalAmount,
+        promoCode: updatedBooking.promoCode,
+        bookedAt: updatedBooking.bookedAt,
+        createdAt: updatedBooking.createdAt,
+      },
+      bookingConfirmationUrl,
+      isFreeEvent: true,
+      paymentRequired: false,
+      paymentStatus: 'not_required',
+    },
+  });
+}
 
     // STEP 2: Create Stripe Payment Intent and Checkout Session (only for paid events)
     const stripeInstance = getStripeInstance();

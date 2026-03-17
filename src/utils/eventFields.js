@@ -221,39 +221,59 @@ const formatEventResponse = (event) => {
   // Calculate eventStatus if not present or if eventDateTime exists
   let eventStatus = event.eventStatus;
   if (eventStatus !== 'draft' && event.eventDateTime) {
-  eventStatus = calculateEventStatus(event.eventDateTime);
-}
+    eventStatus = calculateEventStatus(event.eventDateTime);
+  }
 
-if (!eventStatus) {
-  eventStatus = 'upcoming';
-}
-  
-  // Get images - support both new field name (eventImages) and old field names (gameImages, gameImage) for backward compatibility
-  const eventImages = event.eventImages || event.gameImages || (event.gameImage ? [event.gameImage] : []);
+  if (!eventStatus) {
+    eventStatus = 'upcoming';
+  }
+
+  // Get images - support both new and old field names, with organiser profile pic fallback
+  let eventImages = [];
+
+  if (Array.isArray(event.eventImages) && event.eventImages.length > 0) {
+    eventImages = event.eventImages.filter(Boolean);
+  } else if (Array.isArray(event.gameImages) && event.gameImages.length > 0) {
+    eventImages = event.gameImages.filter(Boolean);
+  } else if (event.eventImage) {
+    eventImages = [event.eventImage];
+  } else if (event.gameImage) {
+    eventImages = [event.gameImage];
+  } else if (event.eventCreatorProfilePic) {
+    // fallback to organiser profile pic when no event image exists
+    eventImages = [event.eventCreatorProfilePic];
+  }
+
   // Limit to max 5 images if more are present
-  const limitedEventImages = Array.isArray(eventImages) ? eventImages.slice(0, 5) : [];
-  
+  const limitedEventImages = eventImages.slice(0, 5);
+  const primaryEventImage = limitedEventImages.length > 0 ? limitedEventImages[0] : null;
+
   // Get video - support both new field name (eventVideo) and old field name (gameVideo) for backward compatibility
   const eventVideo = event.eventVideo || event.gameVideo || null;
 
   // Calculate time until start for upcoming events
   const eventDateTime = event.eventDateTime || event.gameStartDate;
   const eventEndDateTime = event.eventEndDateTime || null;
-  const timeUntilStart = eventStatus === 'upcoming' && eventDateTime 
-    ? calculateTimeUntilStart(eventDateTime) 
-    : null;
+  const timeUntilStart =
+    eventStatus === 'upcoming' && eventDateTime
+      ? calculateTimeUntilStart(eventDateTime)
+      : null;
 
   const response = {
     eventId: event.eventId,
     mongoId: event._id ? event._id.toString() : null,
     eventName: event.eventName || null,
-    eventImages: limitedEventImages, // Array of image URLs (max 5 images, optional)
-    eventVideo: eventVideo, // Video URL (optional)
+
+    eventImages: limitedEventImages,
+    eventImage: primaryEventImage,
+    gameImage: primaryEventImage,
+
+    eventVideo: eventVideo,
     eventType: event.eventType || null,
     eventSports: event.eventSports || [],
     eventDateTime: eventDateTime || null,
     eventEndDateTime: eventEndDateTime,
-    eventFrequency: event.eventFrequency || [], // Array of frequency values (optional)
+    eventFrequency: event.eventFrequency || [],
     eventLocation: event.eventLocation || null,
     eventDescription: event.eventDescription || null,
     eventGender: event.eventGender || null,
@@ -271,13 +291,17 @@ if (!eventStatus) {
     policyJoind: event.policyJoind !== undefined && event.policyJoind !== null ? event.policyJoind : null,
     eventRegistrationStartTime: event.eventRegistrationStartTime || null,
     eventRegistrationEndTime: event.eventRegistrationEndTime || null,
+
+    eventCreatorName: event.eventCreatorName || null,
+    eventCreatorEmail: event.eventCreatorEmail || null,
+    eventCreatorProfilePic: event.eventCreatorProfilePic || null,
+
     eventStatus: eventStatus,
     eventTotalAttendNumber: event.eventTotalAttendNumber || 0,
     createdAt: event.createdAt ? (event.createdAt instanceof Date ? event.createdAt : new Date(event.createdAt)) : new Date(),
     updatedAt: event.updatedAt ? (event.updatedAt instanceof Date ? event.updatedAt : new Date(event.updatedAt)) : new Date(),
   };
 
-  // Add timeUntilStart for upcoming events
   if (timeUntilStart) {
     response.timeUntilStart = timeUntilStart;
   }

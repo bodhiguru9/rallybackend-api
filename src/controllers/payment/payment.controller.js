@@ -224,6 +224,7 @@ const createPaymentOrder = async (req, res, next) => {
  * @route   POST /api/payments/verify
  * @access  Private
  */
+const { sendBookingConfirmedNotification } = require('../../services/eventNotification.service');
 const verifyPayment = async (req, res, next) => {
   try {
     const { payment_intent_id } = req.body;
@@ -415,6 +416,24 @@ const verifyPayment = async (req, res, next) => {
             bookedAt: booking.bookedAt,
           };
         }
+
+        if (booking) {
+          try {
+            const user = await User.findById(payment.userId);
+            const eventForNotification = await findEventById(booking.eventId);
+
+            if (user && eventForNotification) {
+              await sendBookingConfirmedNotification({
+                user,
+                event: eventForNotification,
+                booking,
+              });
+            }
+          } catch (notificationError) {
+            console.error('Paid booking confirmation notification failed:', notificationError);
+          }
+        }
+
 
         res.status(200).json({
           success: true,

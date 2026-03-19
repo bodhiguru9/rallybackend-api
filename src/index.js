@@ -18,10 +18,7 @@ const notFound = require('./middleware/notFound');
 const app = express();
 
 // Get port from environment or default to 3000
-const PORT = (() => {
-  const p = Number(process.env.PORT) || 8080; // EB commonly uses 8081 behind nginx
-  return p < 1024 ? 8081 : p;
-})();
+const PORT = Number(process.env.PORT) || 8080;
 
 app.get("/health", (req, res) => {
   res.status(200).send("OK");
@@ -141,15 +138,14 @@ async function startServer() {
     await connectDB();
 
     // Start Express server
-    app.listen(PORT, () => {
-      console.log(`🚀 Server is running on port ${PORT}`);
-      console.log(`📍 Environment: ${process.env.NODE_ENV || 'development'}`);
-      console.log(`🌐 Health check: http://localhost:${PORT}/health`);
-      
-      // Start event reminder cron job
-      const { startReminderCronJob } = require('./services/eventReminderCron.service');
-      startReminderCronJob();
-    });
+    app.listen(PORT, "0.0.0.0", () => {
+  console.log(`🚀 Server is running on port ${PORT}`);
+  console.log(`📍 Environment: ${process.env.NODE_ENV || 'development'}`);
+  console.log(`🌐 Health check: http://localhost:${PORT}/health`);
+
+  const { startReminderCronJob } = require('./services/eventReminderCron.service');
+  startReminderCronJob();
+});
   } catch (error) {
     console.error('❌ Failed to start server:', error.message);
     process.exit(1);

@@ -494,10 +494,11 @@ if (!customerId) {
 });
     } catch (stripeError) {
       await Booking.updateStatus(booking.bookingId, 'failed');
+      const errorMessage = stripeError.message || 'Failed to create payment intent';
       return res.status(400).json({
         success: false,
-        error: 'Failed to create payment intent',
-        details: stripeError.message,
+        error: errorMessage,
+        details: stripeError.toString(),
       });
     }
 

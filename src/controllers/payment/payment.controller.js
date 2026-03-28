@@ -158,7 +158,7 @@ const createPaymentOrder = async (req, res, next) => {
     const stripeInstance = getStripeInstance();
     const paymentIntent = await stripeInstance.paymentIntents.create({
       amount: amountInCents,
-      currency: 'usd', // Change to your preferred currency (usd, eur, inr, etc.)
+      currency: 'aed', // Change to your preferred currency (usd, eur, inr, etc.)
       metadata: {
         eventId: event.eventId,
         eventTitle: event.eventName || '',
@@ -300,7 +300,15 @@ const verifyPayment = async (req, res, next) => {
                     eventMaxAge: ageCheck.maxAge,
                   });
                 }
-                await EventJoin.join(payment.userId, existingBooking.eventId);
+                await EventJoin.join(
+  payment.userId,
+  existingBooking.eventId,
+  existingBooking.occurrenceStart,
+  {
+    occurrenceEnd: existingBooking.occurrenceEnd || null,
+    parentEventId: existingBooking.parentEventId || eventDoc?.eventId || null,
+  }
+);
 
                 // Private events: remove request record after successful join
                 try {
@@ -320,7 +328,7 @@ const verifyPayment = async (req, res, next) => {
                 }
               } catch (joinError) {
                 // User might already be joined, that's okay
-                if (joinError.message !== 'Already joined this event') {
+                if (joinError.message !== 'Already joined this occurrence') {
                   console.error('Error joining event:', joinError);
                 }
               }
@@ -332,7 +340,11 @@ const verifyPayment = async (req, res, next) => {
             // If no booking exists, create one (backward compatibility)
             const event = await findEventById(payment.eventId);
             if (event) {
-              const hasJoined = await EventJoin.hasJoined(payment.userId, event.eventId);
+              const hasJoined = await EventJoin.hasJoined(
+  payment.userId,
+  event._id,
+  payment.occurrenceStart || null
+);
               if (!hasJoined) {
                 const ageCheck = await ensureAgeAllowedForEvent(event);
                 if (!ageCheck.allowed) {
@@ -346,20 +358,31 @@ const verifyPayment = async (req, res, next) => {
                   });
                 }
                 const bookingData = {
-                  userId: payment.userId,
-                  eventId: event._id,
-                  paymentId: payment.paymentId,
-                  paymentIntentId: payment_intent_id,
-                  status: 'booked',
-                  amount: payment.amount,
-                  discountAmount: payment.discountAmount,
-                  finalAmount: payment.finalAmount,
-                  promoCode: payment.promoCode,
-                  bookedAt: new Date(),
-                };
+  userId: payment.userId,
+  eventId: event._id,
+  parentEventId: payment.parentEventId || event.eventId || null,
+  occurrenceStart: payment.occurrenceStart || null,
+  occurrenceEnd: payment.occurrenceEnd || null,
+  paymentId: payment.paymentId,
+  paymentIntentId: payment_intent_id,
+  status: 'booked',
+  amount: payment.amount,
+  discountAmount: payment.discountAmount,
+  finalAmount: payment.finalAmount,
+  promoCode: payment.promoCode,
+  bookedAt: new Date(),
+};
 
                 booking = await Booking.create(bookingData);
-                await EventJoin.join(payment.userId, event._id);
+                await EventJoin.join(
+  payment.userId,
+  event._id,
+  payment.occurrenceStart || null,
+  {
+    occurrenceEnd: payment.occurrenceEnd || null,
+    parentEventId: payment.parentEventId || event.eventId || null,
+  }
+);
 
                 // Private events: remove request record after successful join
                 try {
@@ -368,11 +391,12 @@ const verifyPayment = async (req, res, next) => {
                     await EventJoinRequest.deleteActiveByUserAndEvent(payment.userId, event._id);
                     const db = getDB();
                     const waitlistCollection = db.collection('waitlist');
-                    await waitlistCollection.deleteMany({
-                      userId: typeof payment.userId === 'string' ? new ObjectId(payment.userId) : payment.userId,
-                      eventId: event._id,
-                      status: { $in: ['pending', 'accepted'] },
-                    });
+                   await waitlistCollection.deleteMany({
+  userId: typeof payment.userId === 'string' ? new ObjectId(payment.userId) : payment.userId,
+  eventId: event._id,
+  occurrenceStart: payment.occurrenceStart || null,
+  status: { $in: ['pending', 'accepted'] },
+});
                   }
                 } catch (cleanupErr) {
                   console.error('Error cleaning up private request after payment:', cleanupErr);
@@ -405,16 +429,18 @@ const verifyPayment = async (req, res, next) => {
         // Add booking info if created
         if (booking) {
           const event = await findEventById(booking.eventId);
-          responseData.booking = {
-            bookingId: booking.bookingId,
-            eventId: event ? event.eventId : null,
-            eventTitle: event ? (event.eventName || null) : null,
-            eventName: event ? (event.eventName || null) : null,
-            eventCategory: event && Array.isArray(event.eventSports) && event.eventSports.length > 0 ? event.eventSports[0] : null,
-            eventType: event ? (event.eventType || null) : null,
-            status: booking.status,
-            bookedAt: booking.bookedAt,
-          };
+         responseData.booking = {
+  bookingId: booking.bookingId,
+  eventId: event ? event.eventId : null,
+  eventTitle: event ? (event.eventName || null) : null,
+  eventName: event ? (event.eventName || null) : null,
+  eventCategory: event && Array.isArray(event.eventSports) && event.eventSports.length > 0 ? event.eventSports[0] : null,
+  eventType: event ? (event.eventType || null) : null,
+  occurrenceStart: booking.occurrenceStart || null,
+  occurrenceEnd: booking.occurrenceEnd || null,
+  status: booking.status,
+  bookedAt: booking.bookedAt,
+};
         }
 
         if (booking) {

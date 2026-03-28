@@ -13,10 +13,18 @@ const { validateAgeForEvent } = require('../../utils/ageRestriction');
  * @route   POST /api/events/:eventId/join
  * @access  Private
  */
+   const normalizeIso = (value) => {
+  if (!value) return null;
+  const d = new Date(value);
+  return isNaN(d.getTime()) ? null : d.toISOString();
+};
+
 const joinEvent = async (req, res, next) => {
   try {
     const { eventId } = req.params;
     const userId = req.user.id;
+    const requestedOccurrenceStart = req.body.occurrenceStart || req.query.occurrenceStart || null;
+const requestedOccurrenceEnd = req.body.occurrenceEnd || req.query.occurrenceEnd || null;
 
     // Validate eventId format
     const validation = validateEventId(eventId);
@@ -28,6 +36,8 @@ const joinEvent = async (req, res, next) => {
       });
     }
 
+ 
+
     // Find event by either sequential ID or ObjectId
     const event = await findEventById(eventId);
     if (!event) {
@@ -38,6 +48,25 @@ const joinEvent = async (req, res, next) => {
         suggestion: 'Use GET /api/events/all to see all available events.',
       });
     }
+
+    const isRecurring = Array.isArray(event.eventFrequency) && event.eventFrequency.length > 0;
+
+if (isRecurring && !requestedOccurrenceStart) {
+  return res.status(400).json({
+    success: false,
+    error: 'occurrenceStart is required for recurring events',
+  });
+}
+
+const occurrenceStart = normalizeIso(requestedOccurrenceStart || event.eventDateTime);
+const occurrenceEnd = normalizeIso(requestedOccurrenceEnd || event.eventEndDateTime || null);
+
+if (!occurrenceStart) {
+  return res.status(400).json({
+    success: false,
+    error: 'Invalid occurrenceStart',
+  });
+}
 
     // Support both old and new field names for backward compatibility
     const isPrivate = event.IsPrivateEvent !== undefined ? event.IsPrivateEvent : (event.visibility === 'private');
@@ -73,7 +102,7 @@ const joinEvent = async (req, res, next) => {
     }
 
     // Check actual booked spots (more accurate than eventTotalAttendNumber)
-    const currentJoinedCount = await EventJoin.getParticipantCount(event._id);
+    const currentJoinedCount = await EventJoin.getParticipantCount(event._id, occurrenceStart);
     const spotsFull = currentJoinedCount >= maxGuest;
 
     // If event is full, redirect to waitlist
@@ -94,11 +123,11 @@ const joinEvent = async (req, res, next) => {
     }
 
     // Check if already joined (use MongoDB ObjectId from found event)
-    const hasJoined = await EventJoin.hasJoined(userId, event._id);
+    const hasJoined = await EventJoin.hasJoined(userId, event._id, occurrenceStart);
     if (hasJoined) {
       return res.status(400).json({
         success: false,
-        error: 'Already joined this event',
+        error: 'Already joined this occurrence',
       });
     }
 
@@ -119,7 +148,10 @@ const joinEvent = async (req, res, next) => {
     }
 
     // Join event (use MongoDB ObjectId from found event)
-    await EventJoin.join(userId, event._id);
+    await EventJoin.join(userId, event._id, occurrenceStart, {
+  occurrenceEnd,
+  parentEventId: event.eventId,
+});
 
     // Get updated event
     const updatedEvent = await findEventById(eventId);
@@ -136,6 +168,8 @@ const joinEvent = async (req, res, next) => {
           eventId: updatedEvent.eventId,
           eventTotalAttendNumber: updatedTotalAttend,
           eventMaxGuest: updatedMaxGuest,
+          occurrenceStart: occurrenceStart,
+occurrenceEnd: occurrenceEnd,
         },
       },
     };
@@ -161,6 +195,7 @@ const leaveEvent = async (req, res, next) => {
   try {
     const { eventId } = req.params;
     const userId = req.user.id;
+    const requestedOccurrenceStart = req.body.occurrenceStart || req.query.occurrenceStart || null;
 
     // Validate and find event first to get MongoDB ObjectId
     const validation = validateEventId(eventId);
@@ -181,8 +216,26 @@ const leaveEvent = async (req, res, next) => {
       });
     }
 
+    const isRecurring = Array.isArray(event.eventFrequency) && event.eventFrequency.length > 0;
+
+if (isRecurring && !requestedOccurrenceStart) {
+  return res.status(400).json({
+    success: false,
+    error: 'occurrenceStart is required for recurring events',
+  });
+}
+
+const occurrenceStart = normalizeIso(requestedOccurrenceStart || event.eventDateTime);
+
+if (!occurrenceStart) {
+  return res.status(400).json({
+    success: false,
+    error: 'Invalid occurrenceStart',
+  });
+}
+
     // Leave event (use MongoDB ObjectId from found event)
-    const left = await EventJoin.leave(userId, event._id);
+    const left = await EventJoin.leave(userId, event._id, occurrenceStart);
 
     if (!left) {
       return res.status(400).json({
@@ -204,6 +257,7 @@ const leaveEvent = async (req, res, next) => {
           userId: userId,
           eventId: event._id.toString(),
           eventName: eventName,
+          occurrenceStart: occurrenceStart,
         }
       );
     } catch (error) {
@@ -224,6 +278,7 @@ const leaveEvent = async (req, res, next) => {
         event: {
           id: updatedEvent._id.toString(),
           eventTotalAttendNumber: updatedTotalAttend,
+          occurrenceStart: occurrenceStart,
         },
       },
     });
@@ -264,6 +319,24 @@ const getParticipants = async (req, res, next) => {
       });
     }
 
+    const requestedOccurrenceStart = req.query.occurrenceStart || null;
+const isRecurring = Array.isArray(event.eventFrequency) && event.eventFrequency.length > 0;
+
+if (isRecurring && !requestedOccurrenceStart) {
+  return res.status(400).json({
+    success: false,
+    error: 'occurrenceStart is required for recurring events',
+  });
+}
+
+const occurrenceStart = normalizeIso(requestedOccurrenceStart || event.eventDateTime);
+
+if (!occurrenceStart) {
+  return res.status(400).json({
+    success: false,
+    error: 'Invalid occurrenceStart',
+  });
+}
     // Support both old and new field names for backward compatibility
     const isPrivate = event.IsPrivateEvent !== undefined ? event.IsPrivateEvent : (event.visibility === 'private');
     
@@ -288,8 +361,8 @@ const getParticipants = async (req, res, next) => {
     }
 
     // Use MongoDB ObjectId from found event
-    const participants = await EventJoin.getEventParticipants(event._id, perPage, skip);
-    const totalCount = await EventJoin.getParticipantCount(event._id);
+    const participants = await EventJoin.getEventParticipants(event._id, occurrenceStart, perPage, skip);
+const totalCount = await EventJoin.getParticipantCount(event._id, occurrenceStart);
     const pagination = createPaginationResponse(totalCount, page, perPage);
 
     res.status(200).json({
@@ -297,6 +370,9 @@ const getParticipants = async (req, res, next) => {
       data: {
         participants,
         pagination,
+        occurrence: {
+  occurrenceStart,
+},
       },
     });
   } catch (error) {
@@ -312,6 +388,7 @@ const getParticipants = async (req, res, next) => {
 const removeParticipant = async (req, res, next) => {
   try {
     const { eventId, userId } = req.params;
+    const requestedOccurrenceStart = req.body.occurrenceStart || req.query.occurrenceStart || null;
     const organiserId = req.user.id;
 
     // Verify event exists and user is creator
@@ -341,6 +418,24 @@ const removeParticipant = async (req, res, next) => {
       });
     }
 
+    const isRecurring = Array.isArray(event.eventFrequency) && event.eventFrequency.length > 0;
+
+if (isRecurring && !requestedOccurrenceStart) {
+  return res.status(400).json({
+    success: false,
+    error: 'occurrenceStart is required for recurring events',
+  });
+}
+
+const occurrenceStart = normalizeIso(requestedOccurrenceStart || event.eventDateTime);
+
+if (!occurrenceStart) {
+  return res.status(400).json({
+    success: false,
+    error: 'Invalid occurrenceStart',
+  });
+}
+
     // Resolve user to remove (supports sequential userId or MongoDB ObjectId)
     let userToRemove = null;
     if (!isNaN(userId) && parseInt(userId).toString() === userId) {
@@ -358,12 +453,12 @@ const removeParticipant = async (req, res, next) => {
     }
 
     // Remove user from event (use MongoDB ObjectId from found event)
-    const removed = await EventJoin.removeUser(event._id, userToRemove._id);
-
+    const removed = await EventJoin.removeUser(event._id, userToRemove._id, occurrenceStart);
     if (!removed) {
       return res.status(400).json({
         success: false,
         error: 'User not found in event participants',
+        occurrenceStart: occurrenceStart,
       });
     }
 
@@ -383,6 +478,7 @@ const removeParticipant = async (req, res, next) => {
           organiserName: organiserName,
           eventId: event._id.toString(),
           eventName: eventName,
+          occurrenceStart: occurrenceStart,
         }
       );
     } catch (error) {
@@ -428,6 +524,7 @@ const getJoinStatus = async (req, res, next) => {
   try {
     const { eventId } = req.params;
     const userId = req.user.id;
+    const requestedOccurrenceStart = req.query.occurrenceStart || req.body.occurrenceStart || null;
 
     // Validate and find event
     const validation = validateEventId(eventId);
@@ -448,6 +545,24 @@ const getJoinStatus = async (req, res, next) => {
       });
     }
 
+    const isRecurringEvent = Array.isArray(event.eventFrequency) && event.eventFrequency.length > 0;
+
+if (isRecurringEvent && !requestedOccurrenceStart) {
+  return res.status(400).json({
+    success: false,
+    error: 'occurrenceStart is required for recurring events',
+  });
+}
+
+const occurrenceStart = normalizeIso(requestedOccurrenceStart || event.eventDateTime);
+
+if (!occurrenceStart) {
+  return res.status(400).json({
+    success: false,
+    error: 'Invalid occurrenceStart',
+  });
+}
+
     let hasJoined = false;
     let inWaitlist = false;
 
@@ -456,12 +571,12 @@ const getJoinStatus = async (req, res, next) => {
 
     // Use MongoDB ObjectId from found event
     if (!isPrivate) {
-      hasJoined = await EventJoin.hasJoined(userId, event._id);
+      hasJoined = await EventJoin.hasJoined(userId, event._id, occurrenceStart);
     } else {
       inWaitlist = await Waitlist.isInWaitlist(userId, event._id);
       // Also check if accepted from waitlist (now in participants)
       if (!inWaitlist) {
-        hasJoined = await EventJoin.hasJoined(userId, event._id);
+        hasJoined = await EventJoin.hasJoined(userId, event._id, occurrenceStart);
       }
     }
 
@@ -471,6 +586,7 @@ const getJoinStatus = async (req, res, next) => {
         hasJoined,
         inWaitlist,
         IsPrivateEvent: isPrivate,
+        occurrenceStart: occurrenceStart,
       },
     });
   } catch (error) {
@@ -511,6 +627,25 @@ const notifyAttendees = async (req, res, next) => {
       });
     }
 
+    const requestedOccurrenceStart = req.body.occurrenceStart || req.query.occurrenceStart || null;
+const isRecurring = Array.isArray(event.eventFrequency) && event.eventFrequency.length > 0;
+
+if (isRecurring && !requestedOccurrenceStart) {
+  return res.status(400).json({
+    success: false,
+    error: 'occurrenceStart is required for recurring events',
+  });
+}
+
+const occurrenceStart = normalizeIso(requestedOccurrenceStart || event.eventDateTime);
+
+if (!occurrenceStart) {
+  return res.status(400).json({
+    success: false,
+    error: 'Invalid occurrenceStart',
+  });
+}
+
     // Permission: creator or superadmin
     const isCreator = senderId === event.creatorId?.toString();
     const isSuperadmin = senderType === 'superadmin';
@@ -543,7 +678,7 @@ const notifyAttendees = async (req, res, next) => {
       `Reminder for "${event.eventName || 'your event'}".`;
 
     // Get ALL attendee userIds
-    const attendeeIds = await EventJoin.getAllParticipantUserIds(event._id);
+    const attendeeIds = await EventJoin.getAllParticipantUserIds(event._id, occurrenceStart);
 
     if (!attendeeIds.length) {
       return res.status(200).json({
@@ -575,12 +710,13 @@ const notifyAttendees = async (req, res, next) => {
           title,
           message,
           {
-            organiserId: senderId,           // ✅ playerNotification controller uses this
-            eventId: event._id.toString(),   // ✅ playerNotification controller uses this
-            eventSeqId: event.eventId,       // optional helper for UI
-            eventName: event.eventName,
-            eventDateTime: event.eventDateTime || null,
-            eventLocation: event.eventLocation || null,
+            organiserId: senderId,
+  eventId: event._id.toString(),
+  eventSeqId: event.eventId,
+  eventName: event.eventName,
+  occurrenceStart: occurrenceStart,
+  eventDateTime: occurrenceStart || event.eventDateTime || null,
+  eventLocation: event.eventLocation || null,
           }
         );
         sentCount++;
@@ -596,6 +732,7 @@ const notifyAttendees = async (req, res, next) => {
         eventId: event.eventId,
         mongoId: event._id.toString(),
         attendees: attendeeIds.length,
+        occurrenceStart: occurrenceStart,
         sentCount,
         skippedSelf,
       },

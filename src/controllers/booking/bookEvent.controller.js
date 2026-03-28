@@ -39,6 +39,15 @@ const bookEvent = async (req, res, next) => {
     const eventId = req.params.eventId;
     const promoCode = req.query.promoCode || req.body.promoCode || req.body.promo_code;
 
+    const requestedOccurrenceStart = req.body.occurrenceStart || req.query.occurrenceStart || null;
+const requestedOccurrenceEnd = req.body.occurrenceEnd || req.query.occurrenceEnd || null;
+
+const normalizeIso = (value) => {
+  if (!value) return null;
+  const d = new Date(value);
+  return isNaN(d.getTime()) ? null : d.toISOString();
+};
+
     // Validation
     if (!eventId) {
       return res.status(400).json({
@@ -64,6 +73,32 @@ const bookEvent = async (req, res, next) => {
         error: 'Event not found',
       });
     }
+
+    const isRecurring = Array.isArray(event.eventFrequency) && event.eventFrequency.length > 0;
+
+if (isRecurring && !requestedOccurrenceStart) {
+  return res.status(400).json({
+    success: false,
+    error: 'occurrenceStart is required for recurring events',
+  });
+}
+
+const occurrenceStart = normalizeIso(requestedOccurrenceStart || event.eventDateTime);
+const occurrenceEnd = normalizeIso(requestedOccurrenceEnd || event.eventEndDateTime || null);
+
+if (!occurrenceStart) {
+  return res.status(400).json({
+    success: false,
+    error: 'Invalid occurrenceStart',
+  });
+}
+
+if (new Date(occurrenceStart) <= new Date()) {
+  return res.status(400).json({
+    success: false,
+    error: 'Cannot book a past occurrence',
+  });
+}
 
     // Normalize event price across old/new schemas
     const eventPrice = Number(event?.gameJoinPrice ?? event?.eventPricePerGuest ?? 0);
@@ -93,19 +128,21 @@ const bookEvent = async (req, res, next) => {
     }
 
     // Check if user already joined the event
-    const hasJoined = await EventJoin.hasJoined(userId, event.eventId);
-    if (hasJoined) {
-      return res.status(400).json({
-        success: false,
-        error: 'Already joined this event',
-      });
-    }
+    const hasJoined = await EventJoin.hasJoined(userId, event._id, occurrenceStart);
+if (hasJoined) {
+  return res.status(400).json({
+    success: false,
+    error: 'Already joined this occurrence',
+  });
+}
 
     // Check if there's already a pending booking for this user and event
-    const existingBookings = await Booking.findByUser(userId, 'pending', 100, 0);
-    const existingPendingBooking = existingBookings.find(
-      (b) => b.eventId.toString() === event._id.toString()
-    );
+   const existingBookings = await Booking.findByUser(userId, 'pending', 100, 0);
+const existingPendingBooking = existingBookings.find(
+  (b) =>
+    b.eventId.toString() === event._id.toString() &&
+    (b.occurrenceStart || null) === occurrenceStart
+);
 
     if (existingPendingBooking) {
       const payment = existingPendingBooking.paymentIntentId
@@ -232,14 +269,20 @@ const bookEvent = async (req, res, next) => {
               user: userDetails,
               event: eventDetails,
               booking: {
-                bookingId: existingPendingBooking.bookingId,
-                status: existingPendingBooking.status,
-                amount: existingPendingBooking.amount,
-                discountAmount: existingPendingBooking.discountAmount,
-                finalAmount: existingPendingBooking.finalAmount,
-                promoCode: existingPendingBooking.promoCode,
-                createdAt: existingPendingBooking.createdAt,
-              },
+  bookingId: existingPendingBooking.bookingId,
+  status: existingPendingBooking.status,
+  amount: existingPendingBooking.amount,
+  discountAmount: existingPendingBooking.discountAmount,
+  finalAmount: existingPendingBooking.finalAmount,
+  promoCode: existingPendingBooking.promoCode,
+  occurrenceStart: existingPendingBooking.occurrenceStart || null,
+  occurrenceEnd: existingPendingBooking.occurrenceEnd || null,
+  createdAt: existingPendingBooking.createdAt,
+},
+occurrence: {
+  occurrenceStart: existingPendingBooking.occurrenceStart || occurrenceStart,
+  occurrenceEnd: existingPendingBooking.occurrenceEnd || occurrenceEnd,
+},
               payment: paymentDetails,
               paymentIntent: stripePaymentIntent,
               checkoutSession: stripeCheckoutSession,
@@ -299,26 +342,32 @@ const bookEvent = async (req, res, next) => {
 
     // STEP 1: Create booking first (before payment)
     const bookingData = {
-      userId: userId,
-      eventId: event._id,
-      paymentId: null,
-      paymentIntentId: null,
-      status: isFreeEvent ? 'booked' : 'pending',
-      amount: originalAmount,
-      discountAmount: discountAmount,
-      finalAmount: finalAmount,
-      promoCode: promoCodeString,
-      bookedAt: isFreeEvent ? new Date() : null,
-    };
+  userId: userId,
+  eventId: event._id,
+  parentEventId: event.eventId,
+  occurrenceStart: occurrenceStart,
+  occurrenceEnd: occurrenceEnd,
+  paymentId: null,
+  paymentIntentId: null,
+  status: isFreeEvent ? 'booked' : 'pending',
+  amount: originalAmount,
+  discountAmount: discountAmount,
+  finalAmount: finalAmount,
+  promoCode: promoCodeString,
+  bookedAt: isFreeEvent ? new Date() : null,
+};
 
     const booking = await Booking.create(bookingData);
 
     // If it's a free event, skip Stripe payment and directly add user to event
    if (isFreeEvent) {
   try {
-    await EventJoin.join(userId, event._id);
+    await EventJoin.join(userId, event._id, occurrenceStart, {
+  occurrenceEnd,
+  parentEventId: event.eventId,
+});
   } catch (joinError) {
-    if (joinError.message !== 'Already joined this event') {
+    if (joinError.message !== 'Already joined this occurrence') {
       console.error('Error joining event:', joinError);
     }
   }
@@ -372,16 +421,22 @@ const bookEvent = async (req, res, next) => {
     data: {
       user: userDetails,
       event: eventDetails,
-      booking: {
-        bookingId: updatedBooking.bookingId,
-        status: updatedBooking.status,
-        amount: updatedBooking.amount,
-        discountAmount: updatedBooking.discountAmount,
-        finalAmount: updatedBooking.finalAmount,
-        promoCode: updatedBooking.promoCode,
-        bookedAt: updatedBooking.bookedAt,
-        createdAt: updatedBooking.createdAt,
-      },
+     booking: {
+  bookingId: updatedBooking.bookingId,
+  status: updatedBooking.status,
+  amount: updatedBooking.amount,
+  discountAmount: updatedBooking.discountAmount,
+  finalAmount: updatedBooking.finalAmount,
+  promoCode: updatedBooking.promoCode,
+  occurrenceStart: updatedBooking.occurrenceStart || occurrenceStart,
+  occurrenceEnd: updatedBooking.occurrenceEnd || occurrenceEnd,
+  bookedAt: updatedBooking.bookedAt,
+  createdAt: updatedBooking.createdAt,
+},
+occurrence: {
+  occurrenceStart,
+  occurrenceEnd,
+},
       bookingConfirmationUrl,
       isFreeEvent: true,
       paymentRequired: false,
@@ -397,25 +452,46 @@ const bookEvent = async (req, res, next) => {
 
     try {
       const metadata = {
-        bookingId: booking.bookingId,
-        eventId: event.eventId,
-        eventTitle: event.eventName || '',
-        eventName: event.eventName || '',
-        eventCategory: Array.isArray(event.eventSports) && event.eventSports.length > 0 ? event.eventSports[0] : '',
-        eventType: event.eventType || '',
-        userId: userId,
-      };
+  bookingId: booking.bookingId,
+  eventId: event.eventId,
+  parentEventId: event.eventId,
+  occurrenceStart: occurrenceStart,
+  ...(occurrenceEnd && { occurrenceEnd: occurrenceEnd }),
+  eventTitle: event.eventName || '',
+  eventName: event.eventName || '',
+  eventCategory: Array.isArray(event.eventSports) && event.eventSports.length > 0 ? event.eventSports[0] : '',
+  eventType: event.eventType || '',
+  userId: String(userId),
+};
 
       if (promoCodeString) {
         metadata.promoCode = promoCodeString;
       }
 
+      let customerId = user.stripeCustomerId;
+
+if (!customerId) {
+  const customer = await stripeInstance.customers.create({
+    email: user.email,
+    name: user.fullName,
+  });
+
+  customerId = customer.id;
+
+  // Save in DB
+  await User.findByIdAndUpdate(userId, {
+    stripeCustomerId: customerId,
+  });
+}
+
       paymentIntent = await stripeInstance.paymentIntents.create({
-        amount: amountInCents,
-        currency: 'usd',
-        metadata: metadata,
-        description: `Payment for event: ${event.eventName || ''}`,
-      });
+  amount: amountInCents,
+  currency: 'usd',
+  customer: customerId,   // ✅ ADD THIS
+  metadata: metadata,
+  description: `Payment for event: ${event.eventName || ''}`,
+  setup_future_usage: 'off_session',
+});
     } catch (stripeError) {
       await Booking.updateStatus(booking.bookingId, 'failed');
       return res.status(400).json({
@@ -457,15 +533,18 @@ const bookEvent = async (req, res, next) => {
             success_url: `${frontendUrl}/payment/success?session_id={CHECKOUT_SESSION_ID}&booking_id=${booking.bookingId}`,
             cancel_url: `${frontendUrl}/payment/cancel?booking_id=${booking.bookingId}`,
             metadata: {
-              bookingId: booking.bookingId,
-              eventId: event.eventId,
-              eventTitle: event.eventName || '',
-              eventName: event.eventName || '',
-              eventCategory: Array.isArray(event.eventSports) && event.eventSports.length > 0 ? event.eventSports[0] : '',
-              eventType: event.eventType || '',
-              userId: userId,
-              ...(promoCodeString && { promoCode: promoCodeString }),
-            },
+  bookingId: booking.bookingId,
+  eventId: event.eventId,
+  parentEventId: event.eventId,
+  occurrenceStart: occurrenceStart,
+  ...(occurrenceEnd && { occurrenceEnd: occurrenceEnd }),
+  eventTitle: event.eventName || '',
+  eventName: event.eventName || '',
+  eventCategory: Array.isArray(event.eventSports) && event.eventSports.length > 0 ? event.eventSports[0] : '',
+  eventType: event.eventType || '',
+  userId: String(userId),
+  ...(promoCodeString && { promoCode: promoCodeString }),
+},
             customer_email: user?.email || null,
             payment_intent_data: {
               metadata: {
@@ -489,16 +568,21 @@ const bookEvent = async (req, res, next) => {
 
     // STEP 3: Create payment record
     const paymentData = {
-      userId: userId,
-      eventId: event._id.toString(),
-      amount: originalAmount,
-      discountAmount: discountAmount,
-      finalAmount: finalAmount,
-      promoCodeId: promoCodeId,
-      promoCode: promoCodeString,
-      stripePaymentIntentId: paymentIntent.id,
-      status: 'pending',
-    };
+  userId: userId,
+  bookingId: booking.bookingId,
+  eventId: event._id.toString(),
+  parentEventId: event.eventId,
+  occurrenceStart: occurrenceStart,
+  occurrenceEnd: occurrenceEnd,
+  amount: originalAmount,
+  discountAmount: discountAmount,
+  finalAmount: finalAmount,
+  promoCodeId: promoCodeId,
+  promoCode: promoCodeString,
+  stripePaymentIntentId: paymentIntent.id,
+  status: 'pending',
+  metadata: metadata,
+};
 
     const payment = await Payment.create(paymentData);
 
@@ -569,14 +653,20 @@ const bookEvent = async (req, res, next) => {
         user: userDetails,
         event: eventDetails,
         booking: {
-          bookingId: updatedBooking.bookingId,
-          status: updatedBooking.status,
-          amount: updatedBooking.amount,
-          discountAmount: updatedBooking.discountAmount,
-          finalAmount: updatedBooking.finalAmount,
-          promoCode: updatedBooking.promoCode,
-          createdAt: updatedBooking.createdAt,
-        },
+  bookingId: updatedBooking.bookingId,
+  status: updatedBooking.status,
+  amount: updatedBooking.amount,
+  discountAmount: updatedBooking.discountAmount,
+  finalAmount: updatedBooking.finalAmount,
+  promoCode: updatedBooking.promoCode,
+  occurrenceStart: updatedBooking.occurrenceStart || occurrenceStart,
+  occurrenceEnd: updatedBooking.occurrenceEnd || occurrenceEnd,
+  createdAt: updatedBooking.createdAt,
+},
+occurrence: {
+  occurrenceStart,
+  occurrenceEnd,
+},
         payment: paymentDetails,
         paymentIntent: stripePaymentIntent,
         checkoutSession: stripeCheckoutSession,

@@ -7,49 +7,69 @@ const { findEventById } = require('../utils/eventHelper');
  * Handles users joining events
  */
 class EventJoin {
+
+  static normalizeOccurrence(value) {
+  if (!value) return null;
+  const d = new Date(value);
+  return isNaN(d.getTime()) ? null : d.toISOString();
+}
   /**
    * Join an event
    */
-  static async join(userId, eventId) {
+  static async join(userId, eventId, occurrenceStart = null, extraData = {}) {
     const db = getDB();
-    const joinsCollection = db.collection('eventJoins');
+const joinsCollection = db.collection('eventJoins');
 
-    // Check if already joined
-    const existing = await joinsCollection.findOne({
-      userId: typeof userId === 'string' ? new ObjectId(userId) : userId,
-      eventId: typeof eventId === 'string' ? new ObjectId(eventId) : eventId,
-    });
+const normalizedOccurrenceStart = this.normalizeOccurrence(occurrenceStart);
+const normalizedOccurrenceEnd = extraData.occurrenceEnd
+  ? this.normalizeOccurrence(extraData.occurrenceEnd)
+  : null;
 
-    if (existing) {
-      throw new Error('Already joined this event');
-    }
+const userObjectId = typeof userId === 'string' ? new ObjectId(userId) : userId;
+const eventObjectId = typeof eventId === 'string' ? new ObjectId(eventId) : eventId;
 
-    const now = new Date();
-    const result = await joinsCollection.insertOne({
-      userId: typeof userId === 'string' ? new ObjectId(userId) : userId,
-      eventId: typeof eventId === 'string' ? new ObjectId(eventId) : eventId,
-      joinedAt: now,
-    });
+// Check if already joined for this specific occurrence
+const existing = await joinsCollection.findOne({
+  userId: userObjectId,
+  eventId: eventObjectId,
+  occurrenceStart: normalizedOccurrenceStart,
+});
 
-    // Update event attendee count
-    const Event = require('./Event');
-    await Event.updateAttendeeCount(eventId, 1);
+if (existing) {
+  throw new Error('Already joined this occurrence');
+}
 
-    return result.insertedId;
+const now = new Date();
+const result = await joinsCollection.insertOne({
+  userId: userObjectId,
+  eventId: eventObjectId,
+  parentEventId: extraData.parentEventId || null,
+  occurrenceStart: normalizedOccurrenceStart,
+  occurrenceEnd: normalizedOccurrenceEnd,
+  joinedAt: now,
+});
+
+// Keep existing attendee count behaviour unchanged for now
+const Event = require('./Event');
+await Event.updateAttendeeCount(eventId, 1);
+
+return result.insertedId;
   }
 
   /**
    * Leave an event
    */
-  static async leave(userId, eventId) {
+  static async leave(userId, eventId, occurrenceStart = null) {
     const db = getDB();
     const joinsCollection = db.collection('eventJoins');
 
-    const result = await joinsCollection.deleteOne({
-      userId: typeof userId === 'string' ? new ObjectId(userId) : userId,
-      eventId: typeof eventId === 'string' ? new ObjectId(eventId) : eventId,
-    });
+    const normalizedOccurrenceStart = this.normalizeOccurrence(occurrenceStart);
 
+const result = await joinsCollection.deleteOne({
+  userId: typeof userId === 'string' ? new ObjectId(userId) : userId,
+  eventId: typeof eventId === 'string' ? new ObjectId(eventId) : eventId,
+  occurrenceStart: normalizedOccurrenceStart,
+});
     if (result.deletedCount > 0) {
       // Update event attendee count
       const Event = require('./Event');
@@ -62,14 +82,17 @@ class EventJoin {
   /**
    * Remove user from event (admin/creator only)
    */
-  static async removeUser(eventId, userIdToRemove) {
+  static async removeUser(eventId, userIdToRemove, occurrenceStart = null) {
     const db = getDB();
     const joinsCollection = db.collection('eventJoins');
 
-    const result = await joinsCollection.deleteOne({
-      userId: typeof userIdToRemove === 'string' ? new ObjectId(userIdToRemove) : userIdToRemove,
-      eventId: typeof eventId === 'string' ? new ObjectId(eventId) : eventId,
-    });
+    const normalizedOccurrenceStart = this.normalizeOccurrence(occurrenceStart);
+
+const result = await joinsCollection.deleteOne({
+  userId: typeof userIdToRemove === 'string' ? new ObjectId(userIdToRemove) : userIdToRemove,
+  eventId: typeof eventId === 'string' ? new ObjectId(eventId) : eventId,
+  occurrenceStart: normalizedOccurrenceStart,
+});
 
     if (result.deletedCount > 0) {
       // Update event attendee count
@@ -88,34 +111,36 @@ class EventJoin {
    * @param {string|ObjectId} userId - User ID (MongoDB ObjectId)
    * @param {string} eventId - Event ID (sequential eventId like "E1" or MongoDB ObjectId)
    */
-  static async hasJoined(userId, eventId) {
-    const db = getDB();
-    const joinsCollection = db.collection('eventJoins');
+ static async hasJoined(userId, eventId, occurrenceStart = null) {
+  const db = getDB();
+  const joinsCollection = db.collection('eventJoins');
 
-    // Find event by sequential eventId or MongoDB ObjectId
-    const event = await findEventById(eventId);
-    if (!event) {
-      return false;
-    }
+  const normalizedOccurrenceStart = this.normalizeOccurrence(occurrenceStart);
 
-    // Use MongoDB ObjectId from found event for database operations
-    const eventObjectId = event._id;
-
-    const join = await joinsCollection.findOne({
-      userId: typeof userId === 'string' ? new ObjectId(userId) : userId,
-      eventId: eventObjectId,
-    });
-
-    return !!join;
+  const event = await findEventById(eventId);
+  if (!event) {
+    return false;
   }
+
+  const eventObjectId = event._id;
+
+  const join = await joinsCollection.findOne({
+    userId: typeof userId === 'string' ? new ObjectId(userId) : userId,
+    eventId: eventObjectId,
+    occurrenceStart: normalizedOccurrenceStart,
+  });
+
+  return !!join;
+}
 
   /**
    * Get all users who joined an event
    */
-  static async getEventParticipants(eventId, limit = 100, skip = 0) {
+ static async getEventParticipants(eventId, occurrenceStart = null, limit = 100, skip = 0) {
     const db = getDB();
     const joinsCollection = db.collection('eventJoins');
     const usersCollection = db.collection('users');
+    const normalizedOccurrenceStart = this.normalizeOccurrence(occurrenceStart);
 
     let objectId;
     try {
@@ -125,7 +150,10 @@ class EventJoin {
     }
 
     const joins = await joinsCollection
-      .find({ eventId: objectId })
+      .find({
+  eventId: objectId,
+  occurrenceStart: normalizedOccurrenceStart,
+})
       .sort({ joinedAt: -1 })
       .limit(limit)
       .skip(skip)
@@ -164,9 +192,10 @@ class EventJoin {
   /**
    * Get participant count for event
    */
-  static async getParticipantCount(eventId) {
+  static async getParticipantCount(eventId, occurrenceStart = null) {
     const db = getDB();
     const joinsCollection = db.collection('eventJoins');
+    const normalizedOccurrenceStart = this.normalizeOccurrence(occurrenceStart);
 
     let objectId;
     try {
@@ -175,7 +204,10 @@ class EventJoin {
       return 0;
     }
 
-    return await joinsCollection.countDocuments({ eventId: objectId });
+    return await joinsCollection.countDocuments({
+  eventId: objectId,
+  occurrenceStart: normalizedOccurrenceStart,
+});
   }
 
   /**
@@ -215,22 +247,28 @@ class EventJoin {
       .toArray();
 
     // Map events with join info
-    return events.map(event => {
-      const joinInfo = joins.find(j => j.eventId.toString() === event._id.toString());
-      return {
-        ...event,
-        joinedAt: joinInfo?.joinedAt,
-      };
-    });
+   return events.map(event => {
+  const eventJoins = joins.filter(j => j.eventId.toString() === event._id.toString());
+  return {
+    ...event,
+    joinedOccurrences: eventJoins.map(j => ({
+      joinedAt: j.joinedAt,
+      occurrenceStart: j.occurrenceStart || null,
+      occurrenceEnd: j.occurrenceEnd || null,
+      parentEventId: j.parentEventId || null,
+    })),
+  };
+});
   }
 
   /**
  * Get ALL participant userIds (ObjectId list) for an event
  * (used for organiser manual broadcast)
  */
-static async getAllParticipantUserIds(eventObjectId) {
+static async getAllParticipantUserIds(eventObjectId, occurrenceStart = null) {
   const db = getDB();
   const joinsCollection = db.collection('eventJoins');
+  const normalizedOccurrenceStart = this.normalizeOccurrence(occurrenceStart);
 
   let objectId;
   try {
@@ -239,7 +277,10 @@ static async getAllParticipantUserIds(eventObjectId) {
     return [];
   }
 
-  const userIds = await joinsCollection.distinct('userId', { eventId: objectId });
+  const userIds = await joinsCollection.distinct('userId', {
+  eventId: objectId,
+  occurrenceStart: normalizedOccurrenceStart,
+});
   return userIds || [];
 }
 }

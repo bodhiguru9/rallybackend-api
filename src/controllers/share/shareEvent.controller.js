@@ -50,37 +50,49 @@ const generateShareLink = async (req, res, next) => {
     }
 
     // Get base URL from environment or request
-    const baseUrl = process.env.BASE_URL || req.protocol + '://' + req.get('host');
-    
-    // Generate share link using eventId
-    // For better security, we can use a share token, but for simplicity, using eventId
-    const shareLink = `${baseUrl}/api/events/share/${event.eventId}`;
-    
-    // Alternative: Generate a secure share token (optional, more secure)
-    const shareToken = crypto.randomBytes(32).toString('hex');
-    const shareLinkWithToken = `${baseUrl}/api/events/share/${event.eventId}?token=${shareToken}`;
+    const apiBaseUrl = process.env.BASE_URL || `${req.protocol}://${req.get('host')}`;
+const appBaseUrl = process.env.APP_BASE_URL || 'https://rally.app';
+const appScheme = process.env.APP_SCHEME || 'rally-app://';
+
+// Main share URL for users
+const shareLink = `${appBaseUrl}/event/${event.eventId}`;
+
+// Optional app deep link
+const deepLink = `${appScheme}event/${event.eventId}`;
+
+// Optional API link if you still want backend access route
+const apiShareLink = `${apiBaseUrl}/api/events/share/${event.eventId}`;
+
+// Optional tokenized public link
+const shareToken = crypto.randomBytes(32).toString('hex');
+const shareLinkWithToken = `${appBaseUrl}/event/${event.eventId}?token=${shareToken}`;
 
     res.status(200).json({
       success: true,
       message: 'Share link generated successfully',
       data: {
-        eventId: event.eventId,
-        eventTitle: event.eventName || null,
-        eventName: event.eventName || null,
-        eventCategory: Array.isArray(event.eventSports) && event.eventSports.length > 0 ? event.eventSports[0] : null,
-        eventType: event.eventType || null,
-        visibility: event.visibility,
-        shareLink: shareLink, // Simple link using eventId
-        shareLinkWithToken: shareLinkWithToken, // More secure link with token
-        shareOptions: {
-          simple: shareLink,
-          secure: shareLinkWithToken,
-        },
-        message: event.visibility === 'public' 
-          ? 'This link can be shared publicly. Anyone can view and join the event.'
-          : 'This is a private event link. Only people with this link can view the event, but they still need to request to join.',
-        expiresAt: null, // Can add expiration if needed
-      },
+  eventId: event.eventId,
+  eventTitle: event.eventName || null,
+  eventName: event.eventName || null,
+  eventCategory: Array.isArray(event.eventSports) && event.eventSports.length > 0 ? event.eventSports[0] : null,
+  eventType: event.eventType || null,
+  visibility: event.visibility,
+  shareLink,
+  deepLink,
+  apiShareLink,
+  shareLinkWithToken,
+  shareOptions: {
+    public: shareLink,
+    app: deepLink,
+    api: apiShareLink,
+    secure: shareLinkWithToken,
+  },
+  message:
+    event.visibility === 'public'
+      ? 'This link can be shared publicly. Anyone can view and join the event.'
+      : 'This is a private event link. Only people with this link can view the event, but they still need to request to join.',
+  expiresAt: null,
+}
     });
   } catch (error) {
     next(error);

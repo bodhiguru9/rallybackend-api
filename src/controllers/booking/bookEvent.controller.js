@@ -397,13 +397,13 @@ const bookEvent = async (req, res, next) => {
 
     try {
       const metadata = {
-        bookingId: booking.bookingId,
-        eventId: event.eventId,
-        eventTitle: event.eventName || '',
-        eventName: event.eventName || '',
-        eventCategory: Array.isArray(event.eventSports) && event.eventSports.length > 0 ? event.eventSports[0] : '',
-        eventType: event.eventType || '',
-        userId: userId,
+        bookingId: String(booking.bookingId),
+        eventId: String(event.eventId),
+        eventTitle: String(event.eventName || ''),
+        eventName: String(event.eventName || ''),
+        eventCategory: String(Array.isArray(event.eventSports) && event.eventSports.length > 0 ? event.eventSports[0] : ''),
+        eventType: String(event.eventType || ''),
+        userId: String(userId),
       };
 
       if (promoCodeString) {
@@ -412,16 +412,17 @@ const bookEvent = async (req, res, next) => {
 
       paymentIntent = await stripeInstance.paymentIntents.create({
         amount: amountInCents,
-        currency: 'usd',
+        currency: 'usd', // Use AED if your account is in AED!
         metadata: metadata,
         description: `Payment for event: ${event.eventName || ''}`,
       });
     } catch (stripeError) {
       await Booking.updateStatus(booking.bookingId, 'failed');
+      const errorMessage = stripeError.message || 'Failed to create payment intent';
       return res.status(400).json({
         success: false,
-        error: 'Failed to create payment intent',
-        details: stripeError.message,
+        error: errorMessage,
+        details: stripeError.toString(),
       });
     }
 

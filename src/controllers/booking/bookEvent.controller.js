@@ -479,7 +479,7 @@ if (!customerId) {
   customerId = customer.id;
 
   // Save in DB
-  await User.findByIdAndUpdate(userId, {
+  await User.updateById(userId, {
     stripeCustomerId: customerId,
   });
 }

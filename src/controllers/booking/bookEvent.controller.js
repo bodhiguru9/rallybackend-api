@@ -372,7 +372,7 @@ occurrence: {
     }
   }
 
-  const updatedBooking = await Booking.findById(booking._id); // or Booking.findByBookingId(booking.bookingId)
+  const updatedBooking = await Booking.findById(booking._id);// or Booking.findByBookingId(booking.bookingId)
 
   let bookingConfirmationUrl = null;
   const frontendUrl = process.env.FRONTEND_URL;
@@ -479,9 +479,9 @@ if (!customerId) {
   customerId = customer.id;
 
   // Save in DB
-  await User.findByIdAndUpdate(userId, {
-    stripeCustomerId: customerId,
-  });
+ await User.updateById(userId, {
+  stripeCustomerId: customerId,
+});
 }
 
       paymentIntent = await stripeInstance.paymentIntents.create({
@@ -593,7 +593,7 @@ if (!customerId) {
       paymentIntentId: paymentIntent.id,
     });
 
-    const updatedBooking = await Booking.findById(booking.bookingId);
+    const updatedBooking = await Booking.findById(booking._id);
 
     const userDetails = {
       userId: user?.userId || null,

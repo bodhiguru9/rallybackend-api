@@ -17,6 +17,7 @@ class User {
     this.mobileNumber = data.mobileNumber;
     this.password = data.password;
     this.profilePic = data.profilePic;
+    this.stripeCustomerId = data.stripeCustomerId || null;
     this.whatsappNumber = data.whatsappNumber || null; // Optional WhatsApp number
     this.isEmailVerified = data.isEmailVerified || false;
     this.isMobileVerified = data.isMobileVerified || false;
@@ -229,20 +230,19 @@ class User {
   /**
    * Find user by ID
    */
-  static async findById(id) {
-    const db = getDB();
-    const usersCollection = db.collection('users');
-    
-    // Convert string ID to ObjectId if needed
-    let objectId;
-    try {
-      objectId = typeof id === 'string' ? new ObjectId(id) : id;
-    } catch (error) {
-      return null; // Invalid ObjectId format
-    }
-    
-    return await usersCollection.findOne({ _id: objectId });
+static async findById(id) {
+  const db = getDB();
+  const usersCollection = db.collection('users');
+
+  let objectId;
+  try {
+    objectId = typeof id === 'string' ? new ObjectId(id) : id;
+  } catch (error) {
+    return null;
   }
+
+  return await usersCollection.findOne({ _id: objectId });
+}
 
   /**
    * Find user by sequential userId

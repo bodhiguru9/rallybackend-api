@@ -182,7 +182,7 @@ const existingPendingBooking = existingBookings.find(
             discountAmount: existingPendingBooking.discountAmount,
             finalAmount: existingPendingBooking.finalAmount,
             finalAmountInCents: paymentIntent.amount,
-            currency: 'usd',
+            currency: 'aed',
             promoCode: existingPendingBooking.promoCode,
             stripePaymentIntentId: paymentIntent.id,
           };
@@ -209,7 +209,7 @@ const existingPendingBooking = existingBookings.find(
                   line_items: [
                     {
                       price_data: {
-                        currency: 'usd',
+                        currency: 'aed',
                         product_data: {
                           name: event.eventName || 'Event',
                           description: `Booking for event: ${event.eventName || 'Event'}`,
@@ -487,7 +487,7 @@ if (!customerId) {
 
       paymentIntent = await stripeInstance.paymentIntents.create({
   amount: amountInCents,
-  currency: 'usd',
+  currency: 'aed',
   customer: customerId,   // ✅ ADD THIS
   metadata: metadata,
   description: `Payment for event: ${event.eventName || ''}`,
@@ -520,7 +520,7 @@ if (!customerId) {
             line_items: [
               {
                 price_data: {
-                  currency: 'usd',
+                  currency: 'aed',
                   product_data: {
                     name: event.eventName || 'Event',
                     description: `Booking for event: ${event.eventName || 'Event'}`,
@@ -624,7 +624,7 @@ if (!customerId) {
       discountAmount: discountAmount,
       finalAmount: finalAmount,
       finalAmountInCents: amountInCents,
-      currency: 'usd',
+      currency: 'aed',
       promoCode: promoCodeString,
       stripePaymentIntentId: paymentIntent.id,
     };

@@ -64,6 +64,10 @@ class SavedCard {
   }
 
   static async findByUser(userId) {
+    if (!userId) {
+      console.warn('[DEBUG] SavedCard.findByUser called without userId');
+      return [];
+    }
     const col = this.collection();
     const userObjectId = typeof userId === 'string' ? new ObjectId(userId) : userId;
     

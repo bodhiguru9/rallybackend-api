@@ -17,16 +17,17 @@ const getStripeInstance = () => {
 
 /**
  * IMPORTANT (PCI):
- * This API does NOT store CVV or full card number. It stores a Stripe PaymentMethod ID + non-sensitive metadata.
- */
+ * This API does NOT store CVV or full card number. It stores# Task: Investigate Saved Cards Logic
 
-/**
- * @desc    Save a card (tokenized) for the logged-in user
- * @route   POST /api/cards
- * @access  Private
- *
- * Body:
- * - paymentMethodId (optional): Stripe PaymentMethod id (pm_...) - if provided, card details will be fetched from Stripe
+- [x] Find backend implementation of `/api/cards`
+- [x] Verify if cards are filtered by user ID
+- [x] Check `BookingModal.tsx` for any frontend-side filtering
+- [x] Confirm if it shows all cards or only user's cards
+- [x] Implement diagnostic logging and secondary filter in the backend
+- [x] Implement diagnostic logging in the frontend (PaymentMethodsScreen)
+- [/] Verify fix (Deployment pending by user)
+- [ ] Final confirmation of data privacy
+ will be fetched from Stripe
  * - cardNumber (optional): Card number (can be full or masked) - required if paymentMethodId is not provided
  * - expiry / expMonth / expYear (optional): Card expiry information
  * - cardHolderName (optional)
@@ -229,10 +230,16 @@ const getSavedCards = async (req, res, next) => {
 
     res.status(200).json({
       success: true,
+      debugUserId: userId,
+      debugCardsCount: cards.length,
+      publishableKey: process.env.STRIPE_PUBLISHABLE_KEY,
       data: {
-        cards: cards.map((c) => ({
-          cardId: c.cardId || c._id.toString(),
-          brand: c.brand,
+        cards: cards
+          .filter(c => c.userId && c.userId.toString() === userId.toString()) // Double check filter
+          .map((c) => ({
+            cardId: c.cardId || c._id.toString(),
+            debugCardUserId: c.userId, // Add this for diagnosis
+            brand: c.brand,
           last4: c.last4,
           cardNumber: c.cardNumber || null,
           expiry: c.expiry || null,

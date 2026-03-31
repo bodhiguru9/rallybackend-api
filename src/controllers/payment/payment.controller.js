@@ -224,7 +224,10 @@ const createPaymentOrder = async (req, res, next) => {
  * @route   POST /api/payments/verify
  * @access  Private
  */
-const { sendBookingConfirmedNotification } = require('../../services/eventNotification.service');
+const { 
+  sendBookingConfirmedNotification,
+  sendHostBookingNotification
+} = require('../../services/eventNotification.service');
 const verifyPayment = async (req, res, next) => {
   try {
     const { payment_intent_id } = req.body;
@@ -451,6 +454,13 @@ const verifyPayment = async (req, res, next) => {
             if (user && eventForNotification) {
               await sendBookingConfirmedNotification({
                 user,
+                event: eventForNotification,
+                booking,
+              });
+
+              // Notify organiser
+              await sendHostBookingNotification({
+                player: user,
                 event: eventForNotification,
                 booking,
               });

@@ -7,6 +7,10 @@ const User = require('../../models/User');
 const stripe = require('stripe');
 const { findEventById } = require('../../utils/eventHelper');
 const { validateAgeForEvent } = require('../../utils/ageRestriction');
+const { 
+  sendBookingConfirmedNotification, 
+  sendHostBookingNotification 
+} = require('../../services/eventNotification.service');
 
 // Initialize Stripe lazily
 let stripeInstance = null;
@@ -408,6 +412,13 @@ const bookEvent = async (req, res, next) => {
       try {
         await sendBookingConfirmedNotification({
           user,
+          event,
+          booking: updatedBooking,
+        });
+
+        // Notify organiser
+        await sendHostBookingNotification({
+          player: user,
           event,
           booking: updatedBooking,
         });

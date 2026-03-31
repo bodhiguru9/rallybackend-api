@@ -62,10 +62,14 @@ const getOrganiserNotifications = async (req, res, next) => {
     const unreadCount = organiserJoinCount + eventPendingCount + eventWaitlistCount;
 
     // Get all pending requests (organiser join requests + event waitlist requests) - same as /api/request/pending
-    // 1. Get organiser join requests
+    // 1. Get General Notifications (new_booking, event_booking_cancelled, etc.)
+    const genericNotifications = await Notification.getUserNotifications(organiserMongoId, 100, 0);
+    const unreadGenericCount = await Notification.getUnreadCount(organiserMongoId);
+
+    // 2. Get organiser join requests
     const organiserJoinRequests = await Request.getPendingRequests(organiserMongoId, 1000, 0);
     
-    // 2. Get event waitlist requests
+    // 3. Get event waitlist requests
     const eventWaitlistRequests = eventIds.length > 0
       ? await waitlistCollection
           .find({
@@ -76,7 +80,7 @@ const getOrganiserNotifications = async (req, res, next) => {
           .toArray()
       : [];
 
-    // 3. Get event pending requests (private events not full at request time)
+    // 4. Get event pending requests (private events not full at request time)
     const eventPendingRequests = eventIds.length > 0
       ? await eventJoinRequestsCollection
           .find({
@@ -87,7 +91,7 @@ const getOrganiserNotifications = async (req, res, next) => {
           .toArray()
       : [];
 
-    // Get user details for event waitlist requests
+    // Get user details for event requests
     const eventRequestUserIds = [...eventPendingRequests, ...eventWaitlistRequests].map(r => r.userId);
     const eventRequestUsers = eventRequestUserIds.length > 0
       ? await usersCollection.find({ 
@@ -95,32 +99,49 @@ const getOrganiserNotifications = async (req, res, next) => {
         }).toArray()
       : [];
 
-    // Combine both types of requests and format them like notifications
-    const allRequests = [
-      ...organiserJoinRequests.map(r => ({ ...r, requestType: 'organiser-join' })),
-      ...eventPendingRequests.map(r => ({ ...r, requestType: 'event-pending' })),
-      ...eventWaitlistRequests.map(r => ({ ...r, requestType: 'event-waitlist' }))
-    ];
+    // Helper to find and remove a notification that matches a request
+    const findAndLinkNotification = (request, type) => {
+      const idx = genericNotifications.findIndex(n => {
+        if (n.type !== type) return false;
+        if (type === 'organiser_join_request') {
+          return n.data?.requestId === request.requestId;
+        }
+        if (type === 'event_join_request') {
+          return n.data?.joinRequestId === (request.joinRequestId || request.requestId) || 
+                 n.data?.waitlistId === (request.waitlistId || request._id?.toString());
+        }
+        return false;
+      });
 
-    // Sort by creation date (newest first)
-    allRequests.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-    const totalCount = allRequests.length;
+      if (idx !== -1) {
+        const found = genericNotifications[idx];
+        genericNotifications.splice(idx, 1); // Remove from generic list to avoid duplicate
+        return found;
+      }
+      return null;
+    };
 
-    // Format requests to match notification structure (same as /api/request/pending)
+    // Combine all types and format them
     const formattedRequests = await Promise.all(
-      allRequests.map(async (request) => {
+      [
+        ...organiserJoinRequests.map(r => ({ ...r, requestType: 'organiser-join' })),
+        ...eventPendingRequests.map(r => ({ ...r, requestType: 'event-pending' })),
+        ...eventWaitlistRequests.map(r => ({ ...r, requestType: 'event-waitlist' }))
+      ].map(async (request) => {
         if (request.requestType === 'organiser-join') {
-          // This is an organiser join request - already has user from Request.getPendingRequests
+          const linkedNotification = findAndLinkNotification(request, 'organiser_join_request');
           return {
+            notificationId: linkedNotification ? linkedNotification._id.toString() : request.requestId,
             type: 'organiser-join-request',
             requestId: request.requestId,
             user: request.user,
             status: request.status,
             createdAt: request.createdAt,
             requestType: 'organiser-join',
+            isRead: linkedNotification ? linkedNotification.isRead : request.status !== 'pending'
           };
         } else {
-          // This is an event request (pending or waitlist)
+          const linkedNotification = findAndLinkNotification(request, 'event_join_request');
           const event = organiserEvents.find(e => e._id.toString() === request.eventId.toString());
           const user = eventRequestUsers.find(u => {
             const requestUserId = request.userId instanceof ObjectId ? request.userId : new ObjectId(request.userId);
@@ -129,6 +150,7 @@ const getOrganiserNotifications = async (req, res, next) => {
           });
 
           return {
+            notificationId: linkedNotification ? linkedNotification._id.toString() : (request.requestType === 'event-pending' ? request.joinRequestId : (request._id?.toString() || Math.random().toString())),
             type: 'event-join-request',
             requestSubtype: request.requestType === 'event-pending' ? 'pending-request' : 'waitlist',
             joinRequestId: request.requestType === 'event-pending' ? request.joinRequestId : (request.waitlistId || null),
@@ -141,19 +163,7 @@ const getOrganiserNotifications = async (req, res, next) => {
               mobileNumber: user.mobileNumber || null,
               profilePic: request.profilePic || user.profilePic,
               fullName: request.fullName || user.fullName,
-              ...(user.userType === 'player' && {
-                dob: user.dob || null,
-                gender: user.gender || null,
-                sport1: user.sport1 || null,
-                sport2: user.sport2 || null,
-                sports: user.sports || [user.sport1, user.sport2].filter(Boolean),
-              }),
-            } : {
-              userId: null,
-              email: request.email,
-              profilePic: request.profilePic,
-              fullName: request.fullName,
-            },
+            } : null,
             event: event ? {
               eventId: event.eventId,
               eventTitle: event.eventName || null,
@@ -162,6 +172,7 @@ const getOrganiserNotifications = async (req, res, next) => {
               eventType: event.eventType || null,
             } : null,
             status: request.status,
+            isRead: linkedNotification ? linkedNotification.isRead : request.status !== 'pending',
             createdAt: request.createdAt,
             requestType: request.requestType,
           };
@@ -169,20 +180,42 @@ const getOrganiserNotifications = async (req, res, next) => {
       })
     );
 
-    // Apply pagination to formatted requests
-    const paginatedRequests = formattedRequests.slice(skip, skip + perPage);
+    // Format remaining Generic Notifications (those not linked to a request, like bookings/cancellations)
+    const formattedGeneric = genericNotifications.map(n => ({
+      notificationId: n._id.toString(),
+      type: n.type,
+      title: n.title,
+      message: n.message,
+      isRead: n.isRead,
+      createdAt: n.createdAt,
+      user: n.data?.playerName ? { fullName: n.data.playerName } : null,
+      event: n.data?.eventId ? {
+        eventId: n.data.eventId,
+        eventName: n.data.eventName,
+        eventTitle: n.data.eventName,
+      } : null,
+      data: n.data,
+      status: 'none', // Not a request
+      requestType: 'notification'
+    }));
+
+    // Merge everything
+    const allItems = [...formattedGeneric, ...formattedRequests];
+    allItems.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+    const totalCount = allItems.length;
+    const paginatedItems = allItems.slice(skip, skip + perPage);
     const pagination = createPaginationResponse(totalCount, page, perPage);
 
-    // Use formatted requests as notifications (they already match /api/request/pending structure)
-    const enrichedNotifications = paginatedRequests;
+    // Total unread count (requests + general)
+    const totalUnreadCount = unreadGenericCount + organiserJoinCount + eventPendingCount + eventWaitlistCount;
 
     res.status(200).json({
       success: true,
       message: 'Organiser notifications retrieved successfully',
       data: {
-        unreadCount: unreadCount,
-        notifications: enrichedNotifications,
-        // Add counts matching /api/request/pending structure
+        unreadCount: totalUnreadCount,
+        notifications: paginatedItems,
         organiserJoinRequests: organiserJoinCount,
         eventPendingRequests: eventPendingCount,
         eventWaitlistRequests: eventWaitlistCount,

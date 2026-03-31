@@ -225,6 +225,7 @@ const cancelBooking = async (req, res, next) => {
             eventId: event._id.toString(),
             bookingId: booking._id || bookingId,
             playerName,
+            eventName: event.eventName || event.gameTitle || 'Event',
             occurrenceStart: booking.occurrenceStart,
           }
         );

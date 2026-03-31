@@ -220,6 +220,13 @@ const getSavedCards = async (req, res, next) => {
     const userId = req.user.id;
     const cards = await SavedCard.findByUser(userId);
 
+    // DEBUG LOGS
+    console.log(`[DEBUG] getSavedCards - User ID: ${userId} (Type: ${typeof userId})`);
+    console.log(`[DEBUG] getSavedCards - Cards found: ${cards.length}`);
+    if (cards.length > 0) {
+      console.log(`[DEBUG] getSavedCards - First card userId: ${cards[0].userId}`);
+    }
+
     res.status(200).json({
       success: true,
       data: {

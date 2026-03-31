@@ -66,7 +66,15 @@ class SavedCard {
   static async findByUser(userId) {
     const col = this.collection();
     const userObjectId = typeof userId === 'string' ? new ObjectId(userId) : userId;
-    return await col.find({ userId: userObjectId }).sort({ isDefault: -1, createdAt: -1 }).toArray();
+    
+    // DEBUG LOGS
+    console.log(`[DEBUG] SavedCard.findByUser - Original userId: ${userId} (Type: ${typeof userId})`);
+    console.log(`[DEBUG] SavedCard.findByUser - Querying with userObjectId: ${userObjectId} (Type: ${typeof userObjectId}, IsObjectId: ${userObjectId instanceof ObjectId})`);
+    
+    const results = await col.find({ userId: userObjectId }).sort({ isDefault: -1, createdAt: -1 }).toArray();
+    console.log(`[DEBUG] SavedCard.findByUser - Results count: ${results.length}`);
+    
+    return results;
   }
 
   static async findByIdForUser(cardId, userId) {

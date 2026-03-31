@@ -30,7 +30,7 @@ const sendBookingConfirmedNotification = async ({ user, event, booking }) => {
   `;
   const whatsappMessage = `Hi ${user?.fullName || 'User'}, your booking is confirmed for ${eventName} on ${eventDate} at ${eventLocation}. Booking ID: ${booking?.bookingId || 'N/A'}.`;
 
-  // Add in-app notification
+  // Add in-app notification to Player
   try {
     await Notification.create(
       user._id || user.id,
@@ -51,6 +51,43 @@ const sendBookingConfirmedNotification = async ({ user, event, booking }) => {
   return await notifyUser({ user, subject, text, html, whatsappMessage });
 };
 
+/**
+ * Notify organiser of a new booking
+ */
+const sendHostBookingNotification = async ({ player, event, booking }) => {
+  const eventName = event?.eventName || 'Event';
+  const playerName = player?.fullName || 'A player';
+  const hostId = event?.creatorId || event?.userId;
+
+  if (!hostId) {
+    console.error('No host ID found to send booking notification');
+    return null;
+  }
+
+  // In-app notification for host
+  try {
+    await Notification.create(
+      hostId,
+      'new_booking',
+      'New Booking',
+      `${playerName} joined your event "${eventName}"`,
+      {
+        eventId: event._id ? event._id.toString() : null,
+        bookingId: booking._id || booking.bookingId,
+        playerName: playerName,
+        eventName: eventName,
+        occurrenceStart: booking.occurrenceStart || null,
+      }
+    );
+  } catch (notifError) {
+    console.error('In-app host booking notification failed:', notifError.message);
+  }
+
+  // We could also send email/whatsapp to host here if needed,
+  // but for now we focus on the in-app notification count.
+  return true;
+};
+
 const sendEventCancelledNotification = async ({ user, event }) => {
   const eventName = event?.eventName || 'Event';
   const eventDate = formatEventDate(event?.eventDateTime || event?.gameStartDate);
@@ -68,5 +105,6 @@ const sendEventCancelledNotification = async ({ user, event }) => {
 
 module.exports = {
   sendBookingConfirmedNotification,
+  sendHostBookingNotification,
   sendEventCancelledNotification,
 };

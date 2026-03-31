@@ -224,6 +224,48 @@ const sendWhatsAppOTP = async (mobileNumber, otp, context = 'general') => {
 };
 
 /**
+ * Send a generic WhatsApp message
+ * @param {string} mobileNumber - Recipient mobile number
+ * @param {string} messageText - The message to send
+ * @returns {Promise<Object>} Twilio message result
+ */
+const sendWhatsAppMessage = async (mobileNumber, messageText) => {
+  const client = getTwilioClient();
+  
+  if (!client) {
+    console.log('📱 Twilio not configured. WhatsApp message:', messageText);
+    return { success: true, message: 'Logged (Twilio not configured)' };
+  }
+
+  let twilioWhatsAppNumber = process.env.TWILIO_WHATSAPP_NUMBER;
+  if (!twilioWhatsAppNumber) {
+    twilioWhatsAppNumber = 'whatsapp:+97142589790';
+  } else if (!twilioWhatsAppNumber.startsWith('whatsapp:')) {
+    twilioWhatsAppNumber = `whatsapp:${twilioWhatsAppNumber}`;
+  }
+
+  try {
+    const normalizedNumber = normalizeMobileNumberForWhatsApp(mobileNumber);
+    const whatsappNumber = `whatsapp:${normalizedNumber}`;
+    
+    const message = await client.messages.create({
+      from: twilioWhatsAppNumber,
+      to: whatsappNumber,
+      body: messageText,
+    });
+    
+    return {
+      success: true,
+      messageSid: message.sid,
+      status: message.status,
+    };
+  } catch (error) {
+    console.error('Error sending WhatsApp message:', error.message);
+    throw error;
+  }
+};
+
+/**
  * Verify if a phone number is valid for WhatsApp
  */
 const isValidWhatsAppNumber = (mobileNumber) => {
@@ -244,6 +286,7 @@ const isValidWhatsAppNumber = (mobileNumber) => {
 
 module.exports = {
   sendWhatsAppOTP,
+  sendWhatsAppMessage,
   generateOTP,
   isValidWhatsAppNumber,
   getTwilioClient,

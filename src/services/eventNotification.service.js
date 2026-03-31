@@ -1,4 +1,5 @@
 const { notifyUser } = require('./notification.service');
+const Notification = require('../models/Notification');
 
 const formatEventDate = (dateValue) => {
   if (!dateValue) return 'TBD';
@@ -28,6 +29,24 @@ const sendBookingConfirmedNotification = async ({ user, event, booking }) => {
     <p><strong>Booking ID:</strong> ${booking?.bookingId || 'N/A'}</p>
   `;
   const whatsappMessage = `Hi ${user?.fullName || 'User'}, your booking is confirmed for ${eventName} on ${eventDate} at ${eventLocation}. Booking ID: ${booking?.bookingId || 'N/A'}.`;
+
+  // Add in-app notification
+  try {
+    await Notification.create(
+      user._id || user.id,
+      'booking_confirmed',
+      'Booking Confirmed',
+      `Your booking for "${eventName}" is confirmed!`,
+      {
+        eventId: event._id ? event._id.toString() : null,
+        bookingId: booking._id || booking.bookingId,
+        eventName: eventName,
+        occurrenceStart: booking.occurrenceStart || null,
+      }
+    );
+  } catch (notifError) {
+    console.error('In-app booking notification failed:', notifError.message);
+  }
 
   return await notifyUser({ user, subject, text, html, whatsappMessage });
 };

@@ -450,23 +450,24 @@ occurrence: {
     let paymentIntent;
     let checkoutSession = null;
 
-    try {
-      const metadata = {
-  bookingId: booking.bookingId,
-  eventId: event.eventId,
-  parentEventId: event.eventId,
-  occurrenceStart: occurrenceStart,
-  ...(occurrenceEnd && { occurrenceEnd: occurrenceEnd }),
-  eventTitle: event.eventName || '',
-  eventName: event.eventName || '',
-  eventCategory: Array.isArray(event.eventSports) && event.eventSports.length > 0 ? event.eventSports[0] : '',
-  eventType: event.eventType || '',
-  userId: String(userId),
-};
+    const metadata = {
+      bookingId: booking.bookingId,
+      eventId: event.eventId,
+      parentEventId: event.eventId,
+      occurrenceStart: occurrenceStart,
+      ...(occurrenceEnd && { occurrenceEnd: occurrenceEnd }),
+      eventTitle: event.eventName || '',
+      eventName: event.eventName || '',
+      eventCategory: Array.isArray(event.eventSports) && event.eventSports.length > 0 ? event.eventSports[0] : '',
+      eventType: event.eventType || '',
+      userId: String(userId),
+    };
 
-      if (promoCodeString) {
-        metadata.promoCode = promoCodeString;
-      }
+    if (promoCodeString) {
+      metadata.promoCode = promoCodeString;
+    }
+
+    try {
 
       let customerId = user.stripeCustomerId;
 

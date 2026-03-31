@@ -2,6 +2,7 @@ const stripe = require('stripe');
 const Booking = require('../../models/Booking');
 const Payment = require('../../models/Payment');
 const EventJoin = require('../../models/EventJoin');
+const Notification = require('../../models/Notification');
 const { findEventById } = require('../../utils/eventHelper');
 
 // Initialize Stripe lazily
@@ -107,13 +108,26 @@ const cancelBooking = async (req, res, next) => {
           refundReason = 'Payment was already refunded earlier';
           refundEligible = true;
         } else if (payment.status === 'success') {
-          const bookingCreatedAt = new Date(booking.createdAt || booking.bookedAt || new Date());
-          const now = new Date();
-          const within24Hours = (now.getTime() - bookingCreatedAt.getTime()) <= TWENTY_FOUR_HOURS_MS;
+          // Check refund policy and window
+          const occurrenceStart = booking.occurrenceStart ? new Date(booking.occurrenceStart) : null;
+          const policy = event.policyJoind || 'before-event';
+          
+          if (policy === 'no-refund') {
+            refundEligible = false;
+            refundReason = 'Event has a no-refund policy';
+          } else if (policy === 'before-event' && occurrenceStart) {
+            const timeToEvent = occurrenceStart.getTime() - Date.now();
+            refundEligible = timeToEvent >= TWENTY_FOUR_HOURS_MS;
+            refundReason = refundEligible 
+              ? 'Cancelled more than 24 hours before event' 
+              : 'Cancelled less than 24 hours before event, so no refund applicable';
+          } else {
+            // Default to no refund if policy unknown or date missing
+            refundEligible = false;
+            refundReason = 'No refund applicable for this event or missing occurrence data';
+          }
 
-          refundEligible = within24Hours;
-
-          if (within24Hours) {
+          if (refundEligible) {
             if (!payment.stripePaymentIntentId) {
               refundReason = 'Refund eligible, but Stripe payment intent is missing';
               await Payment.markRefundFailed(
@@ -133,11 +147,30 @@ const cancelBooking = async (req, res, next) => {
                   refundStatus: refund.status || 'succeeded',
                   refundAmount: payment.finalAmount || payment.amount || 0,
                   refundedAt: new Date(),
-                  refundReason: 'Cancelled within 24 hours of booking',
+                  refundReason: refundReason,
                 });
 
                 refundProcessed = true;
                 refundReason = 'Full refund processed successfully';
+
+                // Send in-app notification to player
+                try {
+                  await Notification.create(
+                    userId,
+                    'refund_initiated',
+                    'Refund Initiated',
+                    `Your refund for ${event.eventName || 'the event'} has been initiated and should reflect in your account soon.`,
+                    {
+                      eventId: booking.eventId,
+                      bookingId: booking._id || bookingId,
+                      refundAmount: payment.finalAmount || payment.amount || 0,
+                      eventName: event.eventName
+                    }
+                  );
+                } catch (notificationError) {
+                  console.error('Failed to send refund notification:', notificationError.message);
+                }
+
                 refundData = {
                   refundId: refund.id,
                   refundStatus: refund.status || 'succeeded',
@@ -158,11 +191,10 @@ const cancelBooking = async (req, res, next) => {
               }
             }
           } else {
-            refundReason = 'Booking cancelled after 24 hours, so no refund applicable';
-
+            // Not eligible - already set refundReason above
             await Payment.markRefundNotEligible(
               payment.paymentId || payment._id,
-              'Cancelled after 24 hours of booking'
+              refundReason
             );
           }
         } else {
@@ -173,9 +205,47 @@ const cancelBooking = async (req, res, next) => {
       }
 
       try {
-        await EventJoin.leave(userId, booking.eventId);
+        await EventJoin.leave(userId, booking.eventId, booking.occurrenceStart);
       } catch (leaveError) {
         console.log('User not found in EventJoin (may have been removed already):', leaveError.message);
+      }
+
+      // Final Notifications
+      try {
+        const playerName = req.user.fullName || 'A player';
+        const eventTitle = event.eventName || 'the event';
+
+        // 1. Notify Organiser (Case 3)
+        await Notification.create(
+          event.creatorId,
+          'event_booking_cancelled',
+          'Booking Cancelled',
+          `${playerName} cancelled their booking for "${eventTitle}"`,
+          {
+            eventId: event._id.toString(),
+            bookingId: booking._id || bookingId,
+            playerName,
+            occurrenceStart: booking.occurrenceStart,
+          }
+        );
+
+        // 2. Notify Player (Case 4) - only if NOT already getting refund_initiated
+        if (!refundProcessed) {
+          await Notification.create(
+            userId,
+            'booking_cancelled',
+            'Booking Cancelled',
+            `Your booking for "${eventTitle}" has been cancelled.`,
+            {
+              eventId: event._id.toString(),
+              bookingId: booking._id || bookingId,
+              eventName: eventTitle,
+              occurrenceStart: booking.occurrenceStart,
+            }
+          );
+        }
+      } catch (notifError) {
+        console.error('Error sending final cancellation notifications:', notifError.message);
       }
     }
 

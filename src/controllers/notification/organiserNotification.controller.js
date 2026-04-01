@@ -40,7 +40,7 @@ const getOrganiserNotifications = async (req, res, next) => {
     const eventJoinRequestsCollection = db.collection('eventJoinRequests');
     const usersCollection = db.collection('users');
     const organiserEvents = await eventsCollection
-      .find({ creatorId: organiserMongoId })
+      .find({ creatorId: { $in: [organiserMongoId, userId] } })
       .toArray();
     const eventIds = organiserEvents.map(e => e._id);
 
@@ -61,8 +61,7 @@ const getOrganiserNotifications = async (req, res, next) => {
     // This increases when any new request comes in
     const unreadCount = organiserJoinCount + eventPendingCount + eventWaitlistCount;
 
-    // Get all pending requests (organiser join requests + event waitlist requests) - same as /api/request/pending
-    // 1. Get General Notifications (new_booking, event_booking_cancelled, etc.)
+    // Get general notifications (new_booking, event_booking_cancelled, etc.)
     const genericNotifications = await Notification.getUserNotifications(organiserMongoId, 100, 0);
     const unreadGenericCount = await Notification.getUnreadCount(organiserMongoId);
 
@@ -220,7 +219,7 @@ const getOrganiserNotifications = async (req, res, next) => {
         eventPendingRequests: eventPendingCount,
         eventWaitlistRequests: eventWaitlistCount,
         pagination: pagination,
-      },
+      }
     });
   } catch (error) {
     next(error);

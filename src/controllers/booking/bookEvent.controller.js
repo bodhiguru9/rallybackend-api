@@ -336,6 +336,11 @@ const bookEvent = async (req, res, next) => {
       }
     }
 
+    // Add 5% VAT
+    const vatRate = 0.05;
+    const vatAmount = Math.round(finalAmount * vatRate * 100) / 100;
+    finalAmount = finalAmount + vatAmount;
+
     // Optional temporary debug log
     console.log('BOOK EVENT PRICE DEBUG:', {
       eventId: event.eventId,

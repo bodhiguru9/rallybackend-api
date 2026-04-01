@@ -117,7 +117,7 @@ const createSavedCard = async (req, res, next) => {
             customer: stripeCustomerId,
           });
         }
-        
+
         stripePaymentMethodId = pm.id;
         brand = pm.card?.brand || null;
         last4 = pm.card?.last4 || null;
@@ -285,16 +285,16 @@ const getSavedCards = async (req, res, next) => {
             cardId: c.cardId || c._id.toString(),
             debugCardUserId: c.userId, // Add this for diagnosis
             brand: c.brand,
-          last4: c.last4,
-          cardNumber: c.cardNumber || null,
-          expiry: c.expiry || null,
-          expMonth: c.expMonth,
-          expYear: c.expYear,
-          cardHolderName: c.cardHolderName || null,
-          isDefault: !!c.isDefault,
-          stripePaymentMethodId: c.stripePaymentMethodId,
-          createdAt: c.createdAt,
-        })),
+            last4: c.last4,
+            cardNumber: c.cardNumber || null,
+            expiry: c.expiry || null,
+            expMonth: c.expMonth,
+            expYear: c.expYear,
+            cardHolderName: c.cardHolderName || null,
+            isDefault: !!c.isDefault,
+            stripePaymentMethodId: c.stripePaymentMethodId,
+            createdAt: c.createdAt,
+          })),
       },
     });
   } catch (error) {

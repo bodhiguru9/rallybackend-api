@@ -122,6 +122,11 @@ const createPaymentOrder = async (req, res, next) => {
       }
     }
 
+    // Add 5% VAT
+    const vatRate = 0.05;
+    const vatAmount = Math.round(finalAmount * vatRate * 100) / 100;
+    finalAmount = finalAmount + vatAmount;
+
     // Convert amount to cents (Stripe uses smallest currency unit)
     const amountInCents = Math.round(finalAmount * 100);
 

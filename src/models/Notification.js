@@ -54,8 +54,9 @@ class Notification {
     const notificationsCollection = db.collection('notifications');
 
     const userObjectId = typeof userId === 'string' ? new ObjectId(userId) : userId;
+    const userStringId = userObjectId.toString();
 
-    const query = { recipientId: userObjectId };
+    const query = { recipientId: { $in: [userObjectId, userStringId] } };
     if (type) {
       query.type = type;
     }
@@ -81,9 +82,10 @@ class Notification {
     const notificationsCollection = db.collection('notifications');
 
     const userObjectId = typeof userId === 'string' ? new ObjectId(userId) : userId;
+    const userStringId = userObjectId.toString();
 
     const query = {
-      recipientId: userObjectId,
+      recipientId: { $in: [userObjectId, userStringId] },
       isRead: false,
     };
     if (type) {

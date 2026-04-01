@@ -3,7 +3,12 @@ const Booking = require('../../models/Booking');
 const Payment = require('../../models/Payment');
 const EventJoin = require('../../models/EventJoin');
 const Notification = require('../../models/Notification');
+const User = require('../../models/User');
 const { findEventById } = require('../../utils/eventHelper');
+const {
+  sendPlayerCancelledBookingNotification,
+  sendHostCancelledBookingNotification,
+} = require('../../services/eventNotification.service');
 
 // Initialize Stripe lazily
 let stripeInstance = null;
@@ -215,7 +220,7 @@ const cancelBooking = async (req, res, next) => {
         const playerName = req.user.fullName || 'A player';
         const eventTitle = event.eventName || 'the event';
 
-        // 1. Notify Organiser (Case 3)
+        // 1. In-app: Notify Organiser
         await Notification.create(
           event.creatorId,
           'event_booking_cancelled',
@@ -225,12 +230,14 @@ const cancelBooking = async (req, res, next) => {
             eventId: event._id.toString(),
             bookingId: booking._id || bookingId,
             playerName,
+            playerId: req.user.userId || req.user.id,
+            playerProfilePic: req.user.profilePic || null,
             eventName: event.eventName || event.gameTitle || 'Event',
             occurrenceStart: booking.occurrenceStart,
           }
         );
 
-        // 2. Notify Player (Case 4) - only if NOT already getting refund_initiated
+        // 2. In-app: Notify Player - only if NOT already getting refund_initiated
         if (!refundProcessed) {
           await Notification.create(
             userId,
@@ -246,7 +253,34 @@ const cancelBooking = async (req, res, next) => {
           );
         }
       } catch (notifError) {
-        console.error('Error sending final cancellation notifications:', notifError.message);
+        console.error('Error sending final cancellation in-app notifications:', notifError.message);
+      }
+
+      // 3. Email/WhatsApp: Notify Player
+      try {
+        const playerUser = await User.findById(userId);
+        if (playerUser) {
+          await sendPlayerCancelledBookingNotification({
+            user: playerUser,
+            event,
+            booking,
+            refundMessage: refundProcessed ? refundReason : null,
+          });
+        }
+      } catch (playerNotifError) {
+        console.error('Player cancellation email/WhatsApp failed:', playerNotifError.message);
+      }
+
+      // 4. Email/WhatsApp: Notify Organiser
+      try {
+        const playerUser = await User.findById(userId);
+        await sendHostCancelledBookingNotification({
+          player: playerUser || { fullName: req.user.fullName || 'A player' },
+          event,
+          booking,
+        });
+      } catch (hostNotifError) {
+        console.error('Host cancellation email/WhatsApp failed:', hostNotifError.message);
       }
     }
 

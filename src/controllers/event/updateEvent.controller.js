@@ -6,6 +6,9 @@ const { findEventById, validateEventId } = require('../../utils/eventHelper');
 const { processEventData, formatEventResponse } = require('../../utils/eventFields');
 const fs = require('fs');
 const path = require('path');
+const { getDB } = require('../../config/database');
+const { ObjectId } = require('mongodb');
+const { sendEventCancelledNotification } = require('../../services/eventNotification.service');
 
 /**
  * @desc    Update event (Public and Private events)
@@ -245,9 +248,83 @@ const updateEvent = async (req, res, next) => {
 
       // Get updated event (use MongoDB ObjectId from found event)
       const updatedEvent = await Event.findById(event._id);
-      
-      // Get creator details
       const creator = await User.findById(updatedEvent.creatorId);
+      
+      // If event was just cancelled, notify all participants
+      if (updateData.eventStatus === 'cancelled' && event.eventStatus !== 'cancelled') {
+        try {
+          const db = getDB();
+          const eventObjectId = event._id;
+          const joinsCollection = db.collection('eventJoins');
+          const bookingsCollection = db.collection('bookings');
+          const notificationsCollection = db.collection('notifications');
+
+          // Get joined users
+          const joins = await joinsCollection
+            .find({ eventId: eventObjectId })
+            .project({ userId: 1 })
+            .toArray();
+
+          // Get confirmed booked users
+          const bookedUsers = await bookingsCollection
+            .find({ eventId: eventObjectId, status: 'booked' })
+            .project({ userId: 1 })
+            .toArray();
+
+          // Merge and deduplicate recipient ids
+          const recipientIds = [
+            ...new Set(
+              [...joins, ...bookedUsers]
+                .map((item) => item.userId)
+                .filter(Boolean)
+                .map((id) => (id instanceof ObjectId ? id.toString() : String(id)))
+            ),
+          ];
+
+          if (recipientIds.length > 0) {
+            const now = new Date();
+            const organiserName = creator?.fullName || creator?.communityName || null;
+
+            const title = 'Event cancelled';
+            const message = organiserName
+              ? `${organiserName} cancelled: ${event.eventName || 'this event'}`
+              : `Event cancelled: ${event.eventName || 'this event'}`;
+
+            // In-app notifications
+            const docs = recipientIds.map((rid) => ({
+              recipientId: new ObjectId(rid),
+              type: 'event-cancelled',
+              title,
+              message,
+              isRead: false,
+              createdAt: now,
+              data: {
+                eventId: eventObjectId.toString(),
+                organiserId: organiserId,
+                eventTitle: event.eventName || null,
+                eventDateTime: event.eventDateTime || null,
+              },
+            }));
+
+            await notificationsCollection.insertMany(docs, { ordered: false });
+
+            // Email/WhatsApp notifications
+            for (const rid of recipientIds) {
+              try {
+                const recipientUser = await User.findById(rid);
+                if (!recipientUser) continue;
+                await sendEventCancelledNotification({ user: recipientUser, event });
+              } catch (notifyError) {
+                console.error(`Failed to send event cancellation notification to user ${rid}:`, notifyError);
+              }
+            }
+          }
+        } catch (cancelNotifError) {
+          console.error('Error sending event cancellation notifications:', cancelNotifError);
+        }
+      }
+
+      // Get creator details
       const creatorEmail = creator ? creator.email : null;
       const creatorProfilePic = creator ? creator.profilePic : null;
 

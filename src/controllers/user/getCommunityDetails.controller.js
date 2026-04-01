@@ -100,7 +100,7 @@ const getCommunityDetails = async (req, res, next) => {
         let participants = [];
         if (!isPrivate) {
           participantsCount = await EventJoin.getParticipantCount(event._id);
-          participants = await EventJoin.getEventParticipants(event._id, 10, 0); // Get first 10 participants
+          participants = await EventJoin.getEventParticipants(event._id, null, 10, 0); // Get first 10 participants
         }
 
         // Get waitlist count for private events

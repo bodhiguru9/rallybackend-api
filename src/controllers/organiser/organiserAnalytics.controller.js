@@ -291,7 +291,7 @@ const getOrganiserAnalytics = async (req, res, next) => {
         .map(async (event) => {
           const bookingStats = bookingsByEvent.get(event._id.toString());
           const participantsCount = await EventJoin.getParticipantCount(event._id);
-          const participants = await EventJoin.getEventParticipants(event._id, 10, 0);
+          const participants = await EventJoin.getEventParticipants(event._id, null, 10, 0);
 
           return {
             eventId: event.eventId,

@@ -62,7 +62,7 @@ const getOrganiserEventsWithParticipants = async (req, res, next) => {
 
     const eventsWithParticipants = await Promise.all(
       events.map(async (event) => {
-        const participants = await EventJoin.getEventParticipants(event._id, 10000, 0);
+        const participants = await EventJoin.getEventParticipants(event._id, null, 10000, 0);
         return {
           ...formatEventResponse(event),
           participants,

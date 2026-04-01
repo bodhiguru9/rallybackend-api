@@ -85,18 +85,14 @@ const normalizeMobileNumberForWhatsApp = (mobileNumber) => {
   normalized = normalized.replace(/\s+/g, '').replace(/-/g, '');
   
   if (!normalized.startsWith('+')) {
-    if (normalized.length === 10) {
-      normalized = `+1${normalized}`;
-    } else if (normalized.length === 11 && normalized.startsWith('1')) {
-      normalized = `+${normalized}`;
-    } else {
-      normalized = `+${normalized}`;
-    }
+    // If the number already has enough digits to include a country code, just prefix +
+    // We cannot assume a specific country code for bare numbers
+    normalized = `+${normalized}`;
   }
   
   const digitsOnly = normalized.replace(/\+/g, '');
-  if (digitsOnly.length < 10 || digitsOnly.length > 15) {
-    throw new Error(`Invalid phone number format. Number should be 10-15 digits with country code. Got: ${normalized}`);
+  if (digitsOnly.length < 7 || digitsOnly.length > 15) {
+    throw new Error(`Invalid phone number format. Number should be 7-15 digits with country code. Got: ${normalized}`);
   }
   
   return normalized;

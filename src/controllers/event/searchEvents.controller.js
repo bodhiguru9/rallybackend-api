@@ -411,7 +411,7 @@ const searchEvents = async (req, res, next) => {
         let participants = [];
         if (!isPrivate || (req.user && req.user.id === event.creatorId.toString())) {
           participantsCount = await EventJoin.getParticipantCount(mongoEventId);
-          participants = await EventJoin.getEventParticipants(mongoEventId, 10, 0); // Get first 10 participants
+          participants = await EventJoin.getEventParticipants(mongoEventId, null, 10, 0); // Get first 10 participants
         }
 
         // Get waitlist count (only for private events and if user is creator)

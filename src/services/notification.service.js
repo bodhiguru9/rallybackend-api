@@ -41,9 +41,11 @@ const sendWhatsAppNotification = async ({ to, message }) => {
 };
 
 const notifyUser = async ({ user, subject, text, html, whatsappMessage }) => {
-  const { channel, value } = getPreferredNotificationChannel(user);
+  const email = user?.email && String(user.email).trim() ? String(user.email).trim() : null;
+  const whatsapp = user?.whatsappNumber || user?.mobileNumber;
+  const mobile = whatsapp && String(whatsapp).trim() ? String(whatsapp).trim() : null;
 
-  if (!channel || !value) {
+  if (!email && !mobile) {
     console.log('⚠️ No notification channel available for user:', user?._id || user?.id);
     return {
       success: false,
@@ -52,19 +54,34 @@ const notifyUser = async ({ user, subject, text, html, whatsappMessage }) => {
     };
   }
 
-  if (channel === 'email') {
-    return await sendEmailNotification({
-      to: value,
-      subject,
-      text,
-      html,
-    });
+  const results = [];
+
+  // Send email if available
+  if (email) {
+    try {
+      const emailResult = await sendEmailNotification({ to: email, subject, text, html });
+      results.push(emailResult);
+    } catch (err) {
+      console.error('Email notification failed:', err.message);
+      results.push({ success: false, channel: 'email', error: err.message });
+    }
   }
 
-  return await sendWhatsAppNotification({
-    to: value,
-    message: whatsappMessage || text,
-  });
+  // Send WhatsApp if available
+  if (mobile) {
+    try {
+      const waResult = await sendWhatsAppNotification({ to: mobile, message: whatsappMessage || text });
+      results.push(waResult);
+    } catch (err) {
+      console.error('WhatsApp notification failed:', err.message);
+      results.push({ success: false, channel: 'whatsapp', error: err.message });
+    }
+  }
+
+  return {
+    success: results.some(r => r.success),
+    channels: results,
+  };
 };
 
 module.exports = {

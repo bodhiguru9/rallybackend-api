@@ -102,7 +102,7 @@ let events = await Event.findWithFilters(
         let participants = [];
         if (!isPrivate || (req.user && req.user.id === event.creatorId.toString())) {
           participantsCount = await EventJoin.getParticipantCount(event._id);
-          participants = await EventJoin.getEventParticipants(event._id, 10, 0); // Get first 10 participants
+          participants = await EventJoin.getEventParticipants(event._id, null, 10, 0); // Get first 10 participants
         }
 
         // Get waitlist count (only for private events and if user is creator)

@@ -92,7 +92,7 @@ const getPackagePurchases = async (req, res, next) => {
     const joinedEventDetailsMap = new Map();
     await Promise.all(
       joinedEvents.map(async (event) => {
-        const participants = await EventJoin.getEventParticipants(event._id, 1000, 0);
+        const participants = await EventJoin.getEventParticipants(event._id, null, 1000, 0);
         joinedEventDetailsMap.set(event._id.toString(), {
           ...formatEventResponse(event),
           participants,

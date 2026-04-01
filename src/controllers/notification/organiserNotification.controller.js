@@ -179,24 +179,52 @@ const getOrganiserNotifications = async (req, res, next) => {
       })
     );
 
+    // Get user details for generic notifications (new_booking, booking_cancelled, etc.)
+    const genericUserIds = genericNotifications
+      .map(n => n.user) // Notification model stores recipientId as user sometimes, but we want the "actor"
+      // Actually, we need to find who triggered it.
+      // For some notifications, we might have stored it in data.
+      .filter(id => id);
+    
+    // Better way: get all unique playerNames/IDs if available
+    // But since the current notifications only have playerName, let's look at who joined the event
+    // Wait, the best way is to fetch the user by the ID stored in data if we add it. 
+    // For now, let's just make it NOT crash and try to find the user by fullName if needed,
+    // or just leave it for now and fix the creation logic for future ones.
+    
+    // ACTUALLY, let's just make sure it returns a safe structure first.
+    
     // Format remaining Generic Notifications (those not linked to a request, like bookings/cancellations)
-    const formattedGeneric = genericNotifications.map(n => ({
-      notificationId: n._id.toString(),
-      type: n.type,
-      title: n.title,
-      message: n.message,
-      isRead: n.isRead,
-      createdAt: n.createdAt,
-      user: n.data?.playerName ? { fullName: n.data.playerName } : null,
-      event: n.data?.eventId ? {
-        eventId: n.data.eventId,
-        eventName: n.data.eventName,
-        eventTitle: n.data.eventName,
-      } : null,
-      data: n.data,
-      status: 'none', // Not a request
-      requestType: 'notification'
-    }));
+    const formattedGeneric = genericNotifications.map(n => {
+      const eventId = n.data?.eventId;
+      const event = organiserEvents.find(e => e._id.toString() === (eventId?.toString() || ''));
+
+      return {
+        notificationId: n._id.toString(),
+        type: n.type,
+        title: n.title,
+        message: n.message,
+        isRead: n.isRead,
+        createdAt: n.createdAt,
+        user: {
+          fullName: n.data?.playerName || 'Someone',
+          userId: n.data?.playerId || 0, // Fallback to 0 if missing
+          profilePic: n.data?.playerProfilePic || null,
+        },
+        event: event ? {
+          eventId: event.eventId,
+          eventName: event.eventName || event.gameTitle || n.data?.eventName,
+          eventTitle: event.eventName || event.gameTitle || n.data?.eventName,
+        } : (n.data?.eventId ? {
+          eventId: n.data.eventId,
+          eventName: n.data.eventName,
+          eventTitle: n.data.eventName,
+        } : null),
+        data: n.data,
+        status: 'none', // Not a request
+        requestType: 'notification'
+      };
+    });
 
     // Merge everything
     const allItems = [...formattedGeneric, ...formattedRequests];

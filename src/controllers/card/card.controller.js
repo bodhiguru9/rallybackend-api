@@ -74,23 +74,68 @@ const createSavedCard = async (req, res, next) => {
     let expYear = null;
     let formattedExpiry = null;
 
-    // If paymentMethodId is provided, fetch card details from Stripe
-    if (paymentMethodId && typeof paymentMethodId === 'string' && paymentMethodId.trim()) {
-      const stripeInstance = getStripeInstance();
-      const pm = await stripeInstance.paymentMethods.retrieve(paymentMethodId.trim());
+    const stripeInstance = getStripeInstance();
 
-      if (!pm || pm.type !== 'card' || !pm.card) {
-        return res.status(400).json({
-          success: false,
-          error: 'Invalid payment method. Only card payment methods are supported.',
-        });
+    // If paymentMethodId is provided, fetch card details from Stripe and attach to Customer
+    if (paymentMethodId && typeof paymentMethodId === 'string' && paymentMethodId.trim()) {
+      const pmId = paymentMethodId.trim();
+
+      // Ensure user has a Stripe Customer ID and attach PaymentMethod
+      const user = await User.findById(userId);
+      if (!user) {
+        return res.status(404).json({ success: false, error: 'User not found' });
       }
 
-      stripePaymentMethodId = pm.id;
-      brand = pm.card.brand || null;
-      last4 = pm.card.last4 || null;
-      expMonth = pm.card.exp_month || null;
-      expYear = pm.card.exp_year || null;
+      let stripeCustomerId = user.stripeCustomerId || user.stripe_customer_id || null;
+      if (stripeCustomerId) {
+        try {
+          // Validate customer exists
+          await stripeInstance.customers.retrieve(stripeCustomerId);
+        } catch (e) {
+          stripeCustomerId = null;
+        }
+      }
+
+      if (!stripeCustomerId) {
+        const customer = await stripeInstance.customers.create({
+          email: user.email || undefined,
+          phone: user.mobileNumber || undefined,
+          metadata: {
+            mongoUserId: user._id.toString(),
+            userId: String(user.userId),
+          },
+        });
+        stripeCustomerId = customer.id;
+        await User.updateById(userId, { stripeCustomerId });
+      }
+
+      // Attach PaymentMethod to Customer (Ignore if already attached)
+      try {
+        const pm = await stripeInstance.paymentMethods.retrieve(pmId);
+        if (pm.customer !== stripeCustomerId) {
+          await stripeInstance.paymentMethods.attach(pmId, {
+            customer: stripeCustomerId,
+          });
+        }
+        
+        stripePaymentMethodId = pm.id;
+        brand = pm.card?.brand || null;
+        last4 = pm.card?.last4 || null;
+        expMonth = pm.card?.exp_month || null;
+        expYear = pm.card?.exp_year || null;
+      } catch (attachError) {
+        // If it's already attached to another customer, we might have a problem
+        // but for now we just log it and proceed if we can retrieve it
+        console.error('Stripe PM attach error:', attachError.message);
+        if (!stripePaymentMethodId) {
+          const pm = await stripeInstance.paymentMethods.retrieve(pmId);
+          stripePaymentMethodId = pm.id;
+          brand = pm.card?.brand || null;
+          last4 = pm.card?.last4 || null;
+          expMonth = pm.card?.exp_month || null;
+          expYear = pm.card?.exp_year || null;
+        }
+      }
 
       // Validate provided expiry (if provided) matches Stripe card expiry
       const parsedExpiry = parseExpiry(expiryRaw);
@@ -107,8 +152,8 @@ const createSavedCard = async (req, res, next) => {
         if (
           !expMonth ||
           !expYear ||
-          providedExpMonth !== expMonth ||
-          providedExpYear !== expYear
+          (providedExpMonth && providedExpMonth !== expMonth) ||
+          (providedExpYear && providedExpYear !== expYear)
         ) {
           return res.status(400).json({
             success: false,

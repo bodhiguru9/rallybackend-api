@@ -107,11 +107,12 @@ class Notification {
 
     const notificationObjectId = typeof notificationId === 'string' ? new ObjectId(notificationId) : notificationId;
     const userObjectId = typeof userId === 'string' ? new ObjectId(userId) : userId;
+    const userStringId = userObjectId.toString();
 
     const result = await notificationsCollection.updateOne(
       {
         _id: notificationObjectId,
-        recipientId: userObjectId,
+        recipientId: { $in: [userObjectId, userStringId] },
       },
       {
         $set: {
@@ -137,7 +138,7 @@ class Notification {
     const userObjectId = typeof userId === 'string' ? new ObjectId(userId) : userId;
 
     const query = {
-      recipientId: userObjectId,
+      recipientId: { $in: [userObjectId, userObjectId.toString()] },
       isRead: false,
     };
     if (type) {

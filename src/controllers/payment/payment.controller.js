@@ -88,8 +88,12 @@ const createPaymentOrder = async (req, res, next) => {
       }
     }
 
-    // Get original price
-    let originalAmount = event.gameJoinPrice || 0;
+    // Get guests count (default to 1)
+    const guestsCount = parseInt(req.body.guestsCount || req.body.guests_count || 1, 10);
+    const safeGuestsCount = isNaN(guestsCount) || guestsCount < 1 ? 1 : guestsCount;
+
+    // Get original price (multiplied by guests count)
+    let originalAmount = (event.gameJoinPrice || 0) * safeGuestsCount;
     let discountAmount = 0;
     let finalAmount = originalAmount;
     let promoCodeId = null;

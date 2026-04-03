@@ -45,6 +45,7 @@ const bookEvent = async (req, res, next) => {
 
     const requestedOccurrenceStart = req.body.occurrenceStart || req.query.occurrenceStart || null;
     const requestedOccurrenceEnd = req.body.occurrenceEnd || req.query.occurrenceEnd || null;
+    const requestedTimeZone = req.body.timeZone || req.query.timeZone || null;
 
     const normalizeIso = (value) => {
       if (!value) return null;
@@ -360,6 +361,7 @@ const bookEvent = async (req, res, next) => {
       parentEventId: event.eventId,
       occurrenceStart: occurrenceStart,
       occurrenceEnd: occurrenceEnd,
+      timeZone: requestedTimeZone,
       paymentId: null,
       paymentIntentId: null,
       status: isFreeEvent ? 'booked' : 'pending',

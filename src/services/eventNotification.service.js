@@ -2,23 +2,56 @@ const { notifyUser } = require('./notification.service');
 const Notification = require('../models/Notification');
 const User = require('../models/User');
 
-const formatEventDate = (dateValue) => {
-  if (!dateValue) return 'TBD';
-  const d = new Date(dateValue);
+const resolveEventTimeZone = ({ booking, event, user }) => {
+  return (
+    booking?.timeZone ||
+    event?.timeZone ||
+    event?.eventTimeZone ||
+    user?.timeZone ||
+    user?.timezone ||
+    'Asia/Dubai'
+  );
+};
+
+const formatEventDate = (startDateValue, endDateValue, timeZone = 'Asia/Dubai') => {
+  if (!startDateValue) return 'TBD';
+  const d = new Date(startDateValue);
   if (Number.isNaN(d.getTime())) return 'TBD';
-  return d.toLocaleString('en-IN', {
+  
+  let formattedStart = d.toLocaleString('en-US', {
+    timeZone,
     year: 'numeric',
     month: 'short',
     day: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
   });
+
+  if (endDateValue) {
+    const endDates = new Date(endDateValue);
+    if (!Number.isNaN(endDates.getTime())) {
+      const formattedEnd = endDates.toLocaleString('en-US', {
+        timeZone,
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+      // Try to clean up the double-date output slightly by just appending the end time
+      return `${formattedStart} - ${formattedEnd}`;
+    }
+  }
+
+  return formattedStart;
 };
 
 // ─── Booking Confirmed → Player ───────────────────────────────────────────
 const sendBookingConfirmedNotification = async ({ user, event, booking }) => {
   const eventName = event?.eventName || 'Event';
-  const eventDate = formatEventDate(booking?.occurrenceStart || event?.eventDateTime || event?.gameStartDate);
+  const timeZone = resolveEventTimeZone({ booking, event, user });
+  const eventDate = formatEventDate(
+    booking?.occurrenceStart || event?.eventDateTime || event?.gameStartDate,
+    booking?.occurrenceEnd || event?.eventEndDateTime || event?.gameEndDate,
+    timeZone
+  );
   const eventLocation = event?.eventLocation || 'Location will be shared soon';
 
   const subject = `Booking confirmed for ${eventName}`;
@@ -58,7 +91,12 @@ const sendHostBookingNotification = async ({ player, event, booking }) => {
   const eventName = event?.eventName || 'Event';
   const playerName = player?.fullName || 'A player';
   const hostId = event?.creatorId || event?.userId;
-  const eventDate = formatEventDate(booking?.occurrenceStart || event?.eventDateTime || event?.gameStartDate);
+  const timeZone = resolveEventTimeZone({ booking, event, user: player });
+  const eventDate = formatEventDate(
+    booking?.occurrenceStart || event?.eventDateTime || event?.gameStartDate,
+    booking?.occurrenceEnd || event?.eventEndDateTime || event?.gameEndDate,
+    timeZone
+  );
   const eventLocation = event?.eventLocation || 'Location will be shared soon';
 
   if (!hostId) {
@@ -112,7 +150,12 @@ const sendHostBookingNotification = async ({ player, event, booking }) => {
 // ─── Booking Cancelled → Player ───────────────────────────────────────────
 const sendPlayerCancelledBookingNotification = async ({ user, event, booking, refundMessage }) => {
   const eventName = event?.eventName || 'Event';
-  const eventDate = formatEventDate(booking?.occurrenceStart || event?.eventDateTime || event?.gameStartDate);
+  const timeZone = resolveEventTimeZone({ booking, event, user });
+  const eventDate = formatEventDate(
+    booking?.occurrenceStart || event?.eventDateTime || event?.gameStartDate,
+    booking?.occurrenceEnd || event?.eventEndDateTime || event?.gameEndDate,
+    timeZone
+  );
   const eventLocation = event?.eventLocation || 'Location will be shared soon';
   const refundLine = refundMessage ? `\n${refundMessage}` : '';
 
@@ -135,7 +178,12 @@ const sendHostCancelledBookingNotification = async ({ player, event, booking }) 
   const eventName = event?.eventName || 'Event';
   const playerName = player?.fullName || 'A player';
   const hostId = event?.creatorId || event?.userId;
-  const eventDate = formatEventDate(booking?.occurrenceStart || event?.eventDateTime || event?.gameStartDate);
+  const timeZone = resolveEventTimeZone({ booking, event, user: player });
+  const eventDate = formatEventDate(
+    booking?.occurrenceStart || event?.eventDateTime || event?.gameStartDate,
+    booking?.occurrenceEnd || event?.eventEndDateTime || event?.gameEndDate,
+    timeZone
+  );
   const eventLocation = event?.eventLocation || 'Location will be shared soon';
 
   if (!hostId) return null;
@@ -164,7 +212,12 @@ const sendHostCancelledBookingNotification = async ({ player, event, booking }) 
 // ─── Event Cancelled (by Organiser) → Player ─────────────────────────────
 const sendEventCancelledNotification = async ({ user, event }) => {
   const eventName = event?.eventName || 'Event';
-  const eventDate = formatEventDate(event?.eventDateTime || event?.gameStartDate);
+  const timeZone = resolveEventTimeZone({ event, user });
+  const eventDate = formatEventDate(
+    event?.eventDateTime || event?.gameStartDate,
+    event?.eventEndDateTime || event?.gameEndDate,
+    timeZone
+  );
   const eventLocation = event?.eventLocation || 'Location will be shared soon';
 
   const subject = `Event cancelled: ${eventName}`;

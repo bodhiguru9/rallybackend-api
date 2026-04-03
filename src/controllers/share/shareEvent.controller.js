@@ -50,8 +50,8 @@ const generateShareLink = async (req, res, next) => {
     }
 
     // Get base URL from environment or request
-    const apiBaseUrl = process.env.BASE_URL || `${req.protocol}://${req.get('host')}`;
-const appBaseUrl = process.env.APP_BASE_URL || 'https://rally.app';
+   const apiBaseUrl = process.env.BASE_URL || `${req.protocol}://${req.get('host')}`;
+const appBaseUrl = (process.env.APP_BASE_URL || 'https://rallysports.ae').replace(/\/+$/, '');
 const appScheme = process.env.APP_SCHEME || 'rally-app://';
 
 // Main share URL for users

@@ -87,6 +87,7 @@ class Event {
       eventType: event.eventType,
       eventSports: event.eventSports || [],
       eventDateTime: event.eventDateTime,
+      eventEndDateTime: event.eventEndDateTime,
       eventFrequency: event.eventFrequency || [],
       eventLocation: event.eventLocation,
       eventDescription: event.eventDescription,

@@ -14,6 +14,7 @@ class Booking {
     this.parentEventId = data.parentEventId || null; // Sequential eventId like E95
     this.occurrenceStart = data.occurrenceStart || null; // ISO date of selected occurrence
     this.occurrenceEnd = data.occurrenceEnd || null; // ISO end date of selected occurrence
+    this.timeZone = data.timeZone || null; // IANA timezone from the booking device
     this.paymentId = data.paymentId;
     this.paymentIntentId = data.paymentIntentId;
     this.status = data.status || 'pending'; // 'pending', 'booked', 'cancelled', 'failed'
@@ -48,6 +49,7 @@ class Booking {
       eventId,
       occurrenceStart: bookingData.occurrenceStart ? new Date(bookingData.occurrenceStart).toISOString() : null,
       occurrenceEnd: bookingData.occurrenceEnd ? new Date(bookingData.occurrenceEnd).toISOString() : null,
+      timeZone: bookingData.timeZone || null,
     });
 
     const result = await bookingsCollection.insertOne(booking);

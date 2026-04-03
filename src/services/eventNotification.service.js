@@ -2,6 +2,17 @@ const { notifyUser } = require('./notification.service');
 const Notification = require('../models/Notification');
 const User = require('../models/User');
 
+const resolveEventTimeZone = ({ booking, event, user }) => {
+  return (
+    booking?.timeZone ||
+    event?.timeZone ||
+    event?.eventTimeZone ||
+    user?.timeZone ||
+    user?.timezone ||
+    'Asia/Dubai'
+  );
+};
+
 const formatEventDate = (startDateValue, endDateValue, timeZone = 'Asia/Dubai') => {
   if (!startDateValue) return 'TBD';
   const d = new Date(startDateValue);
@@ -35,9 +46,11 @@ const formatEventDate = (startDateValue, endDateValue, timeZone = 'Asia/Dubai') 
 // ─── Booking Confirmed → Player ───────────────────────────────────────────
 const sendBookingConfirmedNotification = async ({ user, event, booking }) => {
   const eventName = event?.eventName || 'Event';
+  const timeZone = resolveEventTimeZone({ booking, event, user });
   const eventDate = formatEventDate(
     booking?.occurrenceStart || event?.eventDateTime || event?.gameStartDate,
-    booking?.occurrenceEnd || event?.eventEndDateTime || event?.gameEndDate
+    booking?.occurrenceEnd || event?.eventEndDateTime || event?.gameEndDate,
+    timeZone
   );
   const eventLocation = event?.eventLocation || 'Location will be shared soon';
 
@@ -78,9 +91,11 @@ const sendHostBookingNotification = async ({ player, event, booking }) => {
   const eventName = event?.eventName || 'Event';
   const playerName = player?.fullName || 'A player';
   const hostId = event?.creatorId || event?.userId;
+  const timeZone = resolveEventTimeZone({ booking, event, user: player });
   const eventDate = formatEventDate(
     booking?.occurrenceStart || event?.eventDateTime || event?.gameStartDate,
-    booking?.occurrenceEnd || event?.eventEndDateTime || event?.gameEndDate
+    booking?.occurrenceEnd || event?.eventEndDateTime || event?.gameEndDate,
+    timeZone
   );
   const eventLocation = event?.eventLocation || 'Location will be shared soon';
 
@@ -135,9 +150,11 @@ const sendHostBookingNotification = async ({ player, event, booking }) => {
 // ─── Booking Cancelled → Player ───────────────────────────────────────────
 const sendPlayerCancelledBookingNotification = async ({ user, event, booking, refundMessage }) => {
   const eventName = event?.eventName || 'Event';
+  const timeZone = resolveEventTimeZone({ booking, event, user });
   const eventDate = formatEventDate(
     booking?.occurrenceStart || event?.eventDateTime || event?.gameStartDate,
-    booking?.occurrenceEnd || event?.eventEndDateTime || event?.gameEndDate
+    booking?.occurrenceEnd || event?.eventEndDateTime || event?.gameEndDate,
+    timeZone
   );
   const eventLocation = event?.eventLocation || 'Location will be shared soon';
   const refundLine = refundMessage ? `\n${refundMessage}` : '';
@@ -161,9 +178,11 @@ const sendHostCancelledBookingNotification = async ({ player, event, booking }) 
   const eventName = event?.eventName || 'Event';
   const playerName = player?.fullName || 'A player';
   const hostId = event?.creatorId || event?.userId;
+  const timeZone = resolveEventTimeZone({ booking, event, user: player });
   const eventDate = formatEventDate(
     booking?.occurrenceStart || event?.eventDateTime || event?.gameStartDate,
-    booking?.occurrenceEnd || event?.eventEndDateTime || event?.gameEndDate
+    booking?.occurrenceEnd || event?.eventEndDateTime || event?.gameEndDate,
+    timeZone
   );
   const eventLocation = event?.eventLocation || 'Location will be shared soon';
 
@@ -193,9 +212,11 @@ const sendHostCancelledBookingNotification = async ({ player, event, booking }) 
 // ─── Event Cancelled (by Organiser) → Player ─────────────────────────────
 const sendEventCancelledNotification = async ({ user, event }) => {
   const eventName = event?.eventName || 'Event';
+  const timeZone = resolveEventTimeZone({ event, user });
   const eventDate = formatEventDate(
     event?.eventDateTime || event?.gameStartDate,
-    event?.eventEndDateTime || event?.gameEndDate
+    event?.eventEndDateTime || event?.gameEndDate,
+    timeZone
   );
   const eventLocation = event?.eventLocation || 'Location will be shared soon';
 

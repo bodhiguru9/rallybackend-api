@@ -123,7 +123,38 @@ if (process.env.VERCEL || require.main !== module) {
 }
 
 // API routes
+// API routes
 app.use('/api', apiRoutes);
+
+// ✅ ADD THIS HERE
+app.get('/event/:eventId', (req, res) => {
+  const { eventId } = req.params;
+
+  res.send(`
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+      <title>Open Rally</title>
+    </head>
+    <body style="font-family: Arial; text-align: center; padding: 40px;">
+      <h2>Opening Rally App...</h2>
+      <p>If nothing happens, click below</p>
+
+      <button onclick="window.location.href='rally-app://event/${eventId}'">
+        Open in App
+      </button>
+
+      <script>
+        window.location.href = "rally-app://event/${eventId}";
+      </script>
+    </body>
+    </html>
+  `);
+});
+
+// 404 handler
+app.use(notFound);
 
 // 404 handler
 app.use(notFound);

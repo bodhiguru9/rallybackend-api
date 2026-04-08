@@ -255,6 +255,19 @@ app.get('/event/:eventId', async (req, res) => {
             text-decoration: none;
             font-weight: 600;
           }
+          .store-links {
+            display: flex;
+            justify-content: center;
+            gap: 0.75rem;
+            margin-top: 1.25rem;
+          }
+          .store-badge {
+            height: 40px;
+            transition: transform 0.2s ease;
+          }
+          .store-badge:hover {
+            transform: scale(1.05);
+          }
         </style>
       </head>
       <body>
@@ -278,7 +291,14 @@ app.get('/event/:eventId', async (req, res) => {
 
           <div class="footer">
             Don't have the app yet? <br/>
-            <a href="https://rallysports.ae" class="link">Download Rally</a>
+            <div class="store-links">
+              <a href="https://apps.apple.com/in/app/rally-sports/id6526470249?platform=ipad" target="_blank">
+                <img src="https://upload.wikimedia.org/wikipedia/commons/3/3c/Download_on_the_App_Store_Badge.svg" alt="Download on the App Store" class="store-badge">
+              </a>
+              <a href="https://play.google.com/store/apps/details?id=com.rallysports.app&pcampaignid=web_share" target="_blank">
+                <img src="https://upload.wikimedia.org/wikipedia/commons/7/78/Google_Play_Store_badge_EN.svg" alt="Get it on Google Play" class="store-badge">
+              </a>
+            </div>
           </div>
         </div>
 

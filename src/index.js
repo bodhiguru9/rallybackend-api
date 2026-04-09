@@ -20,8 +20,15 @@ const app = express();
 // Get port from environment or default to 3000
 const PORT = Number(process.env.PORT) || 8080;
 
-app.get("/health", (req, res) => {
-  res.status(200).send("OK");
+// Health check route
+app.get('/health', (req, res) => {
+  res.status(200).json({
+    status: 'OK',
+    message: 'Server is running',
+    timestamp: new Date().toISOString(),
+    environment: process.env.NODE_ENV || 'development',
+    serverless: !!process.env.VERCEL,
+  });
 });
 
 app.get("/", (req, res) => {
@@ -41,16 +48,7 @@ app.use(express.urlencoded({ extended: true })); // Parse URL-encoded bodies
 app.use('/public', express.static('public'));
 app.use('/uploads', express.static('uploads'));
 
-// Health check route (no DB required)
-app.get('/health', (req, res) => {
-  res.status(200).json({
-    status: 'OK',
-    message: 'Server is running',
-    timestamp: new Date().toISOString(),
-    environment: process.env.NODE_ENV || 'development',
-    serverless: !!process.env.VERCEL,
-  });
-});
+
 
 // Database connection middleware for serverless mode
 // This MUST run before routes to ensure DB is connected
@@ -58,7 +56,7 @@ if (process.env.VERCEL || require.main !== module) {
   let dbConnectionPromise = null;
   let dbConnected = false;
   let dbConnectionError = null;
-  
+
   // Try to connect DB when module loads (non-blocking)
   (async () => {
     try {
@@ -71,14 +69,14 @@ if (process.env.VERCEL || require.main !== module) {
       // Will retry on first request
     }
   })();
-  
+
   app.use(async (req, res, next) => {
     try {
       // Skip DB check for static files and health check
       if (req.path.startsWith('/public') || req.path.startsWith('/uploads') || req.path === '/health') {
         return next();
       }
-      
+
       // Ensure DB connection
       if (!dbConnected) {
         if (!dbConnectionPromise) {
@@ -97,7 +95,7 @@ if (process.env.VERCEL || require.main !== module) {
               throw error;
             });
         }
-        
+
         try {
           await dbConnectionPromise;
         } catch (error) {
@@ -109,7 +107,7 @@ if (process.env.VERCEL || require.main !== module) {
           });
         }
       }
-      
+
       next();
     } catch (error) {
       console.error('❌ Middleware error:', error);
@@ -130,15 +128,15 @@ app.use('/api', apiRoutes);
 app.get('/event/:eventId', async (req, res) => {
   const { eventId } = req.params;
   const Event = require('./models/Event');
-  
+
   try {
     // Fetch event details for rich preview
     const event = await Event.findByEventId(eventId);
-    
+
     const eventName = event ? event.eventName : 'Join the Event on Rally';
     const eventDescription = event ? `${event.eventCreatorName} invited you to join ${event.eventName}. Click to open in the Rally app.` : 'Open this invitation in the Rally app.';
-    const eventImage = (event && event.eventImages && event.eventImages.length > 0) 
-      ? event.eventImages[0] 
+    const eventImage = (event && event.eventImages && event.eventImages.length > 0)
+      ? event.eventImages[0]
       : 'https://backend2.rallysports.ae/public/rally-logo-bg.png'; // Fallback logo
 
     const html = `
@@ -183,6 +181,38 @@ app.get('/event/:eventId', async (req, res) => {
             min-height: 100vh;
             margin: 0;
             color: var(--text-main);
+            overflow-x: hidden;
+          }
+          .background-blobs {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: -1;
+            overflow: hidden;
+            background: #f8fafc;
+          }
+          .blob {
+            position: absolute;
+            filter: blur(80px);
+            opacity: 0.4;
+            border-radius: 50%;
+            z-index: -1;
+          }
+          .blob-1 {
+            width: 400px;
+            height: 400px;
+            background: #3b82f6;
+            top: -100px;
+            right: -100px;
+          }
+          .blob-2 {
+            width: 300px;
+            height: 300px;
+            background: #60a5fa;
+            bottom: -50px;
+            left: -50px;
           }
           .card {
             background: var(--card-bg);
@@ -271,16 +301,20 @@ app.get('/event/:eventId', async (req, res) => {
         </style>
       </head>
       <body>
+        <div class="background-blobs">
+          <div class="blob blob-1"></div>
+          <div class="blob blob-2"></div>
+        </div>
         <div class="card">
           <div class="hero-image">
-            ${event && event.eventImages && event.eventImages.length > 0 
-              ? `<img src="${event.eventImages[0]}" alt="${eventName}" style="width: 100%; height: 100%; object-fit: cover;">`
-              : `<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            ${event && event.eventImages && event.eventImages.length > 0
+        ? `<img src="${event.eventImages[0]}" alt="${eventName}" style="width: 100%; height: 100%; object-fit: cover;">`
+        : `<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                   <path d="M12 2L2 7L12 12L22 7L12 2Z" stroke="#3b82f6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
                   <path d="M2 17L12 22L22 17" stroke="#3b82f6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
                   <path d="M2 12L12 17L22 12" stroke="#3b82f6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
                  </svg>`
-            }
+      }
           </div>
           <h1>Join the Game!</h1>
           <p>You've been invited to <strong>${eventName}</strong>. Open the app to view details and book your spot.</p>
@@ -335,9 +369,6 @@ app.get('/event/:eventId', async (req, res) => {
 // 404 handler
 app.use(notFound);
 
-// 404 handler
-app.use(notFound);
-
 // Error handler (must be last)
 app.use(errorHandler);
 
@@ -349,13 +380,13 @@ async function startServer() {
 
     // Start Express server
     app.listen(PORT, "0.0.0.0", () => {
-  console.log(`🚀 Server is running on port ${PORT}`);
-  console.log(`📍 Environment: ${process.env.NODE_ENV || 'development'}`);
-  console.log(`🌐 Health check: http://localhost:${PORT}/health`);
+      console.log(`🚀 Server is running on port ${PORT}`);
+      console.log(`📍 Environment: ${process.env.NODE_ENV || 'development'}`);
+      console.log(`🌐 Health check: http://localhost:${PORT}/health`);
 
-  const { startReminderCronJob } = require('./services/eventReminderCron.service');
-  startReminderCronJob();
-});
+      const { startReminderCronJob } = require('./services/eventReminderCron.service');
+      startReminderCronJob();
+    });
   } catch (error) {
     console.error('❌ Failed to start server:', error.message);
     process.exit(1);

@@ -1,6 +1,57 @@
 const { notifyUser } = require('./notification.service');
+const { createOrGetContentTemplate } = require('./twilio.service');
 const Notification = require('../models/Notification');
 const User = require('../models/User');
+
+const APP_NAME = process.env.APP_NAME || 'Rally';
+
+// ─── Template definitions (mirrors createOrGetOTPTemplate pattern) ────────
+// Each template has a friendlyName (for Twilio lookup/cache) and a body with
+// numbered placeholders.  The first call creates the template in Twilio;
+// subsequent calls use the in-memory cached SID.
+const TEMPLATES = {
+  bookingConfirmed: {
+    friendlyName: `${APP_NAME} Booking Confirmed`,
+    body: `Hi {{1}}, your booking is confirmed for {{2}} on {{3}} at {{4}}. Booking ID: {{5}}.`,
+  },
+  newBooking: {
+    friendlyName: `${APP_NAME} New Booking`,
+    body: `Hi {{1}}, {{2}} has joined your event {{3}} on {{4}} at {{5}}.`,
+  },
+  bookingCancelled: {
+    friendlyName: `${APP_NAME} Booking Cancelled`,
+    body: `Hi {{1}}, your booking for {{2}} on {{3}} at {{4}} has been cancelled.`,
+  },
+  hostBookingCancelled: {
+    friendlyName: `${APP_NAME} Host Booking Cancelled`,
+    body: `Hi {{1}}, {{2}} cancelled their booking for {{3}} on {{4}} at {{5}}.`,
+  },
+  eventCancelled: {
+    friendlyName: `${APP_NAME} Event Cancelled`,
+    body: `Hi {{1}}, we're sorry to inform you that {{2}}, scheduled for {{3}} at {{4}}, has been cancelled by the organiser. Any amount paid will be refunded to your account.`,
+  },
+};
+
+/**
+ * Resolve the content SID for a notification template.
+ * Priority: env var override → dynamic create/find via Twilio Content API → null (freeform fallback)
+ */
+const resolveTemplateSid = async (envVarName, templateDef) => {
+  // 1. Explicit env-var override always wins
+  const envSid = process.env[envVarName];
+  if (envSid) return envSid;
+
+  // 2. Dynamic create-or-get (same approach as OTP)
+  try {
+    const sid = await createOrGetContentTemplate(templateDef.friendlyName, templateDef.body);
+    return sid; // may be null if Twilio is not configured
+  } catch (err) {
+    console.error(`⚠️ resolveTemplateSid(${envVarName}) failed:`, err.message);
+    return null;
+  }
+};
+
+// ─── Helpers ──────────────────────────────────────────────────────────────
 
 const resolveEventTimeZone = ({ booking, event, user }) => {
   return (
@@ -35,7 +86,6 @@ const formatEventDate = (startDateValue, endDateValue, timeZone = 'Asia/Dubai') 
         hour: '2-digit',
         minute: '2-digit',
       });
-      // Try to clean up the double-date output slightly by just appending the end time
       return `${formattedStart} - ${formattedEnd}`;
     }
   }
@@ -53,17 +103,28 @@ const sendBookingConfirmedNotification = async ({ user, event, booking }) => {
     timeZone
   );
   const eventLocation = event?.eventLocation || 'Location will be shared soon';
+  const userName = user?.fullName || 'User';
+  const bookingId = booking?.bookingId || 'N/A';
 
   const subject = `Booking confirmed for ${eventName}`;
-  const text = `Hi ${user?.fullName || 'User'}, your booking is confirmed for ${eventName} on ${eventDate} at ${eventLocation}. Booking ID: ${booking?.bookingId || 'N/A'}.`;
+  const text = `Hi ${userName}, your booking is confirmed for ${eventName} on ${eventDate} at ${eventLocation}. Booking ID: ${bookingId}.`;
   const html = `
-    <p>Hi ${user?.fullName || 'User'},</p>
+    <p>Hi ${userName},</p>
     <p>Your booking is confirmed for <strong>${eventName}</strong>.</p>
     <p><strong>Date:</strong> ${eventDate}</p>
     <p><strong>Location:</strong> ${eventLocation}</p>
-    <p><strong>Booking ID:</strong> ${booking?.bookingId || 'N/A'}</p>
+    <p><strong>Booking ID:</strong> ${bookingId}</p>
   `;
-  const whatsappMessage = `Hi ${user?.fullName || 'User'}, your booking is confirmed for ${eventName} on ${eventDate} at ${eventLocation}. Booking ID: ${booking?.bookingId || 'N/A'}.`;
+  const whatsappMessage = text;
+
+  // Resolve template SID (env var → dynamic creation → null/freeform)
+  const contentSid = await resolveTemplateSid('WHATSAPP_BOOKING_CONFIRMED_SID', TEMPLATES.bookingConfirmed);
+  const whatsappTemplate = contentSid
+    ? {
+        contentSid,
+        contentVariables: { '1': userName, '2': eventName, '3': eventDate, '4': eventLocation, '5': bookingId },
+      }
+    : null;
 
   // In-app notification to Player
   try {
@@ -83,7 +144,7 @@ const sendBookingConfirmedNotification = async ({ user, event, booking }) => {
     console.error('In-app booking notification failed:', notifError.message);
   }
 
-  return await notifyUser({ user, subject, text, html, whatsappMessage });
+  return await notifyUser({ user, subject, text, html, whatsappMessage, whatsappTemplate });
 };
 
 // ─── New Booking → Organiser ──────────────────────────────────────────────
@@ -129,16 +190,26 @@ const sendHostBookingNotification = async ({ player, event, booking }) => {
   try {
     const host = await User.findById(hostId);
     if (host) {
+      const hostName = host.fullName || 'Organiser';
       const subject = `New booking for ${eventName}`;
-      const text = `Hi ${host.fullName || 'Organiser'}, ${playerName} has joined your event "${eventName}" on ${eventDate} at ${eventLocation}.`;
+      const text = `Hi ${hostName}, ${playerName} has joined your event "${eventName}" on ${eventDate} at ${eventLocation}.`;
       const html = `
-        <p>Hi ${host.fullName || 'Organiser'},</p>
+        <p>Hi ${hostName},</p>
         <p><strong>${playerName}</strong> has joined your event <strong>${eventName}</strong>.</p>
         <p><strong>Date:</strong> ${eventDate}</p>
         <p><strong>Location:</strong> ${eventLocation}</p>
       `;
       const whatsappMessage = text;
-      await notifyUser({ user: host, subject, text, html, whatsappMessage });
+
+      const contentSid = await resolveTemplateSid('WHATSAPP_NEW_BOOKING_SID', TEMPLATES.newBooking);
+      const whatsappTemplate = contentSid
+        ? {
+            contentSid,
+            contentVariables: { '1': hostName, '2': playerName, '3': eventName, '4': eventDate, '5': eventLocation },
+          }
+        : null;
+
+      await notifyUser({ user: host, subject, text, html, whatsappMessage, whatsappTemplate });
     }
   } catch (hostNotifyError) {
     console.error('Host email/WhatsApp notification failed:', hostNotifyError.message);
@@ -157,12 +228,13 @@ const sendPlayerCancelledBookingNotification = async ({ user, event, booking, re
     timeZone
   );
   const eventLocation = event?.eventLocation || 'Location will be shared soon';
+  const userName = user?.fullName || 'User';
   const refundLine = refundMessage ? `\n${refundMessage}` : '';
 
   const subject = `Booking cancelled for ${eventName}`;
-  const text = `Hi ${user?.fullName || 'User'}, your booking for "${eventName}" on ${eventDate} at ${eventLocation} has been cancelled.${refundLine}`;
+  const text = `Hi ${userName}, your booking for "${eventName}" on ${eventDate} at ${eventLocation} has been cancelled.${refundLine}`;
   const html = `
-    <p>Hi ${user?.fullName || 'User'},</p>
+    <p>Hi ${userName},</p>
     <p>Your booking for <strong>${eventName}</strong> has been cancelled.</p>
     <p><strong>Date:</strong> ${eventDate}</p>
     <p><strong>Location:</strong> ${eventLocation}</p>
@@ -170,7 +242,15 @@ const sendPlayerCancelledBookingNotification = async ({ user, event, booking, re
   `;
   const whatsappMessage = text;
 
-  return await notifyUser({ user, subject, text, html, whatsappMessage });
+  const contentSid = await resolveTemplateSid('WHATSAPP_BOOKING_CANCELLED_SID', TEMPLATES.bookingCancelled);
+  const whatsappTemplate = contentSid
+    ? {
+        contentSid,
+        contentVariables: { '1': userName, '2': eventName, '3': eventDate, '4': eventLocation },
+      }
+    : null;
+
+  return await notifyUser({ user, subject, text, html, whatsappMessage, whatsappTemplate });
 };
 
 // ─── Booking Cancelled → Organiser ────────────────────────────────────────
@@ -191,16 +271,26 @@ const sendHostCancelledBookingNotification = async ({ player, event, booking }) 
   try {
     const host = await User.findById(hostId);
     if (host) {
+      const hostName = host.fullName || 'Organiser';
       const subject = `Booking cancelled for ${eventName}`;
-      const text = `Hi ${host.fullName || 'Organiser'}, ${playerName} cancelled their booking for "${eventName}" on ${eventDate} at ${eventLocation}.`;
+      const text = `Hi ${hostName}, ${playerName} cancelled their booking for "${eventName}" on ${eventDate} at ${eventLocation}.`;
       const html = `
-        <p>Hi ${host.fullName || 'Organiser'},</p>
+        <p>Hi ${hostName},</p>
         <p><strong>${playerName}</strong> cancelled their booking for <strong>${eventName}</strong>.</p>
         <p><strong>Date:</strong> ${eventDate}</p>
         <p><strong>Location:</strong> ${eventLocation}</p>
       `;
       const whatsappMessage = text;
-      await notifyUser({ user: host, subject, text, html, whatsappMessage });
+
+      const contentSid = await resolveTemplateSid('WHATSAPP_HOST_BOOKING_CANCELLED_SID', TEMPLATES.hostBookingCancelled);
+      const whatsappTemplate = contentSid
+        ? {
+            contentSid,
+            contentVariables: { '1': hostName, '2': playerName, '3': eventName, '4': eventDate, '5': eventLocation },
+          }
+        : null;
+
+      await notifyUser({ user: host, subject, text, html, whatsappMessage, whatsappTemplate });
     }
   } catch (err) {
     console.error('Host cancellation email/WhatsApp failed:', err.message);
@@ -219,16 +309,25 @@ const sendEventCancelledNotification = async ({ user, event }) => {
     timeZone
   );
   const eventLocation = event?.eventLocation || 'Location will be shared soon';
+  const userName = user?.fullName || 'User';
 
   const subject = `Event cancelled: ${eventName}`;
-  const text = `Hi ${user?.fullName || 'User'}, we're sorry to inform you that ${eventName}, scheduled for ${eventDate} at ${eventLocation}, has been cancelled by the organiser. Any amount paid will be refunded to your account`;
+  const text = `Hi ${userName}, we're sorry to inform you that ${eventName}, scheduled for ${eventDate} at ${eventLocation}, has been cancelled by the organiser. Any amount paid will be refunded to your account`;
   const html = `
-    <p>Hi ${user?.fullName || 'User'},</p>
+    <p>Hi ${userName},</p>
     <p>We're sorry to inform you that <strong>${eventName}</strong>, scheduled for <strong>${eventDate}</strong> at <strong>${eventLocation}</strong>, has been cancelled by the organiser. Any amount paid will be refunded to your account</p>
   `;
   const whatsappMessage = text;
 
-  return await notifyUser({ user, subject, text, html, whatsappMessage });
+  const contentSid = await resolveTemplateSid('WHATSAPP_EVENT_CANCELLED_SID', TEMPLATES.eventCancelled);
+  const whatsappTemplate = contentSid
+    ? {
+        contentSid,
+        contentVariables: { '1': userName, '2': eventName, '3': eventDate, '4': eventLocation },
+      }
+    : null;
+
+  return await notifyUser({ user, subject, text, html, whatsappMessage, whatsappTemplate });
 };
 
 module.exports = {

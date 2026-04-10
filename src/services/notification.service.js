@@ -29,9 +29,13 @@ const sendEmailNotification = async ({ to, subject, text, html }) => {
   }
 };
 
-const sendWhatsAppNotification = async ({ to, message }) => {
+const sendWhatsAppNotification = async ({ to, message, templateOptions }) => {
   try {
-    const result = await sendWhatsAppMessage(to, message);
+    const result = await sendWhatsAppMessage(to, message, templateOptions || null);
+    if (result.skipped) {
+      console.warn(`⚠️ WhatsApp notification skipped for ${to}: ${result.message}`);
+      return { success: false, channel: 'whatsapp', skipped: true, reason: result.message };
+    }
     console.log(`✅ WhatsApp notification sent to ${to}`);
     return { success: true, channel: 'whatsapp', ...result };
   } catch (error) {
@@ -40,7 +44,7 @@ const sendWhatsAppNotification = async ({ to, message }) => {
   }
 };
 
-const notifyUser = async ({ user, subject, text, html, whatsappMessage }) => {
+const notifyUser = async ({ user, subject, text, html, whatsappMessage, whatsappTemplate }) => {
   const email = user?.email && String(user.email).trim() ? String(user.email).trim() : null;
   const whatsapp = user?.whatsappNumber || user?.mobileNumber;
   const mobile = whatsapp && String(whatsapp).trim() ? String(whatsapp).trim() : null;
@@ -70,7 +74,11 @@ const notifyUser = async ({ user, subject, text, html, whatsappMessage }) => {
   // Send WhatsApp if available
   if (mobile) {
     try {
-      const waResult = await sendWhatsAppNotification({ to: mobile, message: whatsappMessage || text });
+      const waResult = await sendWhatsAppNotification({
+        to: mobile,
+        message: whatsappMessage || text,
+        templateOptions: whatsappTemplate || null,
+      });
       results.push(waResult);
     } catch (err) {
       console.error('WhatsApp notification failed:', err.message);

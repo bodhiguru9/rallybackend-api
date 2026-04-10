@@ -8,11 +8,13 @@ const getTwilioClient = () => {
   const authToken = process.env.TWILIO_AUTH_TOKEN;
 
   if (!accountSid || !authToken) {
+    console.warn('⚠️ Twilio credentials not configured (TWILIO_ACCOUNT_SID or TWILIO_AUTH_TOKEN missing)');
     return null;
   }
 
   // Validate accountSid format (must start with AC)
   if (!accountSid.startsWith('AC')) {
+    console.warn('⚠️ TWILIO_ACCOUNT_SID has invalid format (must start with "AC")');
     return null;
   }
   
@@ -20,6 +22,7 @@ const getTwilioClient = () => {
     const client = twilio(accountSid, authToken);
     return client;
   } catch (error) {
+    console.error('❌ Failed to initialize Twilio client:', error.message);
     return null;
   }
 };
@@ -72,6 +75,60 @@ const createOrGetOTPTemplate = async (client) => {
     return content.sid;
   } catch (error) {
     throw error;
+  }
+};
+
+// ─── Generic Content Template Helper ──────────────────────────────────────
+// In-memory cache so we only hit the Twilio Content API once per template per process
+const _templateCache = {};
+
+/**
+ * Create or retrieve a WhatsApp content template by friendly name.
+ * Works exactly like createOrGetOTPTemplate but is generic — any notification
+ * type can use it.  SIDs are cached in-process so repeated sends are free.
+ *
+ * @param {string} friendlyName  Unique, human-readable template name
+ * @param {string} bodyText      Template body with {{1}}, {{2}} … placeholders
+ * @returns {Promise<string|null>} Content SID, or null if Twilio is unavailable
+ */
+const createOrGetContentTemplate = async (friendlyName, bodyText) => {
+  // Fast path – return cached SID
+  if (_templateCache[friendlyName]) {
+    return _templateCache[friendlyName];
+  }
+
+  const client = getTwilioClient();
+  if (!client) return null;
+
+  try {
+    // 1. Search for an existing template with this name
+    try {
+      const contents = await client.content.v1.contents.list({ limit: 50 });
+      const existing = contents.find(c => c.friendlyName === friendlyName);
+      if (existing) {
+        _templateCache[friendlyName] = existing.sid;
+        return existing.sid;
+      }
+    } catch (listError) {
+      console.warn('⚠️ Could not list existing content templates:', listError.message);
+      // Continue to creation
+    }
+
+    // 2. Create a new template
+    const content = await client.content.v1.contents.create({
+      friendlyName,
+      types: {
+        'twilio/text': { body: bodyText },
+      },
+      language: 'en',
+    });
+
+    _templateCache[friendlyName] = content.sid;
+    console.log(`✅ Created WhatsApp content template "${friendlyName}" → ${content.sid}`);
+    return content.sid;
+  } catch (error) {
+    console.error(`❌ Failed to create/get WhatsApp template "${friendlyName}":`, error.message);
+    return null;
   }
 };
 
@@ -225,12 +282,12 @@ const sendWhatsAppOTP = async (mobileNumber, otp, context = 'general') => {
  * @param {string} messageText - The message to send
  * @returns {Promise<Object>} Twilio message result
  */
-const sendWhatsAppMessage = async (mobileNumber, messageText) => {
+const sendWhatsAppMessage = async (mobileNumber, messageText, templateOptions = null) => {
   const client = getTwilioClient();
   
   if (!client) {
-    console.log('📱 Twilio not configured. WhatsApp message:', messageText);
-    return { success: true, message: 'Logged (Twilio not configured)' };
+    console.warn('⚠️ Twilio not configured. WhatsApp message NOT sent to:', mobileNumber);
+    return { success: false, skipped: true, message: 'Twilio not configured' };
   }
 
   let twilioWhatsAppNumber = process.env.TWILIO_WHATSAPP_NUMBER;
@@ -244,11 +301,28 @@ const sendWhatsAppMessage = async (mobileNumber, messageText) => {
     const normalizedNumber = normalizeMobileNumberForWhatsApp(mobileNumber);
     const whatsappNumber = `whatsapp:${normalizedNumber}`;
     
-    const message = await client.messages.create({
-      from: twilioWhatsAppNumber,
-      to: whatsappNumber,
-      body: messageText,
-    });
+    let messagePayload;
+    
+    // Use pre-approved template if contentSid is provided (required outside 24hr window)
+    if (templateOptions?.contentSid) {
+      messagePayload = {
+        from: twilioWhatsAppNumber,
+        to: whatsappNumber,
+        contentSid: templateOptions.contentSid,
+        contentVariables: JSON.stringify(templateOptions.contentVariables || {}),
+      };
+      console.log(`📱 Sending WhatsApp template message to ${whatsappNumber} (SID: ${templateOptions.contentSid})`);
+    } else {
+      // Freeform body — only works in sandbox or during 24hr conversation window
+      messagePayload = {
+        from: twilioWhatsAppNumber,
+        to: whatsappNumber,
+        body: messageText,
+      };
+      console.log(`📱 Sending WhatsApp freeform message to ${whatsappNumber} (note: may fail outside 24hr window)`);
+    }
+    
+    const message = await client.messages.create(messagePayload);
     
     return {
       success: true,
@@ -256,7 +330,10 @@ const sendWhatsAppMessage = async (mobileNumber, messageText) => {
       status: message.status,
     };
   } catch (error) {
-    console.error('Error sending WhatsApp message:', error.message);
+    const errorDetail = error.code
+      ? `Twilio Error ${error.code}: ${error.message}`
+      : `WhatsApp send failed: ${error.message}`;
+    console.error('❌', errorDetail);
     throw error;
   }
 };
@@ -287,5 +364,6 @@ module.exports = {
   isValidWhatsAppNumber,
   getTwilioClient,
   createOrGetOTPTemplate,
+  createOrGetContentTemplate,
   normalizeMobileNumberForWhatsApp,
 };

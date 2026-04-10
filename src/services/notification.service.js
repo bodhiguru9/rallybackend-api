@@ -31,15 +31,16 @@ const sendEmailNotification = async ({ to, subject, text, html }) => {
 
 const sendWhatsAppNotification = async ({ to, message, templateOptions }) => {
   try {
+    console.log(`📱 [WA-NOTIFY] Attempting WhatsApp to: "${to}", hasTemplate: ${!!templateOptions}`);
     const result = await sendWhatsAppMessage(to, message, templateOptions || null);
     if (result.skipped) {
       console.warn(`⚠️ WhatsApp notification skipped for ${to}: ${result.message}`);
       return { success: false, channel: 'whatsapp', skipped: true, reason: result.message };
     }
-    console.log(`✅ WhatsApp notification sent to ${to}`);
+    console.log(`✅ WhatsApp notification sent to ${to}`, result);
     return { success: true, channel: 'whatsapp', ...result };
   } catch (error) {
-    console.error('Error sending WhatsApp notification:', error.message);
+    console.error('❌ [WA-NOTIFY] Error sending WhatsApp notification:', error.message, error.code ? `(code: ${error.code})` : '');
     return { success: false, channel: 'whatsapp', error: error.message };
   }
 };
@@ -48,6 +49,8 @@ const notifyUser = async ({ user, subject, text, html, whatsappMessage, whatsapp
   const email = user?.email && String(user.email).trim() ? String(user.email).trim() : null;
   const whatsapp = user?.whatsappNumber || user?.mobileNumber;
   const mobile = whatsapp && String(whatsapp).trim() ? String(whatsapp).trim() : null;
+
+  console.log(`📣 [NOTIFY-USER] userId: ${user?._id || user?.id}, email: ${email || 'NONE'}, mobile: ${mobile || 'NONE'}, whatsappNumber: ${user?.whatsappNumber || 'NONE'}, mobileNumber: ${user?.mobileNumber || 'NONE'}`);
 
   if (!email && !mobile) {
     console.log('⚠️ No notification channel available for user:', user?._id || user?.id);
@@ -74,12 +77,14 @@ const notifyUser = async ({ user, subject, text, html, whatsappMessage, whatsapp
   // Send WhatsApp if available
   if (mobile) {
     try {
+      console.log(`📱 [NOTIFY-USER] Sending WhatsApp to mobile: "${mobile}", hasTemplate: ${!!whatsappTemplate}, templateSid: ${whatsappTemplate?.contentSid || 'NONE'}`);
       const waResult = await sendWhatsAppNotification({
         to: mobile,
         message: whatsappMessage || text,
         templateOptions: whatsappTemplate || null,
       });
       results.push(waResult);
+      console.log(`📱 [NOTIFY-USER] WhatsApp result:`, JSON.stringify(waResult));
     } catch (err) {
       console.error('WhatsApp notification failed:', err.message);
       results.push({ success: false, channel: 'whatsapp', error: err.message });

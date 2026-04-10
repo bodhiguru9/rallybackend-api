@@ -95,6 +95,7 @@ const formatEventDate = (startDateValue, endDateValue, timeZone = 'Asia/Dubai') 
 
 // ─── Booking Confirmed → Player ───────────────────────────────────────────
 const sendBookingConfirmedNotification = async ({ user, event, booking }) => {
+  console.log('📣 [BOOKING-CONFIRMED] Called for player:', user?.fullName, '| email:', user?.email, '| mobile:', user?.mobileNumber, '| whatsapp:', user?.whatsappNumber, '| event:', event?.eventName);
   const eventName = event?.eventName || 'Event';
   const timeZone = resolveEventTimeZone({ booking, event, user });
   const eventDate = formatEventDate(
@@ -149,6 +150,7 @@ const sendBookingConfirmedNotification = async ({ user, event, booking }) => {
 
 // ─── New Booking → Organiser ──────────────────────────────────────────────
 const sendHostBookingNotification = async ({ player, event, booking }) => {
+  console.log('📣 [HOST-BOOKING] Called for organiser. player:', player?.fullName, '| event:', event?.eventName, '| creatorId:', event?.creatorId, '| userId:', event?.userId);
   const eventName = event?.eventName || 'Event';
   const playerName = player?.fullName || 'A player';
   const hostId = event?.creatorId || event?.userId;

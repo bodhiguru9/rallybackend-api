@@ -17,7 +17,7 @@ const formatEventDate = (startDateValue, endDateValue, timeZone = 'Asia/Dubai') 
   if (!startDateValue) return 'TBD';
   const d = new Date(startDateValue);
   if (Number.isNaN(d.getTime())) return 'TBD';
-  
+
   let formattedStart = d.toLocaleString('en-US', {
     timeZone,
     year: 'numeric',
@@ -126,23 +126,23 @@ const sendHostBookingNotification = async ({ player, event, booking }) => {
   }
 
   // Email/WhatsApp to host
-  // try {
-  //   const host = await User.findById(hostId);
-  //   if (host) {
-  //     const subject = `New booking for ${eventName}`;
-  //     const text = `Hi ${host.fullName || 'Organiser'}, ${playerName} has joined your event "${eventName}" on ${eventDate} at ${eventLocation}.`;
-  //     const html = `
-  //       <p>Hi ${host.fullName || 'Organiser'},</p>
-  //       <p><strong>${playerName}</strong> has joined your event <strong>${eventName}</strong>.</p>
-  //       <p><strong>Date:</strong> ${eventDate}</p>
-  //       <p><strong>Location:</strong> ${eventLocation}</p>
-  //     `;
-  //     const whatsappMessage = text;
-  //     await notifyUser({ user: host, subject, text, html, whatsappMessage });
-  //   }
-  // } catch (hostNotifyError) {
-  //   console.error('Host email/WhatsApp notification failed:', hostNotifyError.message);
-  // }
+  try {
+    const host = await User.findById(hostId);
+    if (host) {
+      const subject = `New booking for ${eventName}`;
+      const text = `Hi ${host.fullName || 'Organiser'}, ${playerName} has joined your event "${eventName}" on ${eventDate} at ${eventLocation}.`;
+      const html = `
+        <p>Hi ${host.fullName || 'Organiser'},</p>
+        <p><strong>${playerName}</strong> has joined your event <strong>${eventName}</strong>.</p>
+        <p><strong>Date:</strong> ${eventDate}</p>
+        <p><strong>Location:</strong> ${eventLocation}</p>
+      `;
+      const whatsappMessage = text;
+      await notifyUser({ user: host, subject, text, html, whatsappMessage });
+    }
+  } catch (hostNotifyError) {
+    console.error('Host email/WhatsApp notification failed:', hostNotifyError.message);
+  }
 
   return true;
 };
@@ -221,10 +221,10 @@ const sendEventCancelledNotification = async ({ user, event }) => {
   const eventLocation = event?.eventLocation || 'Location will be shared soon';
 
   const subject = `Event cancelled: ${eventName}`;
-  const text = `Hi ${user?.fullName || 'User'}, we're sorry to inform you that ${eventName}, scheduled for ${eventDate} at ${eventLocation}, has been cancelled by the organiser.`;
+  const text = `Hi ${user?.fullName || 'User'}, we're sorry to inform you that ${eventName}, scheduled for ${eventDate} at ${eventLocation}, has been cancelled by the organiser. Any amount paid will be refunded to your account`;
   const html = `
     <p>Hi ${user?.fullName || 'User'},</p>
-    <p>We're sorry to inform you that <strong>${eventName}</strong>, scheduled for <strong>${eventDate}</strong> at <strong>${eventLocation}</strong>, has been cancelled by the organiser.</p>
+    <p>We're sorry to inform you that <strong>${eventName}</strong>, scheduled for <strong>${eventDate}</strong> at <strong>${eventLocation}</strong>, has been cancelled by the organiser. Any amount paid will be refunded to your account</p>
   `;
   const whatsappMessage = text;
 

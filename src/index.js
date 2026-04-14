@@ -380,6 +380,171 @@ app.get('/event/:eventId', async (req, res) => {
   }
 });
 
+// Account deletion page for Google Play compliance
+app.get('/account-deletion', (req, res) => {
+  const html = `
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>Account Deletion | Rally</title>
+      <meta name="description" content="Request account and data deletion for your Rally Sports app account.">
+      <style>
+        :root {
+          --rally-blue: #3b82f6;
+          --rally-blue-dark: #2563eb;
+          --bg-color: #f1f5f9;
+          --card-bg: #ffffff;
+          --text-main: #0f172a;
+          --text-muted: #64748b;
+        }
+        body {
+          font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+          background-color: var(--bg-color);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          min-height: 100vh;
+          margin: 0;
+          color: var(--text-main);
+          padding: 1.5rem;
+          box-sizing: border-box;
+        }
+        .card {
+          background: var(--card-bg);
+          padding: 2.5rem 2.5rem;
+          border-radius: 1.5rem;
+          box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.1);
+          max-width: 550px;
+          width: 100%;
+          text-align: left;
+          border: 1px solid rgba(255, 255, 255, 0.5);
+        }
+        .logo-container {
+          display: flex;
+          justify-content: center;
+          margin-bottom: 1.5rem;
+        }
+        .logo {
+          width: 64px;
+          height: 64px;
+          background: var(--rally-blue);
+          border-radius: 1rem;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+        .logo svg {
+          width: 36px;
+          height: 36px;
+        }
+        h1 {
+          font-size: 1.75rem;
+          font-weight: 800;
+          margin-bottom: 1rem;
+          text-align: center;
+          letter-spacing: -0.025em;
+        }
+        p {
+          color: var(--text-muted);
+          line-height: 1.6;
+          margin-bottom: 1.5rem;
+          font-size: 1.05rem;
+        }
+        .instructions {
+          background: #f8fafc;
+          padding: 1.5rem;
+          border-radius: 1rem;
+          border: 1px solid #e2e8f0;
+          margin-bottom: 2rem;
+        }
+        .instructions h3 {
+          margin-top: 0;
+          color: var(--text-main);
+          font-size: 1.15rem;
+          margin-bottom: 1rem;
+        }
+        ol {
+          padding-left: 1.25rem;
+          color: var(--text-muted);
+          margin: 0;
+        }
+        ol li {
+          margin-bottom: 0.75rem;
+          line-height: 1.5;
+        }
+        ol li:last-child {
+          margin-bottom: 0;
+        }
+        .btn-primary {
+          display: block;
+          text-align: center;
+          background-color: var(--rally-blue);
+          color: white;
+          font-weight: 600;
+          padding: 1rem 1.5rem;
+          border-radius: 0.75rem;
+          text-decoration: none;
+          transition: all 0.2s ease;
+          box-shadow: 0 4px 6px -1px rgba(59, 130, 246, 0.3);
+          font-size: 1.05rem;
+        }
+        .btn-primary:hover {
+          background-color: var(--rally-blue-dark);
+          transform: translateY(-1px);
+          box-shadow: 0 6px 8px -1px rgba(59, 130, 246, 0.4);
+        }
+        .footer-note {
+          margin-top: 2rem;
+          font-size: 0.9rem;
+          color: #94a3b8;
+          text-align: center;
+          border-top: 1px solid #e2e8f0;
+          padding-top: 1.5rem;
+        }
+      </style>
+    </head>
+    <body>
+      <div class="card">
+        <div class="logo-container">
+          <div class="logo">
+            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M12 2L2 7L12 12L22 7L12 2Z" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M2 17L12 22L22 17" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M2 12L12 17L22 12" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </div>
+        </div>
+        
+        <h1>Account Deletion</h1>
+        <p>If you wish to delete your Rally account and all associated personal data, you can do so directly from within the app. This action is permanent and cannot be undone.</p>
+        
+        <div class="instructions">
+          <h3>How to delete your account:</h3>
+          <ol>
+            <li>Open the Rally Sports app on your device.</li>
+            <li>Log in to your account.</li>
+            <li>Navigate to your <strong>Profile</strong>.</li>
+            <li>Tap on the <strong>Settings</strong> icon (gear).</li>
+            <li>Scroll down and select <strong>Delete Account</strong>.</li>
+            <li>Follow the prompts to confirm deletion.</li>
+          </ol>
+        </div>
+
+        <p>If you no longer have access to the app, you can request manual account and data deletion by contacting our support team.</p>
+        <a href="mailto:support@rallysports.ae?subject=Account%20Deletion%20Request" class="btn-primary">Request Deletion via Email</a>
+        
+        <div class="footer-note">
+          Data deletion requests may take up to 7 business days to process. All associated data including profile information, bookings, and history will be permanently removed.
+        </div>
+      </div>
+    </body>
+    </html>
+  `;
+  res.send(html);
+});
+
 // 404 handler
 app.use(notFound);
 

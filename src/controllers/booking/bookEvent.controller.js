@@ -46,6 +46,7 @@ const bookEvent = async (req, res, next) => {
     const requestedOccurrenceStart = req.body.occurrenceStart || req.query.occurrenceStart || null;
     const requestedOccurrenceEnd = req.body.occurrenceEnd || req.query.occurrenceEnd || null;
     const requestedTimeZone = req.body.timeZone || req.query.timeZone || null;
+    const paymentMethod = req.query.paymentMethod || req.body.paymentMethod || null;
 
     const normalizeIso = (value) => {
       if (!value) return null;
@@ -507,14 +508,19 @@ const bookEvent = async (req, res, next) => {
         });
       }
 
-      paymentIntent = await stripeInstance.paymentIntents.create({
-  amount: amountInCents,
-  currency: 'aed',
-  customer: customerId,   // ✅ ADD THIS
-  metadata: metadata,
-  description: `Payment for event: ${event.eventName || ''}`,
-  setup_future_usage: 'off_session',
-});
+      const paymentIntentParams = {
+        amount: amountInCents,
+        currency: 'aed',
+        customer: customerId,   // ✅ ADD THIS
+        metadata: metadata,
+        description: `Payment for event: ${event.eventName || ''}`,
+      };
+
+      if (paymentMethod === 'card') {
+        paymentIntentParams.setup_future_usage = 'off_session';
+      }
+
+      paymentIntent = await stripeInstance.paymentIntents.create(paymentIntentParams);
     } catch (stripeError) {
       await Booking.updateStatus(booking.bookingId, 'failed');
       const errorMessage = stripeError.message || 'Failed to create payment intent';

@@ -143,6 +143,8 @@ const bookEvent = async (req, res, next) => {
     }
 
     // Check if there's already a pending booking for this user and event
+    // Skip reuse for Apple Pay — old PaymentIntents may have setup_future_usage
+    // which is incompatible with Apple Pay tokens.
     const existingBookings = await Booking.findByUser(userId, 'pending', 100, 0);
     const existingPendingBooking = existingBookings.find(
       (b) =>
@@ -150,7 +152,7 @@ const bookEvent = async (req, res, next) => {
         (b.occurrenceStart || null) === occurrenceStart
     );
 
-    if (existingPendingBooking) {
+    if (existingPendingBooking && paymentMethod !== 'apple_pay') {
       const payment = existingPendingBooking.paymentIntentId
         ? await Payment.findByStripePaymentIntentId(existingPendingBooking.paymentIntentId)
         : null;
@@ -508,19 +510,17 @@ const bookEvent = async (req, res, next) => {
         });
       }
 
-      const paymentIntentParams = {
+      // NOTE: Do NOT set setup_future_usage here.
+      // Cards are saved independently via /api/cards endpoint.
+      // Setting setup_future_usage: 'off_session' causes Stripe to strip
+      // apple_pay from allowed payment_method_types, breaking Apple Pay.
+      paymentIntent = await stripeInstance.paymentIntents.create({
         amount: amountInCents,
         currency: 'aed',
-        customer: customerId,   // ✅ ADD THIS
+        customer: customerId,
         metadata: metadata,
         description: `Payment for event: ${event.eventName || ''}`,
-      };
-
-      if (paymentMethod === 'card') {
-        paymentIntentParams.setup_future_usage = 'off_session';
-      }
-
-      paymentIntent = await stripeInstance.paymentIntents.create(paymentIntentParams);
+      });
     } catch (stripeError) {
       await Booking.updateStatus(booking.bookingId, 'failed');
       const errorMessage = stripeError.message || 'Failed to create payment intent';
@@ -530,70 +530,74 @@ const bookEvent = async (req, res, next) => {
         details: stripeError.toString(),
       });
     }
+    // Skip checkout session for Apple Pay — native app uses confirmPlatformPayPayment directly
+    if (paymentMethod === 'apple_pay') {
+      checkoutSession = null;
+    } else {
+      try {
+        const frontendUrl = process.env.FRONTEND_URL;
 
-    try {
-      const frontendUrl = process.env.FRONTEND_URL;
-
-      if (!frontendUrl || frontendUrl.trim() === '') {
-        console.warn('FRONTEND_URL not set. Skipping checkout session creation.');
-        checkoutSession = null;
-      } else {
-        const backendHost = req.get('host');
-        if (frontendUrl.includes(backendHost)) {
-          console.warn('FRONTEND_URL points to backend. Skipping checkout session creation.');
+        if (!frontendUrl || frontendUrl.trim() === '') {
+          console.warn('FRONTEND_URL not set. Skipping checkout session creation.');
           checkoutSession = null;
         } else {
-          checkoutSession = await stripeInstance.checkout.sessions.create({
-            payment_method_types: ['card'],
-            line_items: [
-              {
-                price_data: {
-                  currency: 'aed',
-                  product_data: {
-                    name: event.eventName || 'Event',
-                    description: `Booking for event: ${event.eventName || 'Event'}`,
-                    images: event.eventImages && event.eventImages.length > 0 ? [event.eventImages[0]] : [],
+          const backendHost = req.get('host');
+          if (frontendUrl.includes(backendHost)) {
+            console.warn('FRONTEND_URL points to backend. Skipping checkout session creation.');
+            checkoutSession = null;
+          } else {
+            checkoutSession = await stripeInstance.checkout.sessions.create({
+              payment_method_types: ['card'],
+              line_items: [
+                {
+                  price_data: {
+                    currency: 'aed',
+                    product_data: {
+                      name: event.eventName || 'Event',
+                      description: `Booking for event: ${event.eventName || 'Event'}`,
+                      images: event.eventImages && event.eventImages.length > 0 ? [event.eventImages[0]] : [],
+                    },
+                    unit_amount: amountInCents,
                   },
-                  unit_amount: amountInCents,
+                  quantity: 1,
                 },
-                quantity: 1,
-              },
-            ],
-            mode: 'payment',
-            success_url: `${frontendUrl}/payment/success?session_id={CHECKOUT_SESSION_ID}&booking_id=${booking.bookingId}`,
-            cancel_url: `${frontendUrl}/payment/cancel?booking_id=${booking.bookingId}`,
-            metadata: {
-              bookingId: booking.bookingId,
-              eventId: event.eventId,
-              parentEventId: event.eventId,
-              occurrenceStart: occurrenceStart,
-              ...(occurrenceEnd && { occurrenceEnd: occurrenceEnd }),
-              eventTitle: event.eventName || '',
-              eventName: event.eventName || '',
-              eventCategory: Array.isArray(event.eventSports) && event.eventSports.length > 0 ? event.eventSports[0] : '',
-              eventType: event.eventType || '',
-              userId: String(userId),
-              ...(promoCodeString && { promoCode: promoCodeString }),
-            },
-            customer_email: user?.email || null,
-            payment_intent_data: {
+              ],
+              mode: 'payment',
+              success_url: `${frontendUrl}/payment/success?session_id={CHECKOUT_SESSION_ID}&booking_id=${booking.bookingId}`,
+              cancel_url: `${frontendUrl}/payment/cancel?booking_id=${booking.bookingId}`,
               metadata: {
                 bookingId: booking.bookingId,
                 eventId: event.eventId,
+                parentEventId: event.eventId,
+                occurrenceStart: occurrenceStart,
+                ...(occurrenceEnd && { occurrenceEnd: occurrenceEnd }),
                 eventTitle: event.eventName || '',
                 eventName: event.eventName || '',
                 eventCategory: Array.isArray(event.eventSports) && event.eventSports.length > 0 ? event.eventSports[0] : '',
                 eventType: event.eventType || '',
-                userId: userId,
+                userId: String(userId),
                 ...(promoCodeString && { promoCode: promoCodeString }),
               },
-            },
-          });
+              customer_email: user?.email || null,
+              payment_intent_data: {
+                metadata: {
+                  bookingId: booking.bookingId,
+                  eventId: event.eventId,
+                  eventTitle: event.eventName || '',
+                  eventName: event.eventName || '',
+                  eventCategory: Array.isArray(event.eventSports) && event.eventSports.length > 0 ? event.eventSports[0] : '',
+                  eventType: event.eventType || '',
+                  userId: userId,
+                  ...(promoCodeString && { promoCode: promoCodeString }),
+                },
+              },
+            });
+          }
         }
+      } catch (checkoutError) {
+        console.error('Failed to create checkout session:', checkoutError);
+        checkoutSession = null;
       }
-    } catch (checkoutError) {
-      console.error('Failed to create checkout session:', checkoutError);
-      checkoutSession = null;
     }
 
     // STEP 3: Create payment record

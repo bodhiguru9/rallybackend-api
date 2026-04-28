@@ -23,6 +23,7 @@ const eventInviteRoutes = require('./eventInvite.routes');
 const packageRoutes = require('./package.routes');
 const bookingRoutes = require('./booking.routes');
 const cardRoutes = require('./card.routes');
+const appConfigRoutes = require('./appConfig.routes');
 // const productRoutes = require('./product.routes');
 
 // Route definitions
@@ -37,6 +38,7 @@ router.use('/event-invites', eventInviteRoutes);
 router.use('/packages', packageRoutes);
 router.use('/bookings', bookingRoutes);
 router.use('/cards', cardRoutes);
+router.use('/app-config', appConfigRoutes);
 router.use('/users', userRoutes);
 router.use('/promo-codes', promoRoutes);
 router.use('/payments', paymentRoutes);

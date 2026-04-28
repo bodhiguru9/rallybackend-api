@@ -145,6 +145,7 @@ const getTopOrganisers = async (req, res, next) => {
       userId: item.organiser.userId,
       profilePic: item.organiser.profilePic || null,
       fullName: item.organiser.fullName || null,
+      communityName: item.organiser.communityName || null,
       isVerified: item.isVerified,
     }));
 

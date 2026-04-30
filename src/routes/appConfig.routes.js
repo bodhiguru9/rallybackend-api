@@ -10,8 +10,8 @@ router.get('/version', (req, res) => {
   res.status(200).json({
     success: true,
     data: {
-      latestVersion: '1.1.0',
-      minRequiredVersion: '1.0.0',
+      latestVersion: '1.0.19',
+      minRequiredVersion: '1.0.19',
       storeUrls: {
         ios: 'https://apps.apple.com/in/app/rally-sports/id6526470249?platform=ipad',
         android: 'https://play.google.com/store/apps/details?id=com.rallysports.app&pcampaignid=web_share',

@@ -260,27 +260,33 @@ const cancelBooking = async (req, res, next) => {
       try {
         const playerUser = await User.findById(userId);
         if (playerUser) {
-          await sendPlayerCancelledBookingNotification({
+          // Fire and forget email/WhatsApp notifications to speed up response
+          sendPlayerCancelledBookingNotification({
             user: playerUser,
             event,
             booking,
             refundMessage: refundProcessed ? refundReason : null,
+          }).catch((playerNotifError) => {
+            console.error('Player cancellation email/WhatsApp failed:', playerNotifError.message);
           });
         }
-      } catch (playerNotifError) {
-        console.error('Player cancellation email/WhatsApp failed:', playerNotifError.message);
+      } catch (userFetchError) {
+        console.error('Failed to fetch user for player notification:', userFetchError.message);
       }
 
       // 4. Email/WhatsApp: Notify Organiser
       try {
         const playerUser = await User.findById(userId);
-        await sendHostCancelledBookingNotification({
+        // Fire and forget email/WhatsApp notifications to speed up response
+        sendHostCancelledBookingNotification({
           player: playerUser || { fullName: req.user.fullName || 'A player' },
           event,
           booking,
+        }).catch((hostNotifError) => {
+          console.error('Host cancellation email/WhatsApp failed:', hostNotifError.message);
         });
-      } catch (hostNotifError) {
-        console.error('Host cancellation email/WhatsApp failed:', hostNotifError.message);
+      } catch (userFetchError) {
+        console.error('Failed to fetch user for host notification:', userFetchError.message);
       }
     }
 

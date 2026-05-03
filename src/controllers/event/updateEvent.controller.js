@@ -322,6 +322,66 @@ const updateEvent = async (req, res, next) => {
         } catch (cancelNotifError) {
           console.error('Error sending event cancellation notifications:', cancelNotifError);
         }
+      } else if (updatedEvent.eventStatus !== 'draft') {
+        try {
+          const db = getDB();
+          const eventObjectId = event._id;
+          const joinsCollection = db.collection('eventJoins');
+          const bookingsCollection = db.collection('bookings');
+          const notificationsCollection = db.collection('notifications');
+
+          // Get joined users
+          const joins = await joinsCollection
+            .find({ eventId: eventObjectId })
+            .project({ userId: 1 })
+            .toArray();
+
+          // Get confirmed booked users
+          const bookedUsers = await bookingsCollection
+            .find({ eventId: eventObjectId, status: 'booked' })
+            .project({ userId: 1 })
+            .toArray();
+
+          // Merge and deduplicate recipient ids
+          const recipientIds = [
+            ...new Set(
+              [...joins, ...bookedUsers]
+                .map((item) => item.userId)
+                .filter(Boolean)
+                .map((id) => (id instanceof ObjectId ? id.toString() : String(id)))
+            ),
+          ];
+
+          if (recipientIds.length > 0) {
+            const now = new Date();
+            const organiserName = creator?.fullName || creator?.communityName || 'The organiser';
+
+            const title = 'Event Updated';
+            const message = `${organiserName} has updated the details for "${updatedEvent.eventName || 'an event'}". Check the event page for the latest information.`;
+
+            // In-app notifications
+            const docs = recipientIds.map((rid) => ({
+              recipientId: new ObjectId(rid),
+              type: 'event_update',
+              title,
+              message,
+              isRead: false,
+              createdAt: now,
+              updatedAt: now,
+              data: {
+                eventId: eventObjectId.toString(),
+                organiserId: organiserId,
+                eventTitle: updatedEvent.eventName || null,
+                eventName: updatedEvent.eventName || null,
+                eventDateTime: updatedEvent.eventDateTime || null,
+              },
+            }));
+
+            await notificationsCollection.insertMany(docs, { ordered: false });
+          }
+        } catch (updateNotifError) {
+          console.error('Error sending event update notifications:', updateNotifError);
+        }
       }
 
       // Get creator details

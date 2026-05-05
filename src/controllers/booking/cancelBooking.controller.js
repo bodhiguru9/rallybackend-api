@@ -290,6 +290,17 @@ const cancelBooking = async (req, res, next) => {
       }
     }
 
+    // Cancel Stripe PaymentIntent for pending bookings that never completed payment
+    if (booking.status === 'pending' && booking.paymentIntentId) {
+      try {
+        const stripeClient = getStripeInstance();
+        await stripeClient.paymentIntents.cancel(booking.paymentIntentId);
+      } catch (piCancelErr) {
+        // PI may already be canceled, expired, or succeeded — that's fine
+        console.log('PaymentIntent cancel skipped:', piCancelErr.message);
+      }
+    }
+
     await Booking.updateStatus(bookingId, 'cancelled', {
       cancelledAt: new Date(),
     });

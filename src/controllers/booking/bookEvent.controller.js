@@ -149,7 +149,9 @@ const bookEvent = async (req, res, next) => {
     const existingPendingBooking = existingBookings.find(
       (b) =>
         b.eventId.toString() === event._id.toString() &&
-        (b.occurrenceStart || null) === occurrenceStart
+        (b.occurrenceStart && occurrenceStart
+          ? new Date(b.occurrenceStart).getTime() === new Date(occurrenceStart).getTime()
+          : (b.occurrenceStart || null) === (occurrenceStart || null))
     );
 
     if (existingPendingBooking && paymentMethod !== 'apple_pay') {

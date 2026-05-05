@@ -303,6 +303,15 @@ const verifyPayment = async (req, res, next) => {
                 const eventDoc = await findEventById(existingBooking.eventId);
                 const ageCheck = await ensureAgeAllowedForEvent(eventDoc);
                 if (!ageCheck.allowed) {
+                  // Auto-refund since payment already succeeded but booking can't proceed
+                  try {
+                    const stripeClient = getStripeInstance();
+                    await stripeClient.refunds.create({ payment_intent: payment_intent_id });
+                    await Payment.updateStatus(payment.paymentId || payment._id, 'refunded');
+                    console.error('Auto-refunded payment due to age restriction after payment succeeded');
+                  } catch (refundErr) {
+                    console.error('Failed to auto-refund after age check failure:', refundErr);
+                  }
                   return res.status(400).json({
                     success: false,
                     error: ageCheck.message,
@@ -352,14 +361,24 @@ const verifyPayment = async (req, res, next) => {
             // If no booking exists, create one (backward compatibility)
             const event = await findEventById(payment.eventId);
             if (event) {
+              // Guard: check if a booking already exists for this payment before creating
+              const existingBookingForPayment = await Booking.findByPaymentId(payment.paymentId);
               const hasJoined = await EventJoin.hasJoined(
   payment.userId,
   event._id,
   payment.occurrenceStart || null
 );
-              if (!hasJoined) {
+              if (!hasJoined && !existingBookingForPayment) {
                 const ageCheck = await ensureAgeAllowedForEvent(event);
                 if (!ageCheck.allowed) {
+                  // Auto-refund since payment already succeeded
+                  try {
+                    const stripeClient = getStripeInstance();
+                    await stripeClient.refunds.create({ payment_intent: payment_intent_id });
+                    await Payment.updateStatus(payment.paymentId || payment._id, 'refunded');
+                  } catch (refundErr) {
+                    console.error('Failed to auto-refund after age check failure:', refundErr);
+                  }
                   return res.status(400).json({
                     success: false,
                     error: ageCheck.message,
@@ -455,27 +474,29 @@ const verifyPayment = async (req, res, next) => {
 };
         }
 
+        // Fire-and-forget notifications — do NOT await.
+        // Blocking on Twilio calls here caused the frontend to timeout,
+        // triggering the Apple Pay catch block to cancel confirmed bookings.
         if (booking) {
           try {
             const user = await User.findById(payment.userId);
             const eventForNotification = await findEventById(booking.eventId);
 
             if (user && eventForNotification) {
-              await sendBookingConfirmedNotification({
+              sendBookingConfirmedNotification({
                 user,
                 event: eventForNotification,
                 booking,
-              });
+              }).catch(err => console.error('Booking confirmation notification failed:', err));
 
-              // Notify organiser
-              await sendHostBookingNotification({
+              sendHostBookingNotification({
                 player: user,
                 event: eventForNotification,
                 booking,
-              });
+              }).catch(err => console.error('Host booking notification failed:', err));
             }
           } catch (notificationError) {
-            console.error('Paid booking confirmation notification failed:', notificationError);
+            console.error('Paid booking notification setup failed:', notificationError);
           }
         }
 

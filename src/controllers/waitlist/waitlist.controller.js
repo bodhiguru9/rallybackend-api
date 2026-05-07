@@ -45,7 +45,7 @@ const getEventWaitlist = async (req, res, next) => {
       });
     }
 
-    const { page, perPage, skip } = getPaginationParams(req.query.page, 20);
+    const { page, perPage, skip } = getPaginationParams(req.query.page, req.query.limit || req.query.perPage || 20);
 
     const waitlist = await Waitlist.getEventWaitlist(eventId, perPage, skip);
     const totalCount = await Waitlist.getWaitlistCount(eventId);

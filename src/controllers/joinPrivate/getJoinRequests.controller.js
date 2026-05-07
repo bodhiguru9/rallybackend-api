@@ -51,7 +51,7 @@ const getEventPendingRequests = async (req, res, next) => {
       });
     }
 
-    const { page, perPage, skip } = getPaginationParams(req.query.page, 20);
+    const { page, perPage, skip } = getPaginationParams(req.query.page, req.query.limit || req.query.perPage || 20);
 
     const pendingRequestsRaw = await EventJoinRequest.findActiveByEvent(event._id, perPage, skip);
     const totalCount = await EventJoinRequest.countActiveByEvent(event._id);
@@ -149,7 +149,7 @@ const getEventJoinRequests = async (req, res, next) => {
       });
     }
 
-    const { page, perPage, skip } = getPaginationParams(req.query.page, 20);
+    const { page, perPage, skip } = getPaginationParams(req.query.page, req.query.limit || req.query.perPage || 20);
 
     // Pending requests (includes accepted-but-unpaid)
     const pendingRequestsRaw = await EventJoinRequest.findActiveByEvent(event._id, perPage, skip);
@@ -234,7 +234,7 @@ const getEventJoinRequests = async (req, res, next) => {
 const getAllJoinRequests = async (req, res, next) => {
   try {
     const organiserId = req.user.id;
-    const { page, perPage, skip } = getPaginationParams(req.query.page, 20);
+    const { page, perPage, skip } = getPaginationParams(req.query.page, req.query.limit || req.query.perPage || 20);
 
     // Get all events created by this organizer
     const events = await Event.findByCreator(organiserId, 1000, 0); // Get all events

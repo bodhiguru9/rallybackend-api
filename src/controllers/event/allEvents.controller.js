@@ -35,8 +35,8 @@ const getAllEvents = async (req, res, next) => {
       });
     }
 
-    // Pagination: use page-based pagination (20 per page)
-    const { page, perPage, skip } = getPaginationParams(req.query.page, 20);
+    // Pagination: support dynamic perPage (max 100)
+    const { page, perPage, skip } = getPaginationParams(req.query.page, req.query.perPage || 20);
 
     // Get all events that user has joined (if authenticated)
     // This will be used to exclude joined events from the home feed
@@ -56,12 +56,12 @@ const getAllEvents = async (req, res, next) => {
       joinedEventIds = joinedEvents.map((join) => join.eventId);
     }
 
-    // Get all events with filters
+// Get all events with filters (exclude drafts for the public feed)
 let events = await Event.findWithFilters(
-  filters,        // don't pass excludeDrafts inside filters
+  filters,
   perPage * 3,
   skip,
-  false           // ✅ this is the real flag used
+  true // excludeDrafts: true
 );
  
     // Filter out events that user has already joined (works for both public and private events)

@@ -241,6 +241,13 @@ const bookEvent = async (req, res, next) => {
                     eventCategory: Array.isArray(event.eventSports) && event.eventSports.length > 0 ? event.eventSports[0] : '',
                     eventType: event.eventType || '',
                     userId: userId,
+                    customerName: user?.fullName || '',
+                    mobileNumber: user?.mobileNumber || '',
+                    playerId: user?.userId ? String(user.userId) : '',
+                    playerName: user?.fullName || '',
+                    organiserId: event.creatorId ? String(event.creatorId) : '',
+                    organiserName: event.eventCreatorName || '',
+                    partySize: String(safeGuestsCount),
                     ...(existingPendingBooking.promoCode && { promoCode: existingPendingBooking.promoCode }),
                   },
                   customer_email: user?.email || null,
@@ -253,6 +260,13 @@ const bookEvent = async (req, res, next) => {
                       eventCategory: Array.isArray(event.eventSports) && event.eventSports.length > 0 ? event.eventSports[0] : '',
                       eventType: event.eventType || '',
                       userId: userId,
+                      customerName: user?.fullName || '',
+                      mobileNumber: user?.mobileNumber || '',
+                      playerId: user?.userId ? String(user.userId) : '',
+                      playerName: user?.fullName || '',
+                      organiserId: event.creatorId ? String(event.creatorId) : '',
+                      organiserName: event.eventCreatorName || '',
+                      partySize: String(safeGuestsCount),
                       ...(existingPendingBooking.promoCode && { promoCode: existingPendingBooking.promoCode }),
                     },
                   },
@@ -488,6 +502,16 @@ const bookEvent = async (req, res, next) => {
       eventCategory: Array.isArray(event.eventSports) && event.eventSports.length > 0 ? event.eventSports[0] : '',
       eventType: event.eventType || '',
       userId: String(userId),
+      // Customer / Player details
+      customerName: user?.fullName || '',
+      mobileNumber: user?.mobileNumber || '',
+      playerId: user?.userId ? String(user.userId) : '',
+      playerName: user?.fullName || '',
+      // Organiser details
+      organiserId: event.creatorId ? String(event.creatorId) : '',
+      organiserName: event.eventCreatorName || '',
+      // Party size
+      partySize: String(safeGuestsCount),
     };
 
     if (promoCodeString) {
@@ -567,31 +591,10 @@ const bookEvent = async (req, res, next) => {
               mode: 'payment',
               success_url: `${frontendUrl}/payment/success?session_id={CHECKOUT_SESSION_ID}&booking_id=${booking.bookingId}`,
               cancel_url: `${frontendUrl}/payment/cancel?booking_id=${booking.bookingId}`,
-              metadata: {
-                bookingId: booking.bookingId,
-                eventId: event.eventId,
-                parentEventId: event.eventId,
-                occurrenceStart: occurrenceStart,
-                ...(occurrenceEnd && { occurrenceEnd: occurrenceEnd }),
-                eventTitle: event.eventName || '',
-                eventName: event.eventName || '',
-                eventCategory: Array.isArray(event.eventSports) && event.eventSports.length > 0 ? event.eventSports[0] : '',
-                eventType: event.eventType || '',
-                userId: String(userId),
-                ...(promoCodeString && { promoCode: promoCodeString }),
-              },
+              metadata: metadata,
               customer_email: user?.email || null,
               payment_intent_data: {
-                metadata: {
-                  bookingId: booking.bookingId,
-                  eventId: event.eventId,
-                  eventTitle: event.eventName || '',
-                  eventName: event.eventName || '',
-                  eventCategory: Array.isArray(event.eventSports) && event.eventSports.length > 0 ? event.eventSports[0] : '',
-                  eventType: event.eventType || '',
-                  userId: userId,
-                  ...(promoCodeString && { promoCode: promoCodeString }),
-                },
+                metadata: metadata,
               },
             });
           }

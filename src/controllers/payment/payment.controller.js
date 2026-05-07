@@ -163,6 +163,13 @@ const createPaymentOrder = async (req, res, next) => {
       }
     }
 
+    // Fetch user details for metadata (may already be fetched above for age check)
+    const paymentUser = await User.findById(userId);
+
+    // Fetch organiser details from event creator
+    let organiserName = event.eventCreatorName || '';
+    let organiserId = event.creatorId ? String(event.creatorId) : '';
+
     // Create Stripe Payment Intent
     const stripeInstance = getStripeInstance();
     const paymentIntent = await stripeInstance.paymentIntents.create({
@@ -176,6 +183,16 @@ const createPaymentOrder = async (req, res, next) => {
         eventType: event.eventType || '',
         userId: userId,
         promoCode: promoCodeString || 'none',
+        // Customer / Player details
+        customerName: paymentUser?.fullName || '',
+        mobileNumber: paymentUser?.mobileNumber || '',
+        playerId: paymentUser?.userId ? String(paymentUser.userId) : '',
+        playerName: paymentUser?.fullName || '',
+        // Organiser details
+        organiserId: organiserId,
+        organiserName: organiserName,
+        // Party size
+        partySize: String(safeGuestsCount),
       },
       description: `Payment for event: ${event.eventName || ''}`,
     });

@@ -298,7 +298,7 @@ if (!occurrenceStart) {
 const getParticipants = async (req, res, next) => {
   try {
     const { eventId } = req.params;
-    const { page, perPage, skip } = getPaginationParams(req.query.page, 20);
+    const { page, perPage, skip } = getPaginationParams(req.query.page, req.query.limit || req.query.perPage || 20);
 
     // Validate and find event
     const validation = validateEventId(eventId);

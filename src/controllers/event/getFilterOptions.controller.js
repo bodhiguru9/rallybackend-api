@@ -115,8 +115,8 @@ const getFilterOptions = async (req, res, next) => {
     // Default sports that should always be available, even if not yet in the database
     const defaultSports = [
       'Tennis', 'Badminton', 'Basketball', 'Padel', 'Football',
-      'Cricket', 'Volleyball', 'Pilates', 'Running', 'Pickleball',
-      'Table-tennis',
+      'Cricket', 'Indoor Cricket', 'Pilates', 'Running', 'Pickleball',
+      'Table-tennis', 'Dance', 'Other',
     ];
 
     // Combine sports from API, events, and defaults, then filter, format and sort
@@ -128,12 +128,18 @@ const getFilterOptions = async (req, res, next) => {
       ) // Sports from events
     ];
 
-    // Filter out empty strings, deduplicate (case-insensitive), format and sort
+    // Filter out empty strings, deduplicate (case-insensitive and hyphen-agnostic), format and sort
     const sports = allSports
       .filter(sport => sport && typeof sport === 'string' && sport.trim().length > 0)
-      .map(sport => sport.trim().toLowerCase())
-      .filter((value, index, self) => self.indexOf(value) === index) // Remove duplicates (case-insensitive)
-      .map(sport => sport.charAt(0).toUpperCase() + sport.slice(1)) // Capitalize first letter
+      .map(sport => sport.trim().toLowerCase().replace(/-/g, ' ')) // Standardize: lower case and no hyphens
+      .filter((value, index, self) => self.indexOf(value) === index) // Remove duplicates
+      .map(sport => {
+        // Capitalize each word for multi-word sports (e.g. "Indoor Cricket")
+        return sport
+          .split(' ')
+          .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+          .join(' ');
+      })
       .sort(); // Sort alphabetically
 
     const eventTypes = (otherData.eventTypes || [])

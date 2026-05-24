@@ -125,6 +125,7 @@ class Waitlist {
       
       // Use stored user details from waitlist if available, otherwise fallback to user document
       const userData = {
+        _id: user ? user._id : null,
         userId: user ? user.userId : null,
         userType: user ? user.userType : null,
         email: item.email || (user ? user.email : null),

@@ -30,6 +30,34 @@ const TEMPLATES = {
     friendlyName: `${APP_NAME} Event Cancelled`,
     body: `Hi {{1}}, we're sorry to inform you that {{2}}, scheduled for {{3}} at {{4}}, has been cancelled by the organiser. Any amount paid will be refunded to your account.`,
   },
+  waitlistSpotAvailable: {
+    friendlyName: `${APP_NAME} Waitlist Spot Available`,
+    body: `Hi {{1}}, a spot has opened up for {{2}} on {{3}}! Book now before it's gone.`,
+  },
+  waitlistJoinHost: {
+    friendlyName: `${APP_NAME} New Waitlist Request`,
+    body: `Hi {{1}}, {{2}} has joined the waitlist for your full event {{3}} on {{4}}.`,
+  },
+  organiserJoinRequest: {
+    friendlyName: `${APP_NAME} New Community Join Request`,
+    body: `Hi {{1}}, {{2}} has requested to join your community {{3}}.`,
+  },
+  eventRequestAccepted: {
+    friendlyName: `${APP_NAME} Event Request Accepted`,
+    body: `Hi {{1}}, your request to join {{2}} has been accepted! {{3}}`,
+  },
+  eventRequestRejected: {
+    friendlyName: `${APP_NAME} Event Request Rejected`,
+    body: `Hi {{1}}, we're sorry but your request to join {{2}} was not accepted.`,
+  },
+  organiserRequestAccepted: {
+    friendlyName: `${APP_NAME} Community Request Accepted`,
+    body: `Hi {{1}}, your request to join {{2}} has been accepted!`,
+  },
+  organiserRequestRejected: {
+    friendlyName: `${APP_NAME} Community Request Rejected`,
+    body: `Hi {{1}}, your request to join {{2}} was not accepted.`,
+  },
 };
 
 /**
@@ -106,15 +134,19 @@ const sendBookingConfirmedNotification = async ({ user, event, booking }) => {
   const eventLocation = event?.eventLocation || 'Location will be shared soon';
   const userName = user?.fullName || 'User';
   const bookingId = booking?.bookingId || 'N/A';
+  const guestsCount = booking?.guestsCount || 1;
+  // Human-readable party size suffix
+  const partySuffix = guestsCount > 1 ? ` (${guestsCount} spots)` : '';
 
   const subject = `Booking confirmed for ${eventName}`;
-  const text = `Hi ${userName}, your booking is confirmed for ${eventName} on ${eventDate} at ${eventLocation}. Booking ID: ${bookingId}.`;
+  const text = `Hi ${userName}, your booking${partySuffix} is confirmed for ${eventName} on ${eventDate} at ${eventLocation}. Booking ID: ${bookingId}.`;
   const html = `
     <p>Hi ${userName},</p>
-    <p>Your booking is confirmed for <strong>${eventName}</strong>.</p>
+    <p>Your booking${partySuffix} is confirmed for <strong>${eventName}</strong>.</p>
     <p><strong>Date:</strong> ${eventDate}</p>
     <p><strong>Location:</strong> ${eventLocation}</p>
     <p><strong>Booking ID:</strong> ${bookingId}</p>
+    ${guestsCount > 1 ? `<p><strong>Party size:</strong> ${guestsCount} (you + ${guestsCount - 1} guest${guestsCount - 1 === 1 ? '' : 's'})</p>` : ''}
   `;
   const whatsappMessage = text;
 
@@ -133,12 +165,15 @@ const sendBookingConfirmedNotification = async ({ user, event, booking }) => {
       user._id || user.id,
       'booking_confirmed',
       'Booking Confirmed',
-      `Your booking for "${eventName}" is confirmed!`,
+      guestsCount > 1
+        ? `Your booking for "${eventName}" is confirmed (${guestsCount} spots)!`
+        : `Your booking for "${eventName}" is confirmed!`,
       {
         eventId: event._id ? event._id.toString() : null,
         bookingId: booking._id || booking.bookingId,
         eventName: eventName,
         occurrenceStart: booking.occurrenceStart || null,
+        guestsCount,
       }
     );
   } catch (notifError) {
@@ -161,6 +196,11 @@ const sendHostBookingNotification = async ({ player, event, booking }) => {
     timeZone
   );
   const eventLocation = event?.eventLocation || 'Location will be shared soon';
+  const guestsCount = booking?.guestsCount || 1;
+  // Human-readable guest suffix for organiser
+  const guestSuffix = guestsCount > 1
+    ? ` (bringing ${guestsCount - 1} guest${guestsCount - 1 === 1 ? '' : 's'})`
+    : '';
 
   if (!hostId) {
     console.error('No host ID found to send booking notification');
@@ -173,7 +213,9 @@ const sendHostBookingNotification = async ({ player, event, booking }) => {
       hostId,
       'new_booking',
       'New Booking',
-      `${playerName} joined your event "${eventName}"`,
+      guestsCount > 1
+        ? `${playerName} joined your event "${eventName}"${guestSuffix}`
+        : `${playerName} joined your event "${eventName}"`,
       {
         eventId: event._id ? event._id.toString() : null,
         bookingId: booking._id || booking.bookingId,
@@ -182,6 +224,7 @@ const sendHostBookingNotification = async ({ player, event, booking }) => {
         playerProfilePic: player.profilePic || null,
         eventName: eventName,
         occurrenceStart: booking.occurrenceStart || null,
+        guestsCount,
       }
     );
   } catch (notifError) {
@@ -194,12 +237,13 @@ const sendHostBookingNotification = async ({ player, event, booking }) => {
     if (host) {
       const hostName = host.fullName || 'Organiser';
       const subject = `New booking for ${eventName}`;
-      const text = `Hi ${hostName}, ${playerName} has joined your event "${eventName}" on ${eventDate} at ${eventLocation}.`;
+      const text = `Hi ${hostName}, ${playerName} has joined your event "${eventName}"${guestSuffix} on ${eventDate} at ${eventLocation}.`;
       const html = `
         <p>Hi ${hostName},</p>
-        <p><strong>${playerName}</strong> has joined your event <strong>${eventName}</strong>.</p>
+        <p><strong>${playerName}</strong> has joined your event <strong>${eventName}</strong>${guestSuffix}.</p>
         <p><strong>Date:</strong> ${eventDate}</p>
         <p><strong>Location:</strong> ${eventLocation}</p>
+        ${guestsCount > 1 ? `<p><strong>Party size:</strong> ${guestsCount} (player + ${guestsCount - 1} guest${guestsCount - 1 === 1 ? '' : 's'})</p>` : ''}
       `;
       const whatsappMessage = text;
 
@@ -332,10 +376,232 @@ const sendEventCancelledNotification = async ({ user, event }) => {
   return await notifyUser({ user, subject, text, html, whatsappMessage, whatsappTemplate });
 };
 
+// ─── Waitlist Spot Available → Waitlisted Players ──────────────────────────
+const sendWaitlistSpotAvailableNotification = async ({ user, event }) => {
+  const eventName = event?.eventName || 'Event';
+  const timeZone = resolveEventTimeZone({ event, user });
+  const eventDate = formatEventDate(
+    event?.eventDateTime || event?.gameStartDate,
+    event?.eventEndDateTime || event?.gameEndDate,
+    timeZone
+  );
+  const userName = user?.fullName || 'User';
+
+  const subject = `Spot available for ${eventName}!`;
+  const text = `Hi ${userName}, a spot has just opened up for ${eventName} on ${eventDate}. Book now before it's gone!`;
+  const html = `
+    <p>Hi ${userName},</p>
+    <p>Good news! A spot has just opened up for <strong>${eventName}</strong> on <strong>${eventDate}</strong>.</p>
+    <p>Don't miss out - book your spot now!</p>
+  `;
+  const whatsappMessage = text;
+
+  const contentSid = await resolveTemplateSid('WHATSAPP_WAITLIST_AVAILABLE_SID', TEMPLATES.waitlistSpotAvailable);
+  const whatsappTemplate = contentSid
+    ? {
+        contentSid,
+        contentVariables: { '1': userName, '2': eventName, '3': eventDate },
+      }
+    : null;
+
+  // In-app notification
+  try {
+    await Notification.create(
+      user._id || user.id,
+      'waitlist_spot_available',
+      'Spot Available!',
+      `A spot has opened up for "${eventName}". Book now!`,
+      {
+        eventId: event._id ? event._id.toString() : null,
+        eventName: eventName,
+      }
+    );
+  } catch (notifError) {
+    console.error('In-app waitlist notification failed:', notifError.message);
+  }
+
+  return await notifyUser({ user, subject, text, html, whatsappMessage, whatsappTemplate });
+};
+
+// ─── Waitlist Join → Organiser ───────────────────────────────────────────
+const sendWaitlistJoinNotificationToHost = async ({ player, event }) => {
+  const eventName = event?.eventName || 'Event';
+  const playerName = player?.fullName || 'A player';
+  const hostId = event?.creatorId || event?.userId;
+  const timeZone = resolveEventTimeZone({ event, user: player });
+  const eventDate = formatEventDate(
+    event?.eventDateTime || event?.gameStartDate,
+    event?.eventEndDateTime || event?.gameEndDate,
+    timeZone
+  );
+
+  if (!hostId) return null;
+
+  try {
+    const host = await User.findById(hostId);
+    if (host) {
+      const hostName = host.fullName || 'Organiser';
+      const subject = `New waitlist request for ${eventName}`;
+      const text = `Hi ${hostName}, ${playerName} has joined the waitlist for your full event "${eventName}" on ${eventDate}.`;
+      const html = `
+        <p>Hi ${hostName},</p>
+        <p><strong>${playerName}</strong> has joined the waitlist for your full event <strong>${eventName}</strong>.</p>
+        <p><strong>Date:</strong> ${eventDate}</p>
+      `;
+      const whatsappMessage = text;
+
+      const contentSid = await resolveTemplateSid('WHATSAPP_WAITLIST_JOIN_HOST_SID', TEMPLATES.waitlistJoinHost);
+      const whatsappTemplate = contentSid
+        ? {
+            contentSid,
+            contentVariables: { '1': hostName, '2': playerName, '3': eventName, '4': eventDate },
+          }
+        : null;
+
+      await notifyUser({ user: host, subject, text, html, whatsappMessage, whatsappTemplate });
+    }
+  } catch (err) {
+    console.error('Waitlist join host notification failed:', err.message);
+  }
+
+  return true;
+};
+
+// ─── Community Join Request → Organiser ──────────────────────────────────
+const sendOrganiserJoinRequestNotification = async ({ user, organiser }) => {
+  const userName = user?.fullName || 'A user';
+  const organiserName = organiser?.fullName || 'Organiser';
+  const communityName = organiser?.communityName || 'your community';
+
+  const subject = `New request to join ${communityName}`;
+  const text = `Hi ${organiserName}, ${userName} has requested to join your community "${communityName}".`;
+  const html = `
+    <p>Hi ${organiserName},</p>
+    <p><strong>${userName}</strong> has requested to join your community <strong>${communityName}</strong>.</p>
+  `;
+  const whatsappMessage = text;
+
+  const contentSid = await resolveTemplateSid('WHATSAPP_ORG_JOIN_REQ_SID', TEMPLATES.organiserJoinRequest);
+  const whatsappTemplate = contentSid
+    ? {
+        contentSid,
+        contentVariables: { '1': organiserName, '2': userName, '3': communityName },
+      }
+    : null;
+
+  return await notifyUser({ user: organiser, subject, text, html, whatsappMessage, whatsappTemplate });
+};
+
+// ─── Event Request Accepted → Player ──────────────────────────────────────
+const sendEventRequestAcceptedNotification = async ({ user, event, message }) => {
+  const eventName = event?.eventName || 'Event';
+  const userName = user?.fullName || 'User';
+  const additionalMessage = message || 'Book your spot now!';
+
+  const subject = `Request accepted for ${eventName}`;
+  const text = `Hi ${userName}, your request to join "${eventName}" has been accepted! ${additionalMessage}`;
+  const html = `
+    <p>Hi ${userName},</p>
+    <p>Good news! Your request to join <strong>${eventName}</strong> has been accepted.</p>
+    <p>${additionalMessage}</p>
+  `;
+  const whatsappMessage = text;
+
+  const contentSid = await resolveTemplateSid('WHATSAPP_EVENT_REQ_ACCEPTED_SID', TEMPLATES.eventRequestAccepted);
+  const whatsappTemplate = contentSid
+    ? {
+        contentSid,
+        contentVariables: { '1': userName, '2': eventName, '3': additionalMessage },
+      }
+    : null;
+
+  return await notifyUser({ user, subject, text, html, whatsappMessage, whatsappTemplate });
+};
+
+// ─── Event Request Rejected → Player ──────────────────────────────────────
+const sendEventRequestRejectedNotification = async ({ user, event }) => {
+  const eventName = event?.eventName || 'Event';
+  const userName = user?.fullName || 'User';
+
+  const subject = `Request for ${eventName}`;
+  const text = `Hi ${userName}, we're sorry but your request to join "${eventName}" was not accepted at this time.`;
+  const html = `
+    <p>Hi ${userName},</p>
+    <p>We're sorry but your request to join <strong>${eventName}</strong> was not accepted at this time.</p>
+  `;
+  const whatsappMessage = text;
+
+  const contentSid = await resolveTemplateSid('WHATSAPP_EVENT_REQ_REJECTED_SID', TEMPLATES.eventRequestRejected);
+  const whatsappTemplate = contentSid
+    ? {
+        contentSid,
+        contentVariables: { '1': userName, '2': eventName },
+      }
+    : null;
+
+  return await notifyUser({ user, subject, text, html, whatsappMessage, whatsappTemplate });
+};
+
+// ─── Community Request Accepted → Player ──────────────────────────────────
+const sendOrganiserRequestAcceptedNotification = async ({ user, organiser }) => {
+  const organiserName = organiser?.fullName || 'Organiser';
+  const communityName = organiser?.communityName || 'the community';
+  const userName = user?.fullName || 'User';
+
+  const subject = `Request accepted for ${communityName}`;
+  const text = `Hi ${userName}, your request to join "${communityName}" has been accepted!`;
+  const html = `
+    <p>Hi ${userName},</p>
+    <p>Your request to join <strong>${communityName}</strong> has been accepted by ${organiserName}.</p>
+  `;
+  const whatsappMessage = text;
+
+  const contentSid = await resolveTemplateSid('WHATSAPP_ORG_REQ_ACCEPTED_SID', TEMPLATES.organiserRequestAccepted);
+  const whatsappTemplate = contentSid
+    ? {
+        contentSid,
+        contentVariables: { '1': userName, '2': communityName },
+      }
+    : null;
+
+  return await notifyUser({ user, subject, text, html, whatsappMessage, whatsappTemplate });
+};
+
+// ─── Community Request Rejected → Player ──────────────────────────────────
+const sendOrganiserRequestRejectedNotification = async ({ user, organiser }) => {
+  const communityName = organiser?.communityName || 'the community';
+  const userName = user?.fullName || 'User';
+
+  const subject = `Request for ${communityName}`;
+  const text = `Hi ${userName}, your request to join "${communityName}" was not accepted.`;
+  const html = `
+    <p>Hi ${userName},</p>
+    <p>We're sorry but your request to join <strong>${communityName}</strong> was not accepted.</p>
+  `;
+  const whatsappMessage = text;
+
+  const contentSid = await resolveTemplateSid('WHATSAPP_ORG_REQ_REJECTED_SID', TEMPLATES.organiserRequestRejected);
+  const whatsappTemplate = contentSid
+    ? {
+        contentSid,
+        contentVariables: { '1': userName, '2': communityName },
+      }
+    : null;
+
+  return await notifyUser({ user, subject, text, html, whatsappMessage, whatsappTemplate });
+};
+
 module.exports = {
   sendBookingConfirmedNotification,
   sendHostBookingNotification,
   sendPlayerCancelledBookingNotification,
   sendHostCancelledBookingNotification,
   sendEventCancelledNotification,
+  sendWaitlistSpotAvailableNotification,
+  sendWaitlistJoinNotificationToHost,
+  sendOrganiserJoinRequestNotification,
+  sendEventRequestAcceptedNotification,
+  sendEventRequestRejectedNotification,
+  sendOrganiserRequestAcceptedNotification,
+  sendOrganiserRequestRejectedNotification,
 };

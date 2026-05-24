@@ -119,6 +119,19 @@ const bookEvent = async (req, res, next) => {
       });
     }
 
+    // Fetch organiser details dynamically
+    let organiserName = event.eventCreatorName || '';
+    if (event.creatorId) {
+      try {
+        const organiser = await User.findById(event.creatorId);
+        if (organiser) {
+          organiserName = organiser.communityName || organiser.fullName || event.eventCreatorName || '';
+        }
+      } catch (err) {
+        console.error('Failed to fetch organiser details for booking:', err);
+      }
+    }
+
     if (req.user.userType === 'player') {
       const ageCheck = validateAgeForEvent(user?.dob, event.eventMinAge, event.eventMaxAge);
       if (!ageCheck.allowed) {
@@ -139,6 +152,32 @@ const bookEvent = async (req, res, next) => {
       return res.status(400).json({
         success: false,
         error: 'Already joined this occurrence',
+      });
+    }
+
+    // Parse guest count EARLY so it's available throughout (including the pending-booking reuse path)
+    const guestsCount = parseInt(req.query.guestsCount || req.body.guestsCount || req.body.guests_count || 1, 10);
+    const safeGuestsCount = isNaN(guestsCount) || guestsCount < 1 ? 1 : guestsCount;
+
+    // Enforce spot capacity: currentOccupied + safeGuestsCount must not exceed eventMaxGuest
+    const maxGuest = event.eventMaxGuest !== undefined ? event.eventMaxGuest : (event.gameSpots || 0);
+    const currentOccupied = await EventJoin.getParticipantCount(event._id, occurrenceStart);
+    const availableSpots = maxGuest - currentOccupied;
+
+    if (availableSpots <= 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'Event is full. All spots have been booked.',
+        message: 'Please join the waitlist to be notified when a spot becomes available.',
+        spotsInfo: { totalSpots: maxGuest, spotsBooked: currentOccupied, spotsLeft: 0, spotsFull: true },
+      });
+    }
+
+    if (safeGuestsCount > availableSpots) {
+      return res.status(400).json({
+        success: false,
+        error: `Only ${availableSpots} spot(s) available. Your party size of ${safeGuestsCount} exceeds the available spots.`,
+        spotsInfo: { totalSpots: maxGuest, spotsBooked: currentOccupied, spotsLeft: availableSpots },
       });
     }
 
@@ -246,7 +285,7 @@ const bookEvent = async (req, res, next) => {
                     playerId: user?.userId ? String(user.userId) : '',
                     playerName: user?.fullName || '',
                     organiserId: event.creatorId ? String(event.creatorId) : '',
-                    organiserName: event.eventCreatorName || '',
+                    organiserName: organiserName,
                     partySize: String(safeGuestsCount),
                     ...(existingPendingBooking.promoCode && { promoCode: existingPendingBooking.promoCode }),
                   },
@@ -265,7 +304,7 @@ const bookEvent = async (req, res, next) => {
                       playerId: user?.userId ? String(user.userId) : '',
                       playerName: user?.fullName || '',
                       organiserId: event.creatorId ? String(event.creatorId) : '',
-                      organiserName: event.eventCreatorName || '',
+                      organiserName: organiserName,
                       partySize: String(safeGuestsCount),
                       ...(existingPendingBooking.promoCode && { promoCode: existingPendingBooking.promoCode }),
                     },
@@ -322,10 +361,7 @@ const bookEvent = async (req, res, next) => {
       }
     }
 
-    // Get guests count (default to 1)
-    const guestsCount = parseInt(req.query.guestsCount || req.body.guestsCount || req.body.guests_count || 1, 10);
-    const safeGuestsCount = isNaN(guestsCount) || guestsCount < 1 ? 1 : guestsCount;
-
+    // guestsCount and safeGuestsCount are now declared above (after hasJoined check)
     // Get original price (multiplied by guests count)
     let originalAmount = safeEventPrice * safeGuestsCount;
     let discountAmount = 0;
@@ -388,6 +424,7 @@ const bookEvent = async (req, res, next) => {
       discountAmount: discountAmount,
       finalAmount: finalAmount,
       promoCode: promoCodeString,
+      guestsCount: safeGuestsCount,
       bookedAt: isFreeEvent ? new Date() : null,
     };
 
@@ -399,6 +436,7 @@ const bookEvent = async (req, res, next) => {
         await EventJoin.join(userId, event._id, occurrenceStart, {
           occurrenceEnd,
           parentEventId: event.eventId,
+          guestsCount: safeGuestsCount,
         });
       } catch (joinError) {
         if (joinError.message !== 'Already joined this occurrence') {
@@ -509,7 +547,7 @@ const bookEvent = async (req, res, next) => {
       playerName: user?.fullName || '',
       // Organiser details
       organiserId: event.creatorId ? String(event.creatorId) : '',
-      organiserName: event.eventCreatorName || '',
+      organiserName: organiserName,
       // Party size
       partySize: String(safeGuestsCount),
     };

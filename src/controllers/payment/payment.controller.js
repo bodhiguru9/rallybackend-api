@@ -166,8 +166,19 @@ const createPaymentOrder = async (req, res, next) => {
     // Fetch user details for metadata (may already be fetched above for age check)
     const paymentUser = await User.findById(userId);
 
-    // Fetch organiser details from event creator
+    // Fetch organiser details dynamically
+    let organiser = null;
     let organiserName = event.eventCreatorName || '';
+    if (event.creatorId) {
+      try {
+        organiser = await User.findById(event.creatorId);
+        if (organiser) {
+          organiserName = organiser.communityName || organiser.fullName || event.eventCreatorName || '';
+        }
+      } catch (err) {
+        console.error('Failed to fetch organiser details for payment order:', err);
+      }
+    }
     let organiserId = event.creatorId ? String(event.creatorId) : '';
 
     // Create Stripe Payment Intent
@@ -345,6 +356,7 @@ const verifyPayment = async (req, res, next) => {
   {
     occurrenceEnd: existingBooking.occurrenceEnd || null,
     parentEventId: existingBooking.parentEventId || eventDoc?.eventId || null,
+    guestsCount: existingBooking.guestsCount || 1,
   }
 );
 
@@ -429,6 +441,7 @@ const verifyPayment = async (req, res, next) => {
   {
     occurrenceEnd: payment.occurrenceEnd || null,
     parentEventId: payment.parentEventId || event.eventId || null,
+    guestsCount: bookingData.guestsCount || 1,
   }
 );
 

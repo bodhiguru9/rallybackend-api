@@ -7,6 +7,9 @@ const PackagePurchase = require('../../models/PackagePurchase');
 const { findEventById, validateEventId } = require('../../utils/eventHelper');
 const { getPaginationParams, createPaginationResponse } = require('../../utils/pagination');
 const { validateAgeForEvent } = require('../../utils/ageRestriction');
+const {
+  sendWaitlistSpotAvailableNotification,
+} = require('../../services/eventNotification.service');
 
 /**
  * @desc    Join a public event (only for public events)
@@ -122,6 +125,19 @@ if (!occurrenceStart) {
       });
     }
 
+    // Parse guest count and validate against available spots
+    const reqGuestsCount = parseInt(req.body.guestsCount || req.query.guestsCount || 1, 10);
+    const safeGuestsCount = isNaN(reqGuestsCount) || reqGuestsCount < 1 ? 1 : reqGuestsCount;
+    const availableSpots = maxGuest - currentJoinedCount;
+
+    if (safeGuestsCount > availableSpots) {
+      return res.status(400).json({
+        success: false,
+        error: `Only ${availableSpots} spot(s) available. Your party size of ${safeGuestsCount} exceeds the available spots.`,
+        spotsInfo: { totalSpots: maxGuest, spotsBooked: currentJoinedCount, spotsLeft: availableSpots },
+      });
+    }
+
     // Check if already joined (use MongoDB ObjectId from found event)
     const hasJoined = await EventJoin.hasJoined(userId, event._id, occurrenceStart);
     if (hasJoined) {
@@ -151,6 +167,7 @@ if (!occurrenceStart) {
     await EventJoin.join(userId, event._id, occurrenceStart, {
   occurrenceEnd,
   parentEventId: event.eventId,
+  guestsCount: safeGuestsCount,
 });
 
     // Get updated event
@@ -263,6 +280,26 @@ if (!occurrenceStart) {
     } catch (error) {
       // Don't fail the request if notification creation fails
       console.error('Error creating notification:', error);
+    }
+
+    // After leaving, notify waitlisted players that a spot is available
+    try {
+      // Fire and forget waitlist notifications
+      Waitlist.getEventWaitlist(event._id).then(waitlistUsers => {
+        if (waitlistUsers && waitlistUsers.length > 0) {
+          console.log(`📣 [LEAVE-EVENT] Notifying ${waitlistUsers.length} waitlisted users for event: ${event.eventId}`);
+          waitlistUsers.forEach(waitlistItem => {
+            if (waitlistItem.user) {
+              sendWaitlistSpotAvailableNotification({
+                user: waitlistItem.user,
+                event: event
+              }).catch(err => console.error('Waitlist notification failed:', err.message));
+            }
+          });
+        }
+      }).catch(err => console.error('Error fetching waitlist for notification:', err.message));
+    } catch (waitlistErr) {
+      console.error('Waitlist processing error:', waitlistErr.message);
     }
 
     // Get updated event
@@ -483,6 +520,26 @@ if (!occurrenceStart) {
       );
     } catch (error) {
       console.error('Error creating removed-from-event notification:', error);
+    }
+
+    // After removal, notify waitlisted players that a spot is available
+    try {
+      // Fire and forget waitlist notifications
+      Waitlist.getEventWaitlist(event._id).then(waitlistUsers => {
+        if (waitlistUsers && waitlistUsers.length > 0) {
+          console.log(`📣 [REMOVE-PARTICIPANT] Notifying ${waitlistUsers.length} waitlisted users for event: ${event.eventId}`);
+          waitlistUsers.forEach(waitlistItem => {
+            if (waitlistItem.user) {
+              sendWaitlistSpotAvailableNotification({
+                user: waitlistItem.user,
+                event: event
+              }).catch(err => console.error('Waitlist notification failed:', err.message));
+            }
+          });
+        }
+      }).catch(err => console.error('Error fetching waitlist for notification:', err.message));
+    } catch (waitlistErr) {
+      console.error('Waitlist processing error:', waitlistErr.message);
     }
 
     // Get updated event

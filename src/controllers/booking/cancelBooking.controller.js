@@ -8,7 +8,9 @@ const { findEventById } = require('../../utils/eventHelper');
 const {
   sendPlayerCancelledBookingNotification,
   sendHostCancelledBookingNotification,
+  sendWaitlistSpotAvailableNotification,
 } = require('../../services/eventNotification.service');
+const Waitlist = require('../../models/Waitlist');
 
 // Initialize Stripe lazily
 let stripeInstance = null;
@@ -211,6 +213,26 @@ const cancelBooking = async (req, res, next) => {
 
       try {
         await EventJoin.leave(userId, booking.eventId, booking.occurrenceStart);
+
+        // After leaving, notify waitlisted players that a spot is available
+        try {
+          // Fire and forget waitlist notifications
+          Waitlist.getEventWaitlist(booking.eventId).then(waitlistUsers => {
+            if (waitlistUsers && waitlistUsers.length > 0) {
+              console.log(`📣 [CANCEL-BOOKING] Notifying ${waitlistUsers.length} waitlisted users for event: ${booking.eventId}`);
+              waitlistUsers.forEach(waitlistItem => {
+                if (waitlistItem.user) {
+                  sendWaitlistSpotAvailableNotification({
+                    user: waitlistItem.user,
+                    event: event
+                  }).catch(err => console.error('Waitlist notification failed:', err.message));
+                }
+              });
+            }
+          }).catch(err => console.error('Error fetching waitlist for notification:', err.message));
+        } catch (waitlistErr) {
+          console.error('Waitlist processing error:', waitlistErr.message);
+        }
       } catch (leaveError) {
         console.log('User not found in EventJoin (may have been removed already):', leaveError.message);
       }

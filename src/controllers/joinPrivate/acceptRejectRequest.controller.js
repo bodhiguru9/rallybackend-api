@@ -4,6 +4,10 @@ const EventJoinRequest = require('../../models/EventJoinRequest');
 const EventJoin = require('../../models/EventJoin');
 const User = require('../../models/User');
 const Notification = require('../../models/Notification');
+const {
+  sendEventRequestAcceptedNotification,
+  sendEventRequestRejectedNotification,
+} = require('../../services/eventNotification.service');
 const { findEventById, validateEventId } = require('../../utils/eventHelper');
 
 /**
@@ -144,6 +148,20 @@ const acceptJoinRequest = async (req, res, next) => {
         console.error('Error creating notification:', error);
       }
 
+      // Email/WhatsApp notification for player
+      try {
+        const player = await User.findById(pendingRequest.userId);
+        if (player) {
+          sendEventRequestAcceptedNotification({
+            user: player,
+            event,
+            message: 'Please complete the payment to join.'
+          }).catch(err => console.error('Error sending event request accepted notification:', err.message));
+        }
+      } catch (err) {
+        console.error('Error calling event request accepted notification:', err.message);
+      }
+
       const updatedJoinedCount = await EventJoin.getParticipantCount(event._id);
       const pendingRequestCount = await EventJoinRequest.countActiveByEvent(event._id);
       const waitlistCount = await Waitlist.getWaitlistCount(event.eventId);
@@ -206,6 +224,19 @@ const acceptJoinRequest = async (req, res, next) => {
     } catch (error) {
       // Don't fail the request if notification creation fails
       console.error('Error creating notification:', error);
+    }
+
+    // Email/WhatsApp notification for player
+    try {
+      if (acceptedUser) {
+        sendEventRequestAcceptedNotification({
+          user: acceptedUser,
+          event: updatedEvent,
+          message: 'You have been added to the event.'
+        }).catch(err => console.error('Error sending event request accepted notification:', err.message));
+      }
+    } catch (err) {
+      console.error('Error calling event request accepted notification:', err.message);
     }
 
     // Get updated counts
@@ -377,6 +408,19 @@ const rejectJoinRequest = async (req, res, next) => {
         console.error('Error creating notification:', error);
       }
 
+      // Email/WhatsApp notification for player
+      try {
+        const player = await User.findById(pendingRequest.userId);
+        if (player) {
+          sendEventRequestRejectedNotification({
+            user: player,
+            event
+          }).catch(err => console.error('Error sending event request rejected notification:', err.message));
+        }
+      } catch (err) {
+        console.error('Error calling event request rejected notification:', err.message);
+      }
+
       const pendingCount = await EventJoinRequest.countPendingByEvent(event._id);
       const waitlistCount = await Waitlist.getWaitlistCount(event.eventId);
 
@@ -426,6 +470,18 @@ const rejectJoinRequest = async (req, res, next) => {
     } catch (error) {
       // Don't fail the request if notification creation fails
       console.error('Error creating notification:', error);
+    }
+
+    // Email/WhatsApp notification for player
+    try {
+      if (rejectedUser) {
+        sendEventRequestRejectedNotification({
+          user: rejectedUser,
+          event: eventDoc
+        }).catch(err => console.error('Error sending event request rejected notification:', err.message));
+      }
+    } catch (err) {
+      console.error('Error calling event request rejected notification:', err.message);
     }
 
     // Get updated join request count

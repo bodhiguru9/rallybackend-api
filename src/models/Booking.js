@@ -22,6 +22,10 @@ class Booking {
     this.discountAmount = data.discountAmount || 0;
     this.finalAmount = data.finalAmount;
     this.promoCode = data.promoCode || null;
+    // Party size: 1 = player only, 2 = player + 1 guest, etc.
+    this.guestsCount = (data.guestsCount && Number.isInteger(data.guestsCount) && data.guestsCount >= 1)
+      ? data.guestsCount
+      : 1;
     this.bookedAt = data.bookedAt || null;
     this.cancelledAt = data.cancelledAt || null;
     this.createdAt = data.createdAt || new Date();

@@ -6,6 +6,9 @@ const Notification = require('../../models/Notification');
 const { findEventById, validateEventId } = require('../../utils/eventHelper');
 const { getPaginationParams, createPaginationResponse } = require('../../utils/pagination');
 const { validateAgeForEvent } = require('../../utils/ageRestriction');
+const {
+  sendWaitlistJoinNotificationToHost,
+} = require('../../services/eventNotification.service');
 
 /**
  * @desc    Join waitlist for a private event
@@ -166,6 +169,15 @@ const joinWaitlist = async (req, res, next) => {
     } catch (error) {
       // Don't fail the request if notification creation fails
       console.error('❌ Error creating event waitlist notification:', error.message, error.stack);
+    }
+
+    // Email/WhatsApp notification for organiser
+    try {
+      sendWaitlistJoinNotificationToHost({ player: user, event }).catch(err => {
+        console.error('❌ Error sending waitlist join email/WhatsApp to host:', err.message);
+      });
+    } catch (err) {
+      console.error('❌ Error calling waitlist join host notification:', err.message);
     }
 
     // Get updated waitlist count

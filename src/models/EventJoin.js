@@ -25,6 +25,11 @@ const normalizedOccurrenceEnd = extraData.occurrenceEnd
   ? this.normalizeOccurrence(extraData.occurrenceEnd)
   : null;
 
+// guestsCount = player (1) + additional guests. Minimum 1.
+const guestsCount = (extraData.guestsCount && Number.isInteger(extraData.guestsCount) && extraData.guestsCount >= 1)
+  ? extraData.guestsCount
+  : 1;
+
 const userObjectId = typeof userId === 'string' ? new ObjectId(userId) : userId;
 const eventObjectId = typeof eventId === 'string' ? new ObjectId(eventId) : eventId;
 
@@ -46,12 +51,13 @@ const result = await joinsCollection.insertOne({
   parentEventId: extraData.parentEventId || null,
   occurrenceStart: normalizedOccurrenceStart,
   occurrenceEnd: normalizedOccurrenceEnd,
+  guestsCount: guestsCount,
   joinedAt: now,
 });
 
-// Keep existing attendee count behaviour unchanged for now
+// Increment event attendee count by the full party size (player + guests)
 const Event = require('./Event');
-await Event.updateAttendeeCount(eventId, 1);
+await Event.updateAttendeeCount(eventId, guestsCount);
 
 return result.insertedId;
   }
@@ -64,16 +70,27 @@ return result.insertedId;
     const joinsCollection = db.collection('eventJoins');
 
     const normalizedOccurrenceStart = this.normalizeOccurrence(occurrenceStart);
+    const userObjectId = typeof userId === 'string' ? new ObjectId(userId) : userId;
+    const eventObjectId = typeof eventId === 'string' ? new ObjectId(eventId) : eventId;
 
-const result = await joinsCollection.deleteOne({
-  userId: typeof userId === 'string' ? new ObjectId(userId) : userId,
-  eventId: typeof eventId === 'string' ? new ObjectId(eventId) : eventId,
-  occurrenceStart: normalizedOccurrenceStart,
-});
+    // Read the join record first so we know how many seats to free
+    const joinRecord = await joinsCollection.findOne({
+      userId: userObjectId,
+      eventId: eventObjectId,
+      occurrenceStart: normalizedOccurrenceStart,
+    });
+
+    const result = await joinsCollection.deleteOne({
+      userId: userObjectId,
+      eventId: eventObjectId,
+      occurrenceStart: normalizedOccurrenceStart,
+    });
+
     if (result.deletedCount > 0) {
-      // Update event attendee count
+      // Decrement by the party size stored in the join record (default 1 for old records)
+      const seatsToFree = (joinRecord && joinRecord.guestsCount >= 1) ? joinRecord.guestsCount : 1;
       const Event = require('./Event');
-      await Event.updateAttendeeCount(eventId, -1);
+      await Event.updateAttendeeCount(eventId, -seatsToFree);
     }
 
     return result.deletedCount > 0;
@@ -87,17 +104,27 @@ const result = await joinsCollection.deleteOne({
     const joinsCollection = db.collection('eventJoins');
 
     const normalizedOccurrenceStart = this.normalizeOccurrence(occurrenceStart);
+    const userObjectId = typeof userIdToRemove === 'string' ? new ObjectId(userIdToRemove) : userIdToRemove;
+    const eventObjectId = typeof eventId === 'string' ? new ObjectId(eventId) : eventId;
 
-const result = await joinsCollection.deleteOne({
-  userId: typeof userIdToRemove === 'string' ? new ObjectId(userIdToRemove) : userIdToRemove,
-  eventId: typeof eventId === 'string' ? new ObjectId(eventId) : eventId,
-  occurrenceStart: normalizedOccurrenceStart,
-});
+    // Read the join record first so we know how many seats to free
+    const joinRecord = await joinsCollection.findOne({
+      userId: userObjectId,
+      eventId: eventObjectId,
+      occurrenceStart: normalizedOccurrenceStart,
+    });
+
+    const result = await joinsCollection.deleteOne({
+      userId: userObjectId,
+      eventId: eventObjectId,
+      occurrenceStart: normalizedOccurrenceStart,
+    });
 
     if (result.deletedCount > 0) {
-      // Update event attendee count
+      // Decrement by the party size stored in the join record (default 1 for old records)
+      const seatsToFree = (joinRecord && joinRecord.guestsCount >= 1) ? joinRecord.guestsCount : 1;
       const Event = require('./Event');
-      await Event.updateAttendeeCount(eventId, -1);
+      await Event.updateAttendeeCount(eventId, -seatsToFree);
     }
 
     return result.deletedCount > 0;
@@ -167,26 +194,31 @@ const result = await joinsCollection.deleteOne({
 
     const users = await usersCollection.find({ _id: { $in: userIds } }).toArray();
 
-    return users.map((user) => ({
-      userId: user.userId,
-      userType: user.userType,
-      email: user.email,
-      mobileNumber: user.mobileNumber,
-      profilePic: user.profilePic,
-      ...(user.userType === 'player' && {
-        fullName: user.fullName,
-        dob: user.dob,
-        gender: user.gender,
-        sport1: user.sport1,
-        sport2: user.sport2,
-      }),
-      ...(user.userType === 'organiser' && {
-        fullName: user.fullName,
-        communityName: user.communityName,
-        yourCity: user.yourCity,
-      }),
-      joinedAt: joins.find((j) => j.userId.toString() === user._id.toString())?.joinedAt,
-    }));
+    return users.map((user) => {
+      const joinRecord = joins.find((j) => j.userId.toString() === user._id.toString());
+      return {
+        userId: user.userId,
+        userType: user.userType,
+        email: user.email,
+        mobileNumber: user.mobileNumber,
+        profilePic: user.profilePic,
+        ...(user.userType === 'player' && {
+          fullName: user.fullName,
+          dob: user.dob,
+          gender: user.gender,
+          sport1: user.sport1,
+          sport2: user.sport2,
+        }),
+        ...(user.userType === 'organiser' && {
+          fullName: user.fullName,
+          communityName: user.communityName,
+          yourCity: user.yourCity,
+        }),
+        joinedAt: joinRecord?.joinedAt,
+        // guestsCount: how many seats this participant occupies (1 = just themselves)
+        guestsCount: (joinRecord && joinRecord.guestsCount >= 1) ? joinRecord.guestsCount : 1,
+      };
+    });
   }
 
   /**
@@ -204,10 +236,14 @@ const result = await joinsCollection.deleteOne({
       return 0;
     }
 
-    return await joinsCollection.countDocuments({
-  eventId: objectId,
-  occurrenceStart: normalizedOccurrenceStart,
-});
+    // Sum guestsCount across all join records to get total occupied seats.
+    // Old records without guestsCount are treated as 1 via $ifNull.
+    const agg = await joinsCollection.aggregate([
+      { $match: { eventId: objectId, occurrenceStart: normalizedOccurrenceStart } },
+      { $group: { _id: null, total: { $sum: { $ifNull: ['$guestsCount', 1] } } } },
+    ]).toArray();
+
+    return agg.length > 0 ? agg[0].total : 0;
   }
 
   /**
@@ -256,6 +292,7 @@ const result = await joinsCollection.deleteOne({
       occurrenceStart: j.occurrenceStart || null,
       occurrenceEnd: j.occurrenceEnd || null,
       parentEventId: j.parentEventId || null,
+      guestsCount: (j.guestsCount >= 1) ? j.guestsCount : 1,
     })),
   };
 });

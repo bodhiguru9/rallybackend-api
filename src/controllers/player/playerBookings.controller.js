@@ -143,6 +143,11 @@ const getPlayerBookings = async (req, res, next) => {
         // Ensure eventStatus is set correctly
         formattedEvent.eventStatus = computedStatus;
 
+        // Get occurrenceStart/End from the joinedOccurrences on the event
+        // (getUserJoinedEvents attaches joinedOccurrences to each event)
+        const joinedOccurrences = event.joinedOccurrences || [];
+        const joinOccurrence = joinedOccurrences.length > 0 ? joinedOccurrences[0] : null;
+
         return {
           ...formattedEvent,
           creator: {
@@ -151,9 +156,14 @@ const getPlayerBookings = async (req, res, next) => {
           },
           booking: {
             bookingId: bookingId,
-            joinedAt: event.joinedAt || null,
+            joinedAt: event.joinedAt || joinOccurrence?.joinedAt || null,
             bookingStatus: computedStatus, // past/ongoing/upcoming (for backward compatibility)
             bookingStatusValue: relatedBooking ? relatedBooking.status : null, // pending/booked/cancelled/failed
+            // Guest count from the booking record (player + guests)
+            guestsCount: relatedBooking ? (relatedBooking.guestsCount || 1) : (joinOccurrence?.guestsCount || 1),
+            // Occurrence timing — used by the frontend to match bookings to specific recurring sessions
+            occurrenceStart: joinOccurrence?.occurrenceStart || null,
+            occurrenceEnd: joinOccurrence?.occurrenceEnd || null,
             // Convenience boolean flags
             isPast,
             isOngoing,

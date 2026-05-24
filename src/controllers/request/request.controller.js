@@ -3,6 +3,11 @@ const User = require('../../models/User');
 const Notification = require('../../models/Notification');
 const { getPaginationParams, createPaginationResponse } = require('../../utils/pagination');
 const { ObjectId } = require('mongodb');
+const {
+  sendOrganiserJoinRequestNotification,
+  sendOrganiserRequestAcceptedNotification,
+  sendOrganiserRequestRejectedNotification,
+} = require('../../services/eventNotification.service');
 
 /**
  * @desc    Request to join private organiser
@@ -92,6 +97,15 @@ const requestToJoin = async (req, res, next) => {
     } catch (error) {
       // Don't fail the request if notification creation fails
       console.error('❌ Error creating organiser join request notification:', error.message, error.stack);
+    }
+
+    // Email/WhatsApp notification for organiser
+    try {
+      sendOrganiserJoinRequestNotification({ user, organiser }).catch(err => {
+        console.error('❌ Error sending community join email/WhatsApp to organiser:', err.message);
+      });
+    } catch (err) {
+      console.error('❌ Error calling community join organiser notification:', err.message);
     }
 
     // Prepare user data for response
@@ -407,6 +421,18 @@ const acceptRequest = async (req, res, next) => {
       console.error('❌ Error creating organiser request accepted notification:', error.message, error.stack);
     }
 
+    // Email/WhatsApp notification for player
+    try {
+      const player = await User.findById(request.userId);
+      if (player) {
+        sendOrganiserRequestAcceptedNotification({ user: player, organiser }).catch(err => {
+          console.error('❌ Error sending community request accepted email/WhatsApp to player:', err.message);
+        });
+      }
+    } catch (err) {
+      console.error('❌ Error calling community request accepted notification:', err.message);
+    }
+
     res.status(200).json({
       success: true,
       message: 'Request accepted successfully',
@@ -492,6 +518,18 @@ const rejectRequest = async (req, res, next) => {
     } catch (error) {
       // Don't fail the request if notification creation fails
       console.error('❌ Error creating organiser request rejected notification:', error.message, error.stack);
+    }
+
+    // Email/WhatsApp notification for player
+    try {
+      const player = await User.findById(request.userId);
+      if (player) {
+        sendOrganiserRequestRejectedNotification({ user: player, organiser }).catch(err => {
+          console.error('❌ Error sending community request rejected email/WhatsApp to player:', err.message);
+        });
+      }
+    } catch (err) {
+      console.error('❌ Error calling community request rejected notification:', err.message);
     }
 
     res.status(200).json({

@@ -55,6 +55,11 @@ app.use(
 ); // Security headers
 app.use(cors()); // Enable CORS
 app.use(morgan('dev')); // Logging
+
+// Stripe webhook must come before express.json() to preserve the raw body
+const { stripeWebhook } = require('./controllers/payment/webhook.controller');
+app.post('/api/payments/webhook', express.raw({ type: 'application/json' }), stripeWebhook);
+
 app.use(express.json()); // Parse JSON bodies
 app.use(express.urlencoded({ extended: true })); // Parse URL-encoded bodies
 

@@ -584,6 +584,8 @@ const bookEvent = async (req, res, next) => {
         customer: customerId,
         metadata: metadata,
         description: `Payment for event: ${event.eventName || ''}`,
+      }, {
+        idempotencyKey: booking.bookingId
       });
     } catch (stripeError) {
       await Booking.updateStatus(booking.bookingId, 'failed');
@@ -594,54 +596,8 @@ const bookEvent = async (req, res, next) => {
         details: stripeError.toString(),
       });
     }
-    // Skip checkout session for Apple Pay — native app uses confirmPlatformPayPayment directly
-    if (paymentMethod === 'apple_pay') {
-      checkoutSession = null;
-    } else {
-      try {
-        const frontendUrl = process.env.FRONTEND_URL;
-
-        if (!frontendUrl || frontendUrl.trim() === '') {
-          console.warn('FRONTEND_URL not set. Skipping checkout session creation.');
-          checkoutSession = null;
-        } else {
-          const backendHost = req.get('host');
-          if (frontendUrl.includes(backendHost)) {
-            console.warn('FRONTEND_URL points to backend. Skipping checkout session creation.');
-            checkoutSession = null;
-          } else {
-            checkoutSession = await stripeInstance.checkout.sessions.create({
-              payment_method_types: ['card'],
-              line_items: [
-                {
-                  price_data: {
-                    currency: 'aed',
-                    product_data: {
-                      name: event.eventName || 'Event',
-                      description: `Booking for event: ${event.eventName || 'Event'}`,
-                      images: event.eventImages && event.eventImages.length > 0 ? [event.eventImages[0]] : [],
-                    },
-                    unit_amount: amountInCents,
-                  },
-                  quantity: 1,
-                },
-              ],
-              mode: 'payment',
-              success_url: `${frontendUrl}/payment/success?session_id={CHECKOUT_SESSION_ID}&booking_id=${booking.bookingId}`,
-              cancel_url: `${frontendUrl}/payment/cancel?booking_id=${booking.bookingId}`,
-              metadata: metadata,
-              customer_email: user?.email || null,
-              payment_intent_data: {
-                metadata: metadata,
-              },
-            });
-          }
-        }
-      } catch (checkoutError) {
-        console.error('Failed to create checkout session:', checkoutError);
-        checkoutSession = null;
-      }
-    }
+    // Skip checkout session creation as the native app uses Payment Intents directly
+    checkoutSession = null;
 
     // STEP 3: Create payment record
     const paymentData = {

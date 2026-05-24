@@ -292,13 +292,7 @@ const verifyPayment = async (req, res, next) => {
 
       if (paymentIntent.status === 'succeeded') {
         // Age restriction safety check before joining the event (players only).
-        // We also block earlier in createPaymentOrder/bookEvent, but this prevents edge cases.
-        const ensureAgeAllowedForEvent = async (eventDoc) => {
-          if (req.user?.userType !== 'player') return { allowed: true };
-          const user = await User.findById(payment.userId);
-          const ageCheck = validateAgeForEvent(user?.dob, eventDoc?.eventMinAge, eventDoc?.eventMaxAge);
-          return ageCheck;
-        };
+        // Age restriction safety check was here, removed because it's already checked during bookEvent.
 
         // Update payment status to success
         await Payment.updateStatus(
@@ -329,26 +323,7 @@ const verifyPayment = async (req, res, next) => {
               // Add user to event if not already joined
               try {
                 const eventDoc = await findEventById(existingBooking.eventId);
-                const ageCheck = await ensureAgeAllowedForEvent(eventDoc);
-                if (!ageCheck.allowed) {
-                  // Auto-refund since payment already succeeded but booking can't proceed
-                  try {
-                    const stripeClient = getStripeInstance();
-                    await stripeClient.refunds.create({ payment_intent: payment_intent_id });
-                    await Payment.updateStatus(payment.paymentId || payment._id, 'refunded');
-                    console.error('Auto-refunded payment due to age restriction after payment succeeded');
-                  } catch (refundErr) {
-                    console.error('Failed to auto-refund after age check failure:', refundErr);
-                  }
-                  return res.status(400).json({
-                    success: false,
-                    error: ageCheck.message,
-                    code: ageCheck.code,
-                    age: ageCheck.age,
-                    eventMinAge: ageCheck.minAge,
-                    eventMaxAge: ageCheck.maxAge,
-                  });
-                }
+                // Removed redundant age check and auto-refund
                 await EventJoin.join(
   payment.userId,
   existingBooking.eventId,
@@ -398,25 +373,7 @@ const verifyPayment = async (req, res, next) => {
   payment.occurrenceStart || null
 );
               if (!hasJoined && !existingBookingForPayment) {
-                const ageCheck = await ensureAgeAllowedForEvent(event);
-                if (!ageCheck.allowed) {
-                  // Auto-refund since payment already succeeded
-                  try {
-                    const stripeClient = getStripeInstance();
-                    await stripeClient.refunds.create({ payment_intent: payment_intent_id });
-                    await Payment.updateStatus(payment.paymentId || payment._id, 'refunded');
-                  } catch (refundErr) {
-                    console.error('Failed to auto-refund after age check failure:', refundErr);
-                  }
-                  return res.status(400).json({
-                    success: false,
-                    error: ageCheck.message,
-                    code: ageCheck.code,
-                    age: ageCheck.age,
-                    eventMinAge: ageCheck.minAge,
-                    eventMaxAge: ageCheck.maxAge,
-                  });
-                }
+                // Removed redundant age check and auto-refund
                 const bookingData = {
   userId: payment.userId,
   eventId: event._id,
@@ -509,22 +466,24 @@ const verifyPayment = async (req, res, next) => {
         // triggering the Apple Pay catch block to cancel confirmed bookings.
         if (booking) {
           try {
-            const user = await User.findById(payment.userId);
-            const eventForNotification = await findEventById(booking.eventId);
+            // Do not await the DB lookups so the response returns immediately
+            User.findById(payment.userId).then(user => {
+              findEventById(booking.eventId).then(eventForNotification => {
+                if (user && eventForNotification) {
+                  sendBookingConfirmedNotification({
+                    user,
+                    event: eventForNotification,
+                    booking,
+                  }).catch(err => console.error('Booking confirmation notification failed:', err));
 
-            if (user && eventForNotification) {
-              sendBookingConfirmedNotification({
-                user,
-                event: eventForNotification,
-                booking,
-              }).catch(err => console.error('Booking confirmation notification failed:', err));
-
-              sendHostBookingNotification({
-                player: user,
-                event: eventForNotification,
-                booking,
-              }).catch(err => console.error('Host booking notification failed:', err));
-            }
+                  sendHostBookingNotification({
+                    player: user,
+                    event: eventForNotification,
+                    booking,
+                  }).catch(err => console.error('Host booking notification failed:', err));
+                }
+              }).catch(err => console.error('Error finding event for notification:', err));
+            }).catch(err => console.error('Error finding user for notification:', err));
           } catch (notificationError) {
             console.error('Paid booking notification setup failed:', notificationError);
           }

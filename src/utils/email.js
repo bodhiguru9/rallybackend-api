@@ -15,6 +15,7 @@ const createTransporter = () => {
     host: process.env.SMTP_HOST || smtpHost,
     port: smtpPort,
     secure: false,
+    requireTLS: true,
     auth: {
       user: process.env.Email_ID || process.env.EMAIL_ID || emailId,
       pass: process.env.SERVICE_KEY || serviceKey,

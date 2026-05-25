@@ -49,9 +49,7 @@ const createOrGetOTPTemplate = async (client) => {
       
       // Look for existing OTP template
       const existingTemplate = contents.find(
-        content => content.friendlyName === 'OTP Verification Template' || 
-                   content.friendlyName?.toLowerCase().includes('otp') ||
-                   content.friendlyName === 'Rally OTP'
+        content => content.friendlyName === 'OTP Verification Template'
       );
       
       if (existingTemplate) {
@@ -65,8 +63,9 @@ const createOrGetOTPTemplate = async (client) => {
     const content = await client.content.v1.contents.create({
       friendlyName: 'OTP Verification Template',
       types: {
-        'twilio/text': {
-          body: `Your ${appName} verification code is: {{1}}\n\nThis code will expire in {{2}} minutes. Do not share this code with anyone.`
+        'whatsapp/authentication': {
+          add_security_recommendation: true,
+          code_expiration_minutes: 10,
         }
       },
       language: 'en'
@@ -227,15 +226,17 @@ const sendWhatsAppOTP = async (mobileNumber, otp, context = 'general') => {
         let contentVariables = { '1': otp }; // Default: OTP only
         
         if (templateInfo) {
-          const templateBody = templateInfo.types?.['whatsapp/authentication']?.body || 
-                              templateInfo.types?.['twilio/text']?.body || '';
-          
-          // Check if template has {{2}} placeholder for expiry
-          if (templateBody.includes('{{2}}')) {
-            contentVariables = {
-              '1': otp,      // OTP code as first variable {{1}}
-              '2': '10'      // Expiry time in minutes as second variable {{2}}
-            };
+          const isWhatsAppAuth = templateInfo.types?.['whatsapp/authentication'] !== undefined;
+          if (!isWhatsAppAuth) {
+            const templateBody = templateInfo.types?.['twilio/text']?.body || '';
+            
+            // Check if template has {{2}} placeholder for expiry
+            if (templateBody.includes('{{2}}')) {
+              contentVariables = {
+                '1': otp,      // OTP code as first variable {{1}}
+                '2': '10'      // Expiry time in minutes as second variable {{2}}
+              };
+            }
           }
         }
         

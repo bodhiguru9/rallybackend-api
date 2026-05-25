@@ -1,4 +1,3 @@
-const { getPreferredNotificationChannel } = require('../utils/notificationChannel');
 const { createTransporter } = require('../utils/email');
 const { sendWhatsAppMessage } = require('./twilio.service');
 

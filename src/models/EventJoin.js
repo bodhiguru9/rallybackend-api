@@ -167,6 +167,7 @@ return result.insertedId;
     const db = getDB();
     const joinsCollection = db.collection('eventJoins');
     const usersCollection = db.collection('users');
+    const paymentsCollection = db.collection('payments');
     const normalizedOccurrenceStart = this.normalizeOccurrence(occurrenceStart);
 
     let objectId;
@@ -194,8 +195,19 @@ return result.insertedId;
 
     const users = await usersCollection.find({ _id: { $in: userIds } }).toArray();
 
+    const paymentQuery = {
+      eventId: objectId,
+      userId: { $in: userIds },
+      status: 'success'
+    };
+    if (normalizedOccurrenceStart) {
+      paymentQuery.occurrenceStart = normalizedOccurrenceStart;
+    }
+    const payments = await paymentsCollection.find(paymentQuery).toArray();
+
     return users.map((user) => {
       const joinRecord = joins.find((j) => j.userId.toString() === user._id.toString());
+      const userPayment = payments.find((p) => p.userId.toString() === user._id.toString());
       return {
         userId: user.userId,
         userType: user.userType,
@@ -217,6 +229,7 @@ return result.insertedId;
         joinedAt: joinRecord?.joinedAt,
         // guestsCount: how many seats this participant occupies (1 = just themselves)
         guestsCount: (joinRecord && joinRecord.guestsCount >= 1) ? joinRecord.guestsCount : 1,
+        paidAmount: userPayment ? userPayment.finalAmount : null,
       };
     });
   }

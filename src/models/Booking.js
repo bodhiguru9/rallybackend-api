@@ -182,6 +182,37 @@ class Booking {
       .skip(skip)
       .toArray();
   }
+
+  /**
+   * Find the most recent active (booked or pending) booking for a user + event + occurrence.
+   * Used when an organiser removes a participant to locate their booking for cancellation.
+   */
+  static async findActiveByUserAndEvent(userId, eventId, occurrenceStart = null) {
+    const db = getDB();
+    const bookingsCollection = db.collection('bookings');
+
+    let userObjectId, eventObjectId;
+    try {
+      userObjectId = typeof userId === 'string' ? new ObjectId(userId) : userId;
+      eventObjectId = typeof eventId === 'string' ? new ObjectId(eventId) : eventId;
+    } catch {
+      return null;
+    }
+
+    const query = {
+      userId: userObjectId,
+      eventId: eventObjectId,
+      status: { $in: ['booked', 'pending'] },
+    };
+
+    // If an occurrence is provided, match it exactly; otherwise find any booking for the event
+    if (occurrenceStart) {
+      query.occurrenceStart = new Date(occurrenceStart).toISOString();
+    }
+
+    // Return the most recently created active booking
+    return await bookingsCollection.findOne(query, { sort: { createdAt: -1 } });
+  }
 }
 
 module.exports = Booking;

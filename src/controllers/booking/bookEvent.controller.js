@@ -246,84 +246,8 @@ const bookEvent = async (req, res, next) => {
             description: paymentIntent.description,
           };
 
-          let existingCheckoutSession = null;
-          try {
-            const frontendUrl = process.env.FRONTEND_URL;
-
-            if (frontendUrl && frontendUrl.trim() !== '') {
-              const backendHost = req.get('host');
-              if (!frontendUrl.includes(backendHost)) {
-                existingCheckoutSession = await stripeInstance.checkout.sessions.create({
-                  payment_method_types: ['card'],
-                  line_items: [
-                    {
-                      price_data: {
-                        currency: 'aed',
-                        product_data: {
-                          name: event.eventName || 'Event',
-                          description: `Booking for event: ${event.eventName || 'Event'}`,
-                          images: event.eventImages && event.eventImages.length > 0 ? [event.eventImages[0]] : [],
-                        },
-                        unit_amount: paymentIntent.amount,
-                      },
-                      quantity: 1,
-                    },
-                  ],
-                  mode: 'payment',
-                  success_url: `${frontendUrl}/payment/success?session_id={CHECKOUT_SESSION_ID}&booking_id=${existingPendingBooking.bookingId}`,
-                  cancel_url: `${frontendUrl}/payment/cancel?booking_id=${existingPendingBooking.bookingId}`,
-                  metadata: {
-                    bookingId: existingPendingBooking.bookingId,
-                    eventId: event.eventId,
-                    eventTitle: event.eventName || '',
-                    eventName: event.eventName || '',
-                    eventCategory: Array.isArray(event.eventSports) && event.eventSports.length > 0 ? event.eventSports[0] : '',
-                    eventType: event.eventType || '',
-                    userId: userId,
-                    customerName: user?.fullName || '',
-                    mobileNumber: user?.mobileNumber || '',
-                    playerId: user?.userId ? String(user.userId) : '',
-                    playerName: user?.fullName || '',
-                    organiserId: event.creatorId ? String(event.creatorId) : '',
-                    organiserName: organiserName,
-                    partySize: String(safeGuestsCount),
-                    ...(existingPendingBooking.promoCode && { promoCode: existingPendingBooking.promoCode }),
-                  },
-                  customer_email: user?.email || null,
-                  payment_intent_data: {
-                    metadata: {
-                      bookingId: existingPendingBooking.bookingId,
-                      eventId: event.eventId,
-                      eventTitle: event.eventName || '',
-                      eventName: event.eventName || '',
-                      eventCategory: Array.isArray(event.eventSports) && event.eventSports.length > 0 ? event.eventSports[0] : '',
-                      eventType: event.eventType || '',
-                      userId: userId,
-                      customerName: user?.fullName || '',
-                      mobileNumber: user?.mobileNumber || '',
-                      playerId: user?.userId ? String(user.userId) : '',
-                      playerName: user?.fullName || '',
-                      organiserId: event.creatorId ? String(event.creatorId) : '',
-                      organiserName: organiserName,
-                      partySize: String(safeGuestsCount),
-                      ...(existingPendingBooking.promoCode && { promoCode: existingPendingBooking.promoCode }),
-                    },
-                  },
-                });
-              }
-            }
-          } catch (checkoutError) {
-            console.error('Failed to create checkout session:', checkoutError);
-          }
-
-          const stripeCheckoutSession = existingCheckoutSession
-            ? {
-              id: existingCheckoutSession.id,
-              url: existingCheckoutSession.url,
-              successUrl: existingCheckoutSession.success_url,
-              cancelUrl: existingCheckoutSession.cancel_url,
-            }
-            : null;
+          // Skip checkout session creation in the reuse path as well
+          const stripeCheckoutSession = null;
 
           return res.status(200).json({
             success: true,

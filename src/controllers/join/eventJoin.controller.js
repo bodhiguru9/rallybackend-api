@@ -3,12 +3,15 @@ const EventJoin = require('../../models/EventJoin');
 const Waitlist = require('../../models/Waitlist');
 const User = require('../../models/User');
 const Notification = require('../../models/Notification');
+const Booking = require('../../models/Booking');
+const Payment = require('../../models/Payment');
 const PackagePurchase = require('../../models/PackagePurchase');
 const { findEventById, validateEventId } = require('../../utils/eventHelper');
 const { getPaginationParams, createPaginationResponse } = require('../../utils/pagination');
 const { validateAgeForEvent } = require('../../utils/ageRestriction');
 const {
   sendWaitlistSpotAvailableNotification,
+  sendPlayerCancelledBookingNotification,
 } = require('../../services/eventNotification.service');
 
 /**
@@ -540,6 +543,68 @@ if (!occurrenceStart) {
       }).catch(err => console.error('Error fetching waitlist for notification:', err.message));
     } catch (waitlistErr) {
       console.error('Waitlist processing error:', waitlistErr.message);
+    }
+
+    // ── Cancel the removed player's booking + issue refund if applicable ──────
+    try {
+      const removedBooking = await Booking.findActiveByUserAndEvent(
+        userToRemove._id,
+        event._id,
+        occurrenceStart
+      );
+
+      if (removedBooking) {
+        // Mark booking as cancelled
+        await Booking.updateStatus(removedBooking.bookingId || removedBooking._id, 'cancelled', {
+          cancelledAt: new Date(),
+        });
+
+        // Attempt Stripe refund if this was a paid booking
+        let refundMessage = null;
+        if (removedBooking.paymentIntentId || removedBooking.paymentId) {
+          try {
+            const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+            let payment = null;
+            if (removedBooking.paymentId) {
+              payment = await Payment.findById(removedBooking.paymentId);
+            }
+            if (!payment && removedBooking.paymentIntentId) {
+              payment = await Payment.findByStripePaymentIntentId(removedBooking.paymentIntentId);
+            }
+
+            if (payment && payment.status === 'success' && payment.stripePaymentIntentId) {
+              const refund = await stripe.refunds.create({
+                payment_intent: payment.stripePaymentIntentId,
+              });
+              await Payment.markRefunded(payment.paymentId || payment._id, {
+                refundId: refund.id,
+                refundStatus: refund.status || 'succeeded',
+                refundAmount: payment.finalAmount || payment.amount || 0,
+                refundedAt: new Date(),
+                refundReason: 'Removed by organiser',
+              });
+              refundMessage = 'A full refund has been initiated and should reflect in your account shortly.';
+              console.log(`💸 [REMOVE-PARTICIPANT] Refund issued for booking ${removedBooking.bookingId}`);
+            }
+          } catch (refundErr) {
+            console.error('[REMOVE-PARTICIPANT] Stripe refund failed:', refundErr.message);
+            // Don't block removal — refund failure is non-fatal
+          }
+        }
+
+        // Email/WhatsApp notification to removed player (fire-and-forget)
+        sendPlayerCancelledBookingNotification({
+          user: userToRemove,
+          event,
+          booking: removedBooking,
+          refundMessage,
+        }).catch(err => console.error('[REMOVE-PARTICIPANT] Player email/WhatsApp notification failed:', err.message));
+
+        console.log(`📋 [REMOVE-PARTICIPANT] Booking ${removedBooking.bookingId} cancelled for user ${userToRemove.userId}`);
+      }
+    } catch (bookingCancelErr) {
+      // Non-fatal: log but don't fail the removal response
+      console.error('[REMOVE-PARTICIPANT] Error cancelling booking:', bookingCancelErr.message);
     }
 
     // Get updated event

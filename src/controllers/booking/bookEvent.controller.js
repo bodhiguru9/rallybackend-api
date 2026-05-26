@@ -190,7 +190,8 @@ const bookEvent = async (req, res, next) => {
         b.eventId.toString() === event._id.toString() &&
         (b.occurrenceStart && occurrenceStart
           ? new Date(b.occurrenceStart).getTime() === new Date(occurrenceStart).getTime()
-          : (b.occurrenceStart || null) === (occurrenceStart || null))
+          : (b.occurrenceStart || null) === (occurrenceStart || null)) &&
+        (b.guestsCount || 1) === safeGuestsCount
     );
 
     if (existingPendingBooking && paymentMethod !== 'apple_pay') {

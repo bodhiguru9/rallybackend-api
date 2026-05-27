@@ -123,5 +123,67 @@ router.put('/player/:notificationId/read', protect, playerNotificationController
  */
 router.put('/player/read-all', protect, playerNotificationController.markAllAsRead);
 
+/**
+ * SMTP DIAGNOSTIC TEST ROUTE
+ * POST /api/notifications/test-email
+ * Public (for debugging setup)
+ */
+router.post('/test-email', async (req, res) => {
+  const { to } = req.body;
+  if (!to) {
+    return res.status(400).json({ success: false, error: 'Recipient "to" email is required in request body.' });
+  }
+
+  const { createTransporter } = require('../utils/email');
+  const emailId = process.env.Email_ID || process.env.EMAIL_ID || process.env.EMAIL_USER;
+  const serviceKey = process.env.SERVICE_KEY || process.env.EMAIL_PASSWORD;
+  const smtpHost = process.env.SMTP_HOST || 'smtp.gmail.com';
+  const smtpPort = parseInt(process.env.SMTP_PORT || '587', 10);
+  const smtpSecure = process.env.SMTP_SECURE === 'true' || process.env.SMTP_SECURE === '1' || false;
+
+  const debugConfig = {
+    resolvedEmailId: emailId,
+    hasServiceKey: !!serviceKey,
+    serviceKeyLength: serviceKey ? serviceKey.length : 0,
+    serviceKeyHasSpaces: serviceKey ? serviceKey.includes(' ') : false,
+    smtpHost,
+    smtpPort,
+    smtpSecure,
+    requireTLS: !smtpSecure,
+  };
+
+  try {
+    const transporter = createTransporter();
+    
+    // Verify connection configuration
+    await transporter.verify();
+    
+    const mailOptions = {
+      from: `"${process.env.APP_NAME || 'Rally Test'}" <${emailId}>`,
+      to,
+      subject: 'Rally SMTP Connection Diagnostic Test',
+      text: 'Congratulations! If you receive this email, your SMTP configuration is correct and connection is fully working.',
+      html: '<p>Congratulations! If you receive this email, your SMTP configuration is correct and connection is fully working.</p>',
+    };
+
+    const info = await transporter.sendMail(mailOptions);
+    return res.status(200).json({
+      success: true,
+      message: 'SMTP Verification and Test Email Sent successfully!',
+      config: debugConfig,
+      info,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: 'SMTP Verification/Send Failed',
+      config: debugConfig,
+      errorName: error.name,
+      errorMessage: error.message,
+      errorStack: error.stack,
+    });
+  }
+});
+
 module.exports = router;
 

@@ -10,12 +10,14 @@ const createTransporter = () => {
   const smtpHost = process.env.SMTP_HOST || 'smtp.gmail.com';
   const smtpPort = parseInt(process.env.SMTP_PORT || '587', 10);
 
-  // Gmail SMTP configuration
+  const smtpSecure = process.env.SMTP_SECURE === 'true' || process.env.SMTP_SECURE === '1' || false;
+
+  // SMTP configuration
   return nodemailer.createTransport({
     host: process.env.SMTP_HOST || smtpHost,
     port: smtpPort,
-    secure: false,
-    requireTLS: true,
+    secure: smtpSecure,
+    requireTLS: !smtpSecure, // Only require STARTTLS if not using SSL directly
     auth: {
       user: process.env.Email_ID || process.env.EMAIL_ID || emailId,
       pass: process.env.SERVICE_KEY || serviceKey,

@@ -225,11 +225,13 @@ const getEventDetails = async (req, res, next) => {
     const maxGuest = event.eventMaxGuest !== undefined ? event.eventMaxGuest : (event.gameSpots || 0);
 
     // Get actual booked participants count (more accurate than eventTotalAttendNumber)
+    // NOTE: Joins are always stored with occurrenceStart = event.eventDateTime (never null),
+    // so we must pass eventDateTime here to match stored records.
     let participantsCount = 0;
     let participants = [];
     if (!isPrivate || (req.user && req.user.id === event.creatorId.toString())) {
-      participantsCount = await EventJoin.getParticipantCount(mongoEventId);
-      participants = await EventJoin.getEventParticipants(mongoEventId, null, 50, 0); // Get first 50 participants (increased from 10)
+      participantsCount = await EventJoin.getParticipantCount(mongoEventId, event.eventDateTime || null);
+      participants = await EventJoin.getEventParticipants(mongoEventId, event.eventDateTime || null, 50, 0); // Get first 50 participants (increased from 10)
     }
 
     // Get waitlist count (for private or approval-required events when user is creator)

@@ -102,7 +102,7 @@ const getOrganiserAttendees = async (req, res, next) => {
         {
           $group: {
             _id: null,
-            totalSpent: { $sum: { $ifNull: ['$finalAmount', 0] } },
+            totalSpent: { $sum: { $ifNull: ['$finalAmount', { $ifNull: ['$amount', 0] }] } },
           },
         },
         { $project: { _id: 0, totalSpent: 1 } },
@@ -148,7 +148,7 @@ const getOrganiserAttendees = async (req, res, next) => {
         {
           $group: {
             _id: '$userId',
-            totalSpent: { $sum: { $ifNull: ['$finalAmount', 0] } },
+            totalSpent: { $sum: { $ifNull: ['$finalAmount', { $ifNull: ['$amount', 0] }] } },
             lastBookedAt: { $max: '$bookedAt' },
           },
         },

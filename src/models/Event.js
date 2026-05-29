@@ -290,13 +290,20 @@ class Event {
     const event = await eventsCollection.findOne({ _id: objectId });
     if (!event) return false;
 
-    // Support both old and new field names for backward compatibility during migration
-    const currentCount = event.eventTotalAttendNumber !== undefined ? event.eventTotalAttendNumber : (event.gameAttendNumbers || 0);
-    const newCount = Math.max(0, currentCount + increment);
-
+    // Atomic update to prevent race conditions when multiple users join/leave simultaneously
+    // Uses aggregation pipeline to handle field fallbacks and ensure count never drops below 0
     await eventsCollection.updateOne(
       { _id: objectId },
-      { $set: { eventTotalAttendNumber: newCount } }
+      [{ 
+        $set: { 
+          eventTotalAttendNumber: { 
+            $max: [
+              0, 
+              { $add: [{ $ifNull: ['$eventTotalAttendNumber', { $ifNull: ['$gameAttendNumbers', 0] }] }, increment] }
+            ] 
+          } 
+        } 
+      }]
     );
 
     // Update organiser's total attendees

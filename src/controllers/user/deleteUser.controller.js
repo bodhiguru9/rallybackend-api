@@ -133,7 +133,9 @@ const deleteUser = async (req, res, next) => {
       // Update attendee counts for events
       for (const join of eventJoins) {
         try {
-          await Event.updateAttendeeCount(join.eventId.toString(), -1);
+          // Decrement by the user's actual party size (default 1)
+          const partySize = (join.guestsCount && join.guestsCount >= 1) ? join.guestsCount : 1;
+          await Event.updateAttendeeCount(join.eventId.toString(), -partySize);
         } catch (error) {
           console.error('Error updating attendee count:', error);
         }

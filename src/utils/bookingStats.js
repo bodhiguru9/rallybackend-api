@@ -45,7 +45,7 @@ const getBookingStatsByUsers = async (userIds, options = {}) => {
         $group: {
           _id: '$userId',
           bookedCount: { $sum: 1 },
-          totalSpent: { $sum: { $ifNull: ['$finalAmount', 0] } },
+          totalSpent: { $sum: { $ifNull: ['$finalAmount', { $ifNull: ['$amount', 0] }] } },
           lastBookedAt: { $max: '$bookedAt' },
         },
       },

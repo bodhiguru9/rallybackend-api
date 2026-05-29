@@ -192,7 +192,7 @@ const getOrganiserAnalytics = async (req, res, next) => {
       status: 'booked',
     }).toArray();
 
-    const totalBookedRevenue = bookings.reduce((sum, booking) => sum + (booking.finalAmount || 0), 0);
+    const totalBookedRevenue = bookings.reduce((sum, booking) => sum + (booking.finalAmount || booking.amount || 0), 0);
     const bookingsByEvent = new Map();
     bookings.forEach((booking) => {
       const eventId = booking.eventId.toString();
@@ -201,11 +201,11 @@ const getOrganiserAnalytics = async (req, res, next) => {
       }
       const entry = bookingsByEvent.get(eventId);
       entry.count += 1;
-      entry.revenue += booking.finalAmount || 0;
+      entry.revenue += booking.finalAmount || booking.amount || 0;
     });
 
     // Calculate total revenue
-    const totalRevenue = payments.reduce((sum, payment) => sum + (payment.finalAmount || 0), 0);
+    const totalRevenue = payments.reduce((sum, payment) => sum + (payment.finalAmount || payment.amount || 0), 0);
 
     // Categorize events by status
     const upcoming = [];
@@ -224,7 +224,7 @@ const getOrganiserAnalytics = async (req, res, next) => {
       const eventPayments = payments.filter(
         p => p.eventId.toString() === event._id.toString()
       );
-      eventData.revenue = eventPayments.reduce((sum, p) => sum + (p.finalAmount || 0), 0);
+      eventData.revenue = eventPayments.reduce((sum, p) => sum + (p.finalAmount || p.amount || 0), 0);
       eventData.totalTransactions = eventPayments.length;
       const bookingStats = bookingsByEvent.get(event._id.toString()) || { count: 0, revenue: 0 };
       eventData.bookedCount = bookingStats.count;
@@ -338,7 +338,7 @@ const getOrganiserAnalytics = async (req, res, next) => {
         const eventPayments = payments.filter(
           p => p.eventId.toString() === event._id.toString()
         );
-        const eventRevenue = eventPayments.reduce((sum, p) => sum + (p.finalAmount || 0), 0);
+        const eventRevenue = eventPayments.reduce((sum, p) => sum + (p.finalAmount || p.amount || 0), 0);
         revenueBySport[category] += eventRevenue;
       }
     }

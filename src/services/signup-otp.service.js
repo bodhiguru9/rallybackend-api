@@ -260,7 +260,7 @@ const sendForgotPasswordOTP = async (emailOrMobile) => {
       // Keep entry for verification even if email sending is disabled
     } else {
       signupOTPStore.delete(storeKey);
-      throw new Error(`Failed to send OTP. Please try again.`);
+      throw new Error(`Failed to send OTP. Please try again. Error: ${error.message}`);
     }
   }
   
@@ -326,7 +326,7 @@ const sendSignupOTP = async (emailOrMobile, userType) => {
         // Keep entry for verification even if email sending is disabled
       } else {
         signupOTPStore.delete(storeKey);
-        throw new Error(`Failed to send OTP. Please try again.`);
+        throw new Error(`Failed to send OTP. Please try again. Error: ${error.message}`);
       }
     }
   }

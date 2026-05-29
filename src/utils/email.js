@@ -19,8 +19,8 @@ const createTransporter = () => {
     secure: smtpSecure,
     requireTLS: !smtpSecure, // Only require STARTTLS if not using SSL directly
     auth: {
-      user: process.env.Email_ID || process.env.EMAIL_ID || emailId,
-      pass: process.env.SERVICE_KEY || serviceKey,
+      user: emailId,
+      pass: serviceKey,
     },
   });
 };
@@ -91,7 +91,7 @@ const sendPasswordResetEmail = async (email, resetUrl) => {
     console.log(`✅ Password reset email sent to ${email}`);
   } catch (error) {
     console.error('Error sending email:', error);
-    throw new Error('Failed to send password reset email');
+    throw new Error(`Failed to send password reset email: ${error.message}`);
   }
 };
 
@@ -203,7 +203,7 @@ const sendPasswordResetOTP = async (email, otp) => {
     console.error('❌ Error:', error.message);
     console.error('⏰ Timestamp:', new Date().toISOString());
     console.error('==============================================================\n');
-    throw new Error('Failed to send password reset OTP email');
+    throw new Error(`Failed to send password reset OTP email: ${error.message}`);
   }
 };
 
@@ -314,7 +314,7 @@ const sendSignupOTP = async (email, otp) => {
     console.error('🔢 OTP Code:', otp);
     console.error('❌ Error:', error.message);
     console.error('==============================================\n');
-    throw new Error('Failed to send signup OTP email');
+    throw new Error(`Failed to send signup OTP email: ${error.message}`);
   }
 };
 

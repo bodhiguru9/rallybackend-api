@@ -155,8 +155,11 @@ const signup = async (userData) => {
     createData.dob = userData.dob ? new Date(userData.dob) : null;
     createData.gender = userData.gender ? String(userData.gender).toLowerCase() : null;
     createData.sport1 = userData.sport1.trim();
-    createData.sport2 = userData.sport2.trim();
-    createData.sports = [userData.sport1.trim(), userData.sport2.trim()];
+    createData.sport2 = userData.sport2 && userData.sport2.trim() ? userData.sport2.trim() : null;
+    createData.sports = [createData.sport1];
+    if (createData.sport2) {
+      createData.sports.push(createData.sport2);
+    }
   } else if (userData.userType === 'organiser') {
     createData.fullName = userData.fullName.trim();
     createData.yourBest = userData.yourBest.toLowerCase();
@@ -165,8 +168,11 @@ const signup = async (userData) => {
     createData.dob = userData.dob ? new Date(userData.dob) : null;
     createData.gender = userData.gender ? String(userData.gender).toLowerCase() : null;
     createData.sport1 = userData.sport1.trim();
-    createData.sport2 = userData.sport2.trim();
-    createData.sports = [userData.sport1.trim(), userData.sport2.trim()];
+    createData.sport2 = userData.sport2 && userData.sport2.trim() ? userData.sport2.trim() : null;
+    createData.sports = [createData.sport1];
+    if (createData.sport2) {
+      createData.sports.push(createData.sport2);
+    }
     createData.bio = userData.bio ? userData.bio.trim() : null;
     createData.instagramLink = userData.instagramLink ? userData.instagramLink.trim() : null;
     // Profile visibility: 'public' or 'private', default to 'private' if not provided

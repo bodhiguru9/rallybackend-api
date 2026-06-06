@@ -285,6 +285,58 @@ const verifyPayment = async (req, res, next) => {
       });
     }
 
+    // If payment is already successful (e.g., processed by webhook), return early
+    // to avoid duplicate database updates and duplicate notifications.
+    if (payment.status === 'success') {
+      let booking = null;
+      let eventForResponse = null;
+      
+      try {
+        const existingBooking = await Booking.findByPaymentIntentId(payment_intent_id);
+        if (existingBooking) {
+          booking = existingBooking;
+          eventForResponse = await findEventById(booking.eventId);
+        }
+      } catch (err) {
+        console.error('Error fetching booking for already successful payment:', err);
+      }
+
+      const responseData = {
+        payment: {
+          paymentId: payment.paymentId,
+          status: payment.status,
+          amount: payment.amount,
+          discountAmount: payment.discountAmount,
+          finalAmount: payment.finalAmount,
+          promoCode: payment.promoCode,
+          stripePaymentIntentId: payment.stripePaymentIntentId,
+          stripePaymentId: payment.stripePaymentId,
+          createdAt: payment.createdAt,
+        },
+      };
+
+      if (booking) {
+        responseData.booking = {
+          bookingId: booking.bookingId,
+          eventId: eventForResponse ? eventForResponse.eventId : null,
+          eventTitle: eventForResponse ? (eventForResponse.eventName || null) : null,
+          eventName: eventForResponse ? (eventForResponse.eventName || null) : null,
+          eventCategory: eventForResponse && Array.isArray(eventForResponse.eventSports) && eventForResponse.eventSports.length > 0 ? eventForResponse.eventSports[0] : null,
+          eventType: eventForResponse ? (eventForResponse.eventType || null) : null,
+          occurrenceStart: booking.occurrenceStart || null,
+          occurrenceEnd: booking.occurrenceEnd || null,
+          status: booking.status,
+          bookedAt: booking.bookedAt,
+        };
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: 'Payment verified and event booked successfully',
+        data: responseData,
+      });
+    }
+
     // Verify with Stripe API
     try {
       const stripeInstance = getStripeInstance();
@@ -307,6 +359,9 @@ const verifyPayment = async (req, res, next) => {
           await PromoCode.incrementUsage(payment.promoCodeId);
         }
 
+        // Flag to prevent sending notifications if booking was already confirmed
+        let isNewlyBooked = false;
+
         // Update booking status from pending to booked if payment is successful
         let booking = null;
         try {
@@ -316,6 +371,7 @@ const verifyPayment = async (req, res, next) => {
           if (existingBooking) {
             // Update booking status to booked
             if (existingBooking.status === 'pending') {
+              isNewlyBooked = true;
               await Booking.updateStatus(existingBooking.bookingId, 'booked', {
                 bookedAt: new Date(),
               });
@@ -368,11 +424,12 @@ const verifyPayment = async (req, res, next) => {
               // Guard: check if a booking already exists for this payment before creating
               const existingBookingForPayment = await Booking.findByPaymentId(payment.paymentId);
               const hasJoined = await EventJoin.hasJoined(
-  payment.userId,
-  event._id,
-  payment.occurrenceStart || null
-);
+                payment.userId,
+                event._id,
+                payment.occurrenceStart || null
+              );
               if (!hasJoined && !existingBookingForPayment) {
+                isNewlyBooked = true;
                 // Removed redundant age check and auto-refund
                 const bookingData = {
   userId: payment.userId,
@@ -464,7 +521,7 @@ const verifyPayment = async (req, res, next) => {
         // Fire-and-forget notifications — do NOT await.
         // Blocking on Twilio calls here caused the frontend to timeout,
         // triggering the Apple Pay catch block to cancel confirmed bookings.
-        if (booking) {
+        if (booking && isNewlyBooked) {
           try {
             // Do not await the DB lookups so the response returns immediately
             User.findById(payment.userId).then(user => {

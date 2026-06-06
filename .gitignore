@@ -82,6 +82,13 @@ dist
 
 # Stores VSCode versions used for testing VSCode extensions
 .vscode-test
+organisers.csv
+players.csv
+all_users.csv
+exportUsersCsv.js
+findEnv.js
+testApi.js
+testMongo.js
 
 # IDE
 .vscode/

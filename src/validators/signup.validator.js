@@ -136,9 +136,9 @@ const validatePlayerSignup = (data) => {
     errors.push('Sport 1 is required');
   }
 
-  // Sport 2 validation
-  if (!data.sport2 || data.sport2.trim().length < 2) {
-    errors.push('Sport 2 is required');
+  // Sport 2 validation (optional)
+  if (data.sport2 && data.sport2.trim().length < 2) {
+    errors.push('Sport 2 must be at least 2 characters long if provided');
   }
 
   return {
@@ -196,9 +196,9 @@ const validateOrganiserSignup = (data) => {
     errors.push('Sport 1 is required');
   }
 
-  // Sport 2 validation
-  if (!data.sport2 || data.sport2.trim().length < 2) {
-    errors.push('Sport 2 is required');
+  // Sport 2 validation (optional)
+  if (data.sport2 && data.sport2.trim().length < 2) {
+    errors.push('Sport 2 must be at least 2 characters long if provided');
   }
 
   // Bio validation (optional but if provided, should have minimum length)

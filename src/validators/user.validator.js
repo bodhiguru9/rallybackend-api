@@ -73,8 +73,8 @@ const validateUserUpdate = (data, userType) => {
     }
 
     // Sport 2 validation (optional)
-    if (data.sport2 !== undefined) {
-      if (!data.sport2 || data.sport2.trim().length < 2) {
+    if (data.sport2 !== undefined && data.sport2 !== null && data.sport2 !== '') {
+      if (data.sport2.trim().length < 2) {
         errors.push('Sport 2 must be at least 2 characters long if provided');
       }
     }
@@ -118,8 +118,8 @@ const validateUserUpdate = (data, userType) => {
     }
 
     // Sport 2 validation (optional)
-    if (data.sport2 !== undefined) {
-      if (!data.sport2 || data.sport2.trim().length < 2) {
+    if (data.sport2 !== undefined && data.sport2 !== null && data.sport2 !== '') {
+      if (data.sport2.trim().length < 2) {
         errors.push('Sport 2 must be at least 2 characters long if provided');
       }
     }

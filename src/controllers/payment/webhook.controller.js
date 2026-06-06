@@ -106,6 +106,8 @@ const handlePaymentIntentSucceeded = async (paymentIntent) => {
     await PromoCode.incrementUsage(payment.promoCodeId);
   }
 
+  let isNewlyBooked = false;
+
   // Update booking status
   let booking = null;
   try {
@@ -114,6 +116,7 @@ const handlePaymentIntentSucceeded = async (paymentIntent) => {
     
     if (existingBooking) {
       if (existingBooking.status === 'pending') {
+        isNewlyBooked = true;
         await Booking.updateStatus(existingBooking.bookingId, 'booked', {
           bookedAt: new Date(),
         });
@@ -164,6 +167,7 @@ const handlePaymentIntentSucceeded = async (paymentIntent) => {
           payment.occurrenceStart || null
         );
         if (!hasJoined && !existingBookingForPayment) {
+          isNewlyBooked = true;
           const bookingData = {
             userId: payment.userId,
             eventId: event._id,
@@ -213,7 +217,7 @@ const handlePaymentIntentSucceeded = async (paymentIntent) => {
   }
 
   // Notifications
-  if (booking) {
+  if (booking && isNewlyBooked) {
     try {
       // Do NOT await these so we can return quickly, but we are in a webhook worker anyway.
       // We will look up the user and event without blocking the main thread.

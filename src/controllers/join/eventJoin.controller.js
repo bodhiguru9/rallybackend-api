@@ -512,7 +512,7 @@ if (!occurrenceStart) {
         userToRemove._id,
         'event_participant_removed',
         'Removed from Event',
-        `${organiserName} removed you from "${eventName}"`,
+        `${organiserName} removed you from "${eventName}". If you paid for this event, you will be refunded shortly.`,
         {
           organiserId: organiserId,
           organiserName: organiserName,
@@ -547,10 +547,11 @@ if (!occurrenceStart) {
 
     // ── Cancel the removed player's booking + issue refund if applicable ──────
     try {
+      const queryOccurrenceStart = isRecurring ? occurrenceStart : null;
       const removedBooking = await Booking.findActiveByUserAndEvent(
         userToRemove._id,
         event._id,
-        occurrenceStart
+        queryOccurrenceStart
       );
 
       if (removedBooking) {

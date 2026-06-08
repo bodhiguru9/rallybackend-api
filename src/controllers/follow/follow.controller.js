@@ -88,9 +88,6 @@ const followOrganiser = async (req, res, next) => {
     const followerCount = await Follow.getFollowerCount(organiserMongoId);
     const followingCount = await Follow.getFollowingCount(followerId);
 
-    // Update organiser's followersCount in database
-    await Follow.updateFollowerCount(organiserMongoId, 0); // Sync count
-
     res.status(200).json({
       success: true,
       message: 'Successfully followed organiser',
@@ -161,9 +158,6 @@ const unfollowOrganiser = async (req, res, next) => {
     // Get updated counts
     const followerCount = await Follow.getFollowerCount(organiserMongoId);
     const followingCount = await Follow.getFollowingCount(followerId);
-
-    // Sync organiser followersCount in database
-    await Follow.updateFollowerCount(organiserMongoId, 0);
 
     res.status(200).json({
       success: true,

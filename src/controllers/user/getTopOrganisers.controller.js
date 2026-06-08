@@ -1,5 +1,6 @@
 const { getDB } = require('../../config/database');
 const { getPaginationParams, createPaginationResponse } = require('../../utils/pagination');
+const { ObjectId } = require('mongodb');
 
 /**
  * @desc    Get top organisers ranked by followers, attendees, and events created
@@ -29,9 +30,42 @@ const getTopOrganisers = async (req, res, next) => {
     const eventsCollection = db.collection('events');
     const eventJoinsCollection = db.collection('eventJoins');
 
-    // Step 1: Get all organisers
+    let query = { userType: 'organiser' };
+
+    if (req.query.isSubscribed === 'true') {
+      if (!req.user) {
+        return res.status(200).json({
+          success: true,
+          message: 'Top organisers retrieved successfully',
+          data: {
+            organisers: [],
+            pagination: createPaginationResponse(0, page, perPage),
+          },
+        });
+      }
+
+      const userFollows = await followsCollection
+        .find({ followerId: req.user._id })
+        .toArray();
+      const followedOrganiserIds = userFollows.map((f) => f.followingId);
+
+      if (followedOrganiserIds.length === 0) {
+        return res.status(200).json({
+          success: true,
+          message: 'Top organisers retrieved successfully',
+          data: {
+            organisers: [],
+            pagination: createPaginationResponse(0, page, perPage),
+          },
+        });
+      }
+
+      query._id = { $in: followedOrganiserIds };
+    }
+
+    // Step 1: Get all organisers matching query
     const organisers = await usersCollection
-      .find({ userType: 'organiser' })
+      .find(query)
       .toArray();
 
     if (organisers.length === 0) {

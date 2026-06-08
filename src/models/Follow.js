@@ -169,14 +169,15 @@ class Follow {
 
     const objectId = typeof organiserId === 'string' ? new ObjectId(organiserId) : organiserId;
 
-    // Use upsert to ensure field exists, or set to 0 if it doesn't exist
-    const currentUser = await usersCollection.findOne({ _id: objectId });
-    const currentCount = currentUser?.followersCount || 0;
-    const newCount = Math.max(0, currentCount + (increment || 0));
-
+    // Atomic increment
     await usersCollection.updateOne(
       { _id: objectId },
-      { $set: { followersCount: newCount } }
+      { $inc: { followersCount: increment } }
+    );
+    // Floor guard: prevent count from going below 0
+    await usersCollection.updateOne(
+      { _id: objectId, followersCount: { $lt: 0 } },
+      { $set: { followersCount: 0 } }
     );
   }
 
@@ -189,14 +190,15 @@ class Follow {
 
     const objectId = typeof userId === 'string' ? new ObjectId(userId) : userId;
 
-    // Use upsert to ensure field exists, or set to 0 if it doesn't exist
-    const currentUser = await usersCollection.findOne({ _id: objectId });
-    const currentCount = currentUser?.followingCount || 0;
-    const newCount = Math.max(0, currentCount + (increment || 0));
-
+    // Atomic increment
     await usersCollection.updateOne(
       { _id: objectId },
-      { $set: { followingCount: newCount } }
+      { $inc: { followingCount: increment } }
+    );
+    // Floor guard: prevent count from going below 0
+    await usersCollection.updateOne(
+      { _id: objectId, followingCount: { $lt: 0 } },
+      { $set: { followingCount: 0 } }
     );
   }
 
@@ -222,6 +224,18 @@ class Follow {
     const objectId = typeof userId === 'string' ? new ObjectId(userId) : userId;
 
     return await followsCollection.countDocuments({ followerId: objectId });
+  }
+
+  /**
+   * Create database indexes for follow operations
+   */
+  static async createIndexes() {
+    const db = getDB();
+    const col = db.collection('follows');
+    // Unique compound index: covers isFollowing(), create(), remove() lookups
+    await col.createIndex({ followerId: 1, followingId: 1 }, { unique: true });
+    // Single-field index: covers getFollowerCount() / getFollowers() scans on followingId
+    await col.createIndex({ followingId: 1 });
   }
 }
 

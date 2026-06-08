@@ -218,7 +218,7 @@ router.get('/organisers/all', optionalAuth, getAllOrganisersController.getAllOrg
  * 
  * NOTE: This route must come before /:id to prevent conflicts
  */
-router.get('/organisers/top', getTopOrganisersController.getTopOrganisers);
+router.get('/organisers/top', optionalAuth, getTopOrganisersController.getTopOrganisers);
 
 /**
  * GET ALL COMMUNITIES LIST

@@ -195,6 +195,55 @@ const deleteEvent = async (req, res, next) => {
       console.error('Error cleaning up event blocks:', error);
     }
 
+    // ✅ REFUND LOGIC: Issue Stripe refunds for all paid players before deleting records
+    try {
+      const db = getDB();
+      const bookingsCollection = db.collection('bookings');
+      const activeBookings = await bookingsCollection.find({ 
+        eventId: eventObjectId, 
+        status: { $in: ['booked', 'pending'] } 
+      }).toArray();
+
+      if (activeBookings.length > 0) {
+        const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+        const Payment = require('../../models/Payment');
+
+        for (const booking of activeBookings) {
+          if (booking.paymentIntentId || booking.paymentId) {
+            try {
+              let payment = null;
+              if (booking.paymentId) {
+                payment = await Payment.findById(booking.paymentId);
+              }
+              if (!payment && booking.paymentIntentId) {
+                payment = await Payment.findByStripePaymentIntentId(booking.paymentIntentId);
+              }
+
+              if (payment && payment.status === 'success' && payment.stripePaymentIntentId) {
+                const refund = await stripe.refunds.create({
+                  payment_intent: payment.stripePaymentIntentId,
+                });
+                
+                await Payment.markRefunded(payment.paymentId || payment._id, {
+                  refundId: refund.id,
+                  refundStatus: refund.status || 'succeeded',
+                  refundAmount: payment.finalAmount || payment.amount || 0,
+                  refundedAt: new Date(),
+                  refundReason: 'Event deleted by organiser',
+                });
+                
+                console.log(`💸 [DELETE-EVENT] Refund issued for booking ${booking.bookingId}`);
+              }
+            } catch (refundErr) {
+              console.error(`[DELETE-EVENT] Stripe refund failed for booking ${booking.bookingId}:`, refundErr.message);
+            }
+          }
+        }
+      }
+    } catch (refundBatchErr) {
+      console.error('[DELETE-EVENT] Error processing bulk refunds:', refundBatchErr.message);
+    }
+
     // Remove bookings/payments tied to this event
     try {
       const bookingsCollection = db.collection('bookings');

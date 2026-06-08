@@ -2,7 +2,10 @@ const Event = require('../../models/Event');
 const EventJoin = require('../../models/EventJoin');
 const User = require('../../models/User');
 const Notification = require('../../models/Notification');
+const Booking = require('../../models/Booking');
+const Payment = require('../../models/Payment');
 const { findEventById, validateEventId } = require('../../utils/eventHelper');
+const { sendPlayerCancelledBookingNotification } = require('../../services/eventNotification.service');
 
 /**
  * @desc    Remove a player from a private event (Organiser only)
@@ -121,7 +124,7 @@ const removePlayer = async (req, res, next) => {
         player._id.toString(),
         'player_removed_from_event',
         'Removed from Event',
-        `You have been removed from "${eventName}" by ${organiser?.fullName || 'the organizer'}`,
+        `You have been removed from "${eventName}" by ${organiser?.fullName || 'the organizer'}. If you paid for this event, you will be refunded shortly.`,
         {
           organiserId: organiserId,
           eventId: event._id.toString(),
@@ -130,6 +133,71 @@ const removePlayer = async (req, res, next) => {
       );
     } catch (error) {
       console.error('Error creating notification:', error);
+    }
+
+    // ── Cancel the removed player's booking + issue refund if applicable ──────
+    try {
+      const occurrenceStart = req.body.occurrenceStart || req.query.occurrenceStart;
+      const isRecurring = event.isRecurring;
+      const queryOccurrenceStart = isRecurring ? occurrenceStart : null;
+      const removedBooking = await Booking.findActiveByUserAndEvent(
+        player._id,
+        event._id,
+        queryOccurrenceStart
+      );
+
+      if (removedBooking) {
+        // Mark booking as cancelled
+        await Booking.updateStatus(removedBooking.bookingId || removedBooking._id, 'cancelled', {
+          cancelledAt: new Date(),
+        });
+
+        // Attempt Stripe refund if this was a paid booking
+        let refundMessage = null;
+        if (removedBooking.paymentIntentId || removedBooking.paymentId) {
+          try {
+            const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+            let payment = null;
+            if (removedBooking.paymentId) {
+              payment = await Payment.findById(removedBooking.paymentId);
+            }
+            if (!payment && removedBooking.paymentIntentId) {
+              payment = await Payment.findByStripePaymentIntentId(removedBooking.paymentIntentId);
+            }
+
+            if (payment && payment.status === 'success' && payment.stripePaymentIntentId) {
+              const refund = await stripe.refunds.create({
+                payment_intent: payment.stripePaymentIntentId,
+              });
+              await Payment.markRefunded(payment.paymentId || payment._id, {
+                refundId: refund.id,
+                refundStatus: refund.status || 'succeeded',
+                refundAmount: payment.finalAmount || payment.amount || 0,
+                refundedAt: new Date(),
+                refundReason: 'Removed by organiser',
+              });
+              refundMessage = 'A full refund has been initiated and should reflect in your account shortly.';
+              console.log(`💸 [REMOVE-PLAYER] Refund issued for booking ${removedBooking.bookingId}`);
+            }
+          } catch (refundErr) {
+            console.error('[REMOVE-PLAYER] Stripe refund failed:', refundErr.message);
+            // Don't block removal — refund failure is non-fatal
+          }
+        }
+
+        // Email/WhatsApp notification to removed player (fire-and-forget)
+        sendPlayerCancelledBookingNotification({
+          user: player,
+          event,
+          booking: removedBooking,
+          refundMessage,
+        }).catch(err => console.error('[REMOVE-PLAYER] Player email/WhatsApp notification failed:', err.message));
+
+        console.log(`📋 [REMOVE-PLAYER] Booking ${removedBooking.bookingId} cancelled for user ${player.userId}`);
+      }
+    } catch (bookingCancelErr) {
+      // Non-fatal: log but don't fail the removal response
+      console.error('[REMOVE-PLAYER] Error cancelling booking:', bookingCancelErr.message);
     }
 
     // Get updated participant count

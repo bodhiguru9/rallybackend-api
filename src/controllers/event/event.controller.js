@@ -256,16 +256,47 @@ const getEventDetails = async (req, res, next) => {
     if (req.user) {
       if (!isPrivate && !approvalRequired) {
         const hasJoined = await EventJoin.hasJoined(req.user.id, mongoEventId);
-        const inWaitlist = await Waitlist.isInWaitlist(req.user.id, mongoEventId);
+        
+        // Fetch waitlist item to check status
+        const db = getDB();
+        const waitlistCollection = db.collection('waitlist');
+        const userObjectId = new ObjectId(req.user.id);
+        const waitlistItem = await waitlistCollection.findOne({
+          userId: userObjectId,
+          eventId: mongoEventId,
+        });
+
+        const inWaitlist = waitlistItem && waitlistItem.status === 'pending';
+        const isAcceptedWaitlist = waitlistItem && waitlistItem.status === 'accepted';
+
+        // Check payment status
+        let paymentDone = false;
+        try {
+          const bookingsCollection = db.collection('bookings');
+          const booked = await bookingsCollection.findOne({ userId: userObjectId, eventId: mongoEventId, status: 'booked' });
+          paymentDone = !!booked;
+        } catch (e) {}
+
+        const joinedAfterPayment = hasJoined && (event.gameJoinPrice ? paymentDone : true);
+        const isAcceptedButUnpaid = isAcceptedWaitlist && !joinedAfterPayment;
+
         userJoinStatus = {
-          hasJoined,
+          hasJoined: joinedAfterPayment,
           inWaitlist,
-          canJoin: !hasJoined && !spotsFull && !inWaitlist,
-          action: hasJoined ? 'joined' : inWaitlist ? 'requested' : spotsFull ? 'join-waitlist' : 'join',
+          canJoin: !joinedAfterPayment && !spotsFull && !inWaitlist && !isAcceptedWaitlist,
+          action: joinedAfterPayment
+            ? 'joined'
+            : isAcceptedButUnpaid
+              ? 'payment-pending'
+              : inWaitlist
+                ? 'requested'
+                : spotsFull
+                  ? 'join-waitlist'
+                  : 'join',
         };
-        isJoined = hasJoined;
-        isPending = inWaitlist;
-        isLeave = !hasJoined && !inWaitlist;
+        isJoined = joinedAfterPayment;
+        isPending = !joinedAfterPayment && (inWaitlist || isAcceptedButUnpaid);
+        isLeave = !joinedAfterPayment && !inWaitlist && !isAcceptedWaitlist;
       } else {
         // Private or approval-required event
         const inWaitlist = await Waitlist.isInWaitlist(req.user.id, mongoEventId);

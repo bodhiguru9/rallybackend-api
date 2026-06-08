@@ -391,19 +391,21 @@ const verifyPayment = async (req, res, next) => {
   }
 );
 
-                // Private events: remove request record after successful join
+                // Cleanup requests and waitlist records after successful join
                 try {
                   const isPrivate = eventDoc?.IsPrivateEvent !== undefined ? eventDoc.IsPrivateEvent : (eventDoc?.visibility === 'private');
                   if (isPrivate) {
                     await EventJoinRequest.deleteActiveByUserAndEvent(payment.userId, existingBooking.eventId);
-                    const db = getDB();
-                    const waitlistCollection = db.collection('waitlist');
-                    await waitlistCollection.deleteMany({
-                      userId: typeof payment.userId === 'string' ? new ObjectId(payment.userId) : payment.userId,
-                      eventId: typeof existingBooking.eventId === 'string' ? new ObjectId(existingBooking.eventId) : existingBooking.eventId,
-                      status: { $in: ['pending', 'accepted'] },
-                    });
                   }
+                  
+                  // Cleanup waitlist for BOTH public and private events
+                  const db = getDB();
+                  const waitlistCollection = db.collection('waitlist');
+                  await waitlistCollection.deleteMany({
+                    userId: typeof payment.userId === 'string' ? new ObjectId(payment.userId) : payment.userId,
+                    eventId: typeof existingBooking.eventId === 'string' ? new ObjectId(existingBooking.eventId) : existingBooking.eventId,
+                    status: { $in: ['pending', 'accepted'] },
+                  });
                 } catch (cleanupErr) {
                   console.error('Error cleaning up private request after payment:', cleanupErr);
                 }
@@ -459,20 +461,22 @@ const verifyPayment = async (req, res, next) => {
   }
 );
 
-                // Private events: remove request record after successful join
+                // Cleanup requests and waitlist records after successful join
                 try {
                   const isPrivate = event?.IsPrivateEvent !== undefined ? event.IsPrivateEvent : (event?.visibility === 'private');
                   if (isPrivate) {
                     await EventJoinRequest.deleteActiveByUserAndEvent(payment.userId, event._id);
-                    const db = getDB();
-                    const waitlistCollection = db.collection('waitlist');
-                   await waitlistCollection.deleteMany({
-  userId: typeof payment.userId === 'string' ? new ObjectId(payment.userId) : payment.userId,
-  eventId: event._id,
-  occurrenceStart: payment.occurrenceStart || null,
-  status: { $in: ['pending', 'accepted'] },
-});
                   }
+                  
+                  // Cleanup waitlist for BOTH public and private events
+                  const db = getDB();
+                  const waitlistCollection = db.collection('waitlist');
+                  await waitlistCollection.deleteMany({
+                    userId: typeof payment.userId === 'string' ? new ObjectId(payment.userId) : payment.userId,
+                    eventId: event._id,
+                    occurrenceStart: payment.occurrenceStart || null,
+                    status: { $in: ['pending', 'accepted'] },
+                  });
                 } catch (cleanupErr) {
                   console.error('Error cleaning up private request after payment:', cleanupErr);
                 }

@@ -219,26 +219,39 @@ class Waitlist {
       throw new Error('Event is full');
     }
 
-    // Add user to event
-    try {
-      // Use MongoDB ObjectId from found event
-      await EventJoin.join(waitlistItem.userId, event._id);
-    } catch (error) {
-      if (error.message.includes('Already joined')) {
-        // User already in event, just remove from waitlist
-      } else {
-        throw error;
-      }
-    }
+    // Check if event has a price
+    const eventPrice = event.eventPricePerGuest || event.gameJoinPrice || 0;
+    const paymentRequired = eventPrice > 0;
 
-    // Remove waitlist entry after accepting (delete instead of updating status)
-    await waitlistCollection.deleteOne({ _id: waitlistItem._id });
+    if (paymentRequired) {
+      // Payment required: update status to accepted instead of joining immediately
+      await waitlistCollection.updateOne(
+        { _id: waitlistItem._id },
+        { $set: { status: 'accepted', updatedAt: new Date() } }
+      );
+    } else {
+      // Free event: Add user to event
+      try {
+        // Use MongoDB ObjectId from found event
+        await EventJoin.join(waitlistItem.userId, event._id);
+      } catch (error) {
+        if (error.message.includes('Already joined')) {
+          // User already in event, just remove from waitlist
+        } else {
+          throw error;
+        }
+      }
+
+      // Remove waitlist entry after accepting (delete instead of updating status)
+      await waitlistCollection.deleteOne({ _id: waitlistItem._id });
+    }
 
     return {
       success: true,
       waitlistId: waitlistItem.waitlistId || waitlistItem._id.toString(),
       userId: waitlistItem.userId,
       requestId: waitlistItem.requestId,
+      paymentRequired: paymentRequired,
     };
   }
 

@@ -131,17 +131,23 @@ const acceptFromWaitlist = async (req, res, next) => {
     try {
       const eventName = updatedEvent.eventName || updatedEvent.gameTitle || 'Event';
       const organiser = await User.findById(organiserId);
+      
+      const notificationMessage = acceptResult.paymentRequired
+        ? `Your waitlist request for "${eventName}" has been accepted by ${organiser?.fullName || 'the organizer'}. Please complete the payment to join.`
+        : `Your waitlist request for "${eventName}" has been accepted by ${organiser?.fullName || 'the organizer'}. You have been added to the event.`;
+
       await Notification.create(
         acceptResult.userId,
         'event_request_accepted',
         'Waitlist Request Accepted',
-        `Your waitlist request for "${eventName}" has been accepted by ${organiser?.fullName || 'the organizer'}. You have been added to the event.`,
+        notificationMessage,
         {
           organiserId: organiserId,
           eventId: updatedEvent._id.toString(),
           eventName: eventName,
           waitlistId: acceptResult.waitlistId,
           requestId: acceptResult.requestId,
+          paymentStatus: acceptResult.paymentRequired ? 'pending' : undefined,
         }
       );
     } catch (error) {
@@ -156,12 +162,17 @@ const acceptFromWaitlist = async (req, res, next) => {
     const totalSpots = updatedEvent.gameSpots || 0;
     const availableSpots = Math.max(0, totalSpots - joinedCount);
 
+    const responseMessage = acceptResult.paymentRequired
+      ? 'Waitlist request accepted. Payment is required for the user to join.'
+      : 'User accepted from waitlist and added to event. Waitlist entry removed.';
+
     res.status(200).json({
       success: true,
-      message: 'User accepted from waitlist and added to event. Waitlist entry removed.',
+      message: responseMessage,
       data: {
         waitlistId: acceptResult.waitlistId,
         requestId: acceptResult.requestId,
+        paymentRequired: acceptResult.paymentRequired,
         user: acceptedUser ? {
           userId: acceptedUser.userId,
           userType: acceptedUser.userType,
@@ -176,9 +187,9 @@ const acceptFromWaitlist = async (req, res, next) => {
         },
         counts: {
           totalSpots: totalSpots,
-          joinedSpots: joinedCount, // Updated joined count (increased)
-          availableSpots: availableSpots, // Updated available spots (decreased)
-          pendingWaitlist: pendingWaitlistCount, // Updated pending waitlist (decreased - removed)
+          joinedSpots: joinedCount, // Updated joined count
+          availableSpots: availableSpots, // Updated available spots
+          pendingWaitlist: pendingWaitlistCount, // Updated pending waitlist
         },
       },
     });

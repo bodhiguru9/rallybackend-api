@@ -232,22 +232,29 @@ const getAllCommunities = async (req, res, next) => {
     const eventsCollection = db.collection('events');
     const eventJoinsCollection = db.collection('eventJoins');
 
-    // Get all organisers with communityName
-    const organisers = await usersCollection
-      .find({
-        userType: 'organiser',
-        communityName: { $exists: true, $ne: null, $ne: '' },
-      })
-      .sort({ createdAt: -1 }) // Newest first
-      .toArray();
+    const communityQuery = {
+      userType: 'organiser',
+      communityName: { $exists: true, $ne: null, $ne: '' },
+    };
 
-    // Get all event IDs for these organisers
+    // Get total count and paginated organisers in parallel — DB does the slicing
+    const [totalCount, organisers] = await Promise.all([
+      usersCollection.countDocuments(communityQuery),
+      usersCollection
+        .find(communityQuery)
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(perPage)
+        .toArray(),
+    ]);
+
+    // Get all event IDs for only these paginated organisers
     const organiserIds = organisers.map((o) => o._id);
     const allEvents = await eventsCollection
       .find({ creatorId: { $in: organiserIds } })
       .toArray();
 
-    // Group events by creator/organiser
+    // Group events by creator
     const eventsByCreator = new Map();
     const eventIdsByCreator = new Map();
     allEvents.forEach((event) => {
@@ -263,7 +270,7 @@ const getAllCommunities = async (req, res, next) => {
     // Get total attendees for all events in bulk
     const allEventIds = allEvents.map((e) => e._id);
     const attendeesByEventMap = new Map();
-    
+
     if (allEventIds.length > 0) {
       const attendeesByEvent = await eventJoinsCollection
         .aggregate([
@@ -277,16 +284,14 @@ const getAllCommunities = async (req, res, next) => {
       });
     }
 
-    // Format organisers with required fields and calculate metrics
+    // Format paginated organisers with required fields and metrics
     const communitiesList = organisers.map((organiser) => {
       const organiserIdStr = organiser._id.toString();
       const events = eventsByCreator.get(organiserIdStr) || [];
       const eventIds = eventIdsByCreator.get(organiserIdStr) || [];
 
-      // Calculate total events
       const totalEvents = events.length;
 
-      // Calculate total attendees across all events
       let totalAttendees = 0;
       eventIds.forEach((eventId) => {
         totalAttendees += attendeesByEventMap.get(eventId.toString()) || 0;
@@ -295,7 +300,6 @@ const getAllCommunities = async (req, res, next) => {
       // Extract all sports from events (eventSports field)
       const sportsSet = new Set();
       events.forEach((event) => {
-        // Support both eventSports array and gameCategory string
         if (event.eventSports && Array.isArray(event.eventSports)) {
           event.eventSports.forEach((sport) => {
             if (sport && typeof sport === 'string' && sport.trim()) {
@@ -303,13 +307,11 @@ const getAllCommunities = async (req, res, next) => {
             }
           });
         }
-        // Also check gameCategory for backward compatibility
         if (event.gameCategory && typeof event.gameCategory === 'string' && event.gameCategory.trim()) {
           sportsSet.add(event.gameCategory.trim());
         }
       });
 
-      // Convert Set to sorted array
       const sports = Array.from(sportsSet).sort();
 
       return {
@@ -324,16 +326,13 @@ const getAllCommunities = async (req, res, next) => {
       };
     });
 
-    // Apply pagination
-    const totalCount = communitiesList.length;
-    const paginatedCommunities = communitiesList.slice(skip, skip + perPage);
     const pagination = createPaginationResponse(totalCount, page, perPage);
 
     return res.status(200).json({
       success: true,
       message: 'All communities retrieved successfully',
       data: {
-        communities: paginatedCommunities,
+        communities: communitiesList,
         pagination,
       },
     });

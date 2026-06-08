@@ -56,10 +56,12 @@ const getAllEvents = async (req, res, next) => {
       joinedEventIds = joinedEvents.map((join) => join.eventId);
     }
 
-// Get all events with filters (exclude drafts for the public feed)
+// Fetch enough events to cover the page after filtering out joined ones.
+// Cap the over-fetch at perPage + joinedEventIds.length (with a minimum of perPage).
+const fetchLimit = perPage + Math.min(joinedEventIds.length, 100);
 let events = await Event.findWithFilters(
   filters,
-  perPage * 3,
+  fetchLimit,
   skip,
   true // excludeDrafts: true
 );
@@ -72,6 +74,21 @@ let events = await Event.findWithFilters(
     
     // Apply pagination after filtering
     events = events.slice(0, perPage);
+
+    // Pre-fetch participant counts for all events in a SINGLE bulk aggregation
+    // instead of N individual aggregation pipelines inside the map below.
+    const { getDB: _getDB2 } = require('../../config/database');
+    const _joinsCollection = _getDB2().collection('eventJoins');
+    const _eventIds = events.map((e) => e._id);
+    const _bulkCountAgg = _eventIds.length > 0
+      ? await _joinsCollection.aggregate([
+          { $match: { eventId: { $in: _eventIds } } },
+          { $group: { _id: '$eventId', total: { $sum: { $ifNull: ['$guestsCount', 1] } } } },
+        ]).toArray()
+      : [];
+    const _participantCountMap = new Map(
+      _bulkCountAgg.map((r) => [r._id.toString(), r.total])
+    );
 
     // Get creator details and additional info for each event
     const eventsWithFullData = await Promise.all(
@@ -97,13 +114,12 @@ let events = await Event.findWithFilters(
         const approvalRequired = event.eventApprovalRequired === true || event.eventApprovalReq === true;
         const maxGuest = event.eventMaxGuest !== undefined ? event.eventMaxGuest : (event.gameSpots || 0);
 
-        // Get actual booked participants count (more accurate than eventTotalAttendNumber)
-        // NOTE: Joins are always stored with occurrenceStart = event.eventDateTime (never null),
-        // so we must pass eventDateTime here to match stored records.
+        // Get actual booked participants count — use the pre-fetched bulk Map
+        // (one aggregation for all events above) instead of N individual aggregations.
         let participantsCount = 0;
         let participants = [];
         if (!isPrivate || (req.user && req.user.id === event.creatorId.toString())) {
-          participantsCount = await EventJoin.getParticipantCount(event._id, event.eventDateTime || null);
+          participantsCount = _participantCountMap.get(event._id.toString()) || 0;
           participants = await EventJoin.getEventParticipants(event._id, event.eventDateTime || null, 10, 0); // Get first 10 participants
         }
 

@@ -27,11 +27,11 @@ const getTopOrganisers = async (req, res, next) => {
     const db = getDB();
     const usersCollection = db.collection('users');
     const followsCollection = db.collection('follows');
-    const eventsCollection = db.collection('events');
-    const eventJoinsCollection = db.collection('eventJoins');
 
+    // Base query: all organisers
     let query = { userType: 'organiser' };
 
+    // ?isSubscribed=true → filter to only organisers the current user follows
     if (req.query.isSubscribed === 'true' && req.user) {
       const userFollows = await followsCollection
         .find({ followerId: req.user._id })
@@ -40,139 +40,47 @@ const getTopOrganisers = async (req, res, next) => {
 
       if (followedOrganiserIds.length > 0) {
         query._id = { $in: followedOrganiserIds };
-      }
-    }
-
-    // Step 1: Get all organisers matching query
-    const organisers = await usersCollection
-      .find(query)
-      .toArray();
-
-    if (organisers.length === 0) {
-      return res.status(200).json({
-        success: true,
-        message: 'Top organisers retrieved successfully',
-        data: {
-          organisers: [],
-          pagination: createPaginationResponse(0, page, perPage),
-        },
-      });
-    }
-
-    // Step 2: Get all follower counts in one query
-    const organiserIds = organisers.map((o) => o._id);
-    const followerCountsMap = new Map();
-    const followerCounts = await followsCollection
-      .aggregate([
-        { $match: { followingId: { $in: organiserIds } } },
-        { $group: { _id: '$followingId', count: { $sum: 1 } } },
-      ])
-      .toArray();
-    followerCounts.forEach((fc) => {
-      followerCountsMap.set(fc._id.toString(), fc.count);
-    });
-
-    // Step 3: Get all events created by organisers in one query
-    const eventsByCreator = await eventsCollection
-      .find({ creatorId: { $in: organiserIds } })
-      .toArray();
-
-    // Group events by creator
-    const eventsByCreatorMap = new Map();
-    const eventIdsByCreator = new Map();
-    eventsByCreator.forEach((event) => {
-      const creatorId = event.creatorId.toString();
-      if (!eventsByCreatorMap.has(creatorId)) {
-        eventsByCreatorMap.set(creatorId, []);
-        eventIdsByCreator.set(creatorId, []);
-      }
-      eventsByCreatorMap.get(creatorId).push(event);
-      eventIdsByCreator.get(creatorId).push(event._id);
-    });
-
-    // Step 4: Get total attendees for all events in batches
-    const allEventIds = eventsByCreator.map((e) => e._id);
-    const attendeesCountMap = new Map();
-    
-    if (allEventIds.length > 0) {
-      // Aggregate attendees by eventId
-      const attendeesByEvent = await eventJoinsCollection
-        .aggregate([
-          { $match: { eventId: { $in: allEventIds } } },
-          { $group: { _id: '$eventId', count: { $sum: 1 } } },
-        ])
-        .toArray();
-
-      const attendeesByEventMap = new Map();
-      attendeesByEvent.forEach((ae) => {
-        attendeesByEventMap.set(ae._id.toString(), ae.count);
-      });
-
-      // Calculate total attendees per organiser
-      organiserIds.forEach((organiserId) => {
-        const creatorIdStr = organiserId.toString();
-        const eventIds = eventIdsByCreator.get(creatorIdStr) || [];
-        let totalAttendees = 0;
-        eventIds.forEach((eventId) => {
-          totalAttendees += attendeesByEventMap.get(eventId.toString()) || 0;
+      } else {
+        // User follows nobody — return empty list immediately
+        return res.status(200).json({
+          success: true,
+          message: 'Top organisers retrieved successfully',
+          data: {
+            organisers: [],
+            pagination: createPaginationResponse(0, page, perPage),
+          },
         });
-        attendeesCountMap.set(creatorIdStr, totalAttendees);
-      });
+      }
     }
 
-    // Step 5: Calculate metrics for each organiser
-    const organisersWithMetrics = organisers.map((organiser) => {
-      const organiserIdStr = organiser._id.toString();
-      
-      const followerCount = followerCountsMap.get(organiserIdStr) || 0;
-      const eventsCreatedCount = eventsByCreatorMap.get(organiserIdStr)?.length || 0;
-      const totalAttendees = attendeesCountMap.get(organiserIdStr) || 0;
-      const isVerified = !!(organiser.isEmailVerified || organiser.isMobileVerified);
+    // Single DB query — sort on pre-calculated fields stored on each User document.
+    // These fields are kept in sync atomically by Follow.updateFollowerCount,
+    // Event.recalculateTotalAttendees, and Event.updateEventsCount on every write.
+    const [paginatedOrganisers, totalCount] = await Promise.all([
+      usersCollection
+        .find(query)
+        .sort({ followersCount: -1, totalAttendees: -1, eventsCreated: -1 })
+        .skip(skip)
+        .limit(perPage)
+        .toArray(),
+      usersCollection.countDocuments(query),
+    ]);
 
-      return {
-        organiser,
-        metrics: {
-          followerCount,
-          totalAttendees,
-          eventsCreatedCount,
-        },
-        isVerified,
-      };
-    });
-
-    // Step 6: Sort by followers (desc), then attendees (desc), then events (desc)
-    organisersWithMetrics.sort((a, b) => {
-      // Primary: followers
-      if (b.metrics.followerCount !== a.metrics.followerCount) {
-        return b.metrics.followerCount - a.metrics.followerCount;
-      }
-      // Secondary: total attendees
-      if (b.metrics.totalAttendees !== a.metrics.totalAttendees) {
-        return b.metrics.totalAttendees - a.metrics.totalAttendees;
-      }
-      // Tertiary: events created
-      return b.metrics.eventsCreatedCount - a.metrics.eventsCreatedCount;
-    });
-
-    // Step 7: Format response with only required fields
-    const formattedOrganisers = organisersWithMetrics.map((item) => ({
-      userId: item.organiser.userId,
-      profilePic: item.organiser.profilePic || null,
-      fullName: item.organiser.fullName || null,
-      communityName: item.organiser.communityName || null,
-      isVerified: item.isVerified,
+    const formattedOrganisers = paginatedOrganisers.map((organiser) => ({
+      userId: organiser.userId,
+      profilePic: organiser.profilePic || null,
+      fullName: organiser.fullName || null,
+      communityName: organiser.communityName || null,
+      isVerified: !!(organiser.isEmailVerified || organiser.isMobileVerified),
     }));
 
-    // Step 8: Apply pagination
-    const totalCount = formattedOrganisers.length;
-    const paginatedOrganisers = formattedOrganisers.slice(skip, skip + perPage);
     const pagination = createPaginationResponse(totalCount, page, perPage);
 
     return res.status(200).json({
       success: true,
       message: 'Top organisers retrieved successfully',
       data: {
-        organisers: paginatedOrganisers,
+        organisers: formattedOrganisers,
         pagination,
       },
     });

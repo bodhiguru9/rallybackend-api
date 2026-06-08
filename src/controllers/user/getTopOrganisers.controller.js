@@ -32,35 +32,15 @@ const getTopOrganisers = async (req, res, next) => {
 
     let query = { userType: 'organiser' };
 
-    if (req.query.isSubscribed === 'true') {
-      if (!req.user) {
-        return res.status(200).json({
-          success: true,
-          message: 'Top organisers retrieved successfully',
-          data: {
-            organisers: [],
-            pagination: createPaginationResponse(0, page, perPage),
-          },
-        });
-      }
-
+    if (req.query.isSubscribed === 'true' && req.user) {
       const userFollows = await followsCollection
         .find({ followerId: req.user._id })
         .toArray();
       const followedOrganiserIds = userFollows.map((f) => f.followingId);
 
-      if (followedOrganiserIds.length === 0) {
-        return res.status(200).json({
-          success: true,
-          message: 'Top organisers retrieved successfully',
-          data: {
-            organisers: [],
-            pagination: createPaginationResponse(0, page, perPage),
-          },
-        });
+      if (followedOrganiserIds.length > 0) {
+        query._id = { $in: followedOrganiserIds };
       }
-
-      query._id = { $in: followedOrganiserIds };
     }
 
     // Step 1: Get all organisers matching query

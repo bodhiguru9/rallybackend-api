@@ -342,7 +342,9 @@ class Event {
    * Update total attendees for organiser
    */
   static async updateTotalAttendees(organiserId, increment) {
-    await this.recalculateTotalAttendees(organiserId);
+    this.recalculateTotalAttendees(organiserId).catch(err => {
+      console.error('Error in fire-and-forget recalculateTotalAttendees:', err);
+    });
   }
 
   /**

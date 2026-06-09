@@ -144,12 +144,18 @@ return result.insertedId;
 
   const normalizedOccurrenceStart = this.normalizeOccurrence(occurrenceStart);
 
-  const event = await findEventById(eventId);
-  if (!event) {
-    return false;
+  let eventObjectId;
+  if (typeof eventId === 'object' && eventId instanceof ObjectId) {
+    eventObjectId = eventId;
+  } else if (ObjectId.isValid(eventId)) {
+    eventObjectId = new ObjectId(eventId);
+  } else {
+    const event = await findEventById(eventId);
+    if (!event) {
+      return false;
+    }
+    eventObjectId = event._id;
   }
-
-  const eventObjectId = event._id;
 
   const join = await joinsCollection.findOne({
     userId: typeof userId === 'string' ? new ObjectId(userId) : userId,
@@ -333,6 +339,18 @@ static async getAllParticipantUserIds(eventObjectId, occurrenceStart = null) {
 });
   return userIds || [];
 }
+
+  /**
+   * Create database indexes for event joins operations
+   */
+  static async createIndexes() {
+    const db = getDB();
+    const col = db.collection('eventJoins');
+    // Compound index for capacity checks
+    await col.createIndex({ eventId: 1, occurrenceStart: 1 });
+    // Unique compound index for join state
+    await col.createIndex({ userId: 1, eventId: 1, occurrenceStart: 1 }, { unique: true });
+  }
 }
 
 module.exports = EventJoin;

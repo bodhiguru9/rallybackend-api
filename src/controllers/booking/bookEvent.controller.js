@@ -181,18 +181,9 @@ const bookEvent = async (req, res, next) => {
       });
     }
 
-    // Check if there's already a pending booking for this user and event
     // Skip reuse for Apple Pay — old PaymentIntents may have setup_future_usage
     // which is incompatible with Apple Pay tokens.
-    const existingBookings = await Booking.findByUser(userId, 'pending', 100, 0);
-    const existingPendingBooking = existingBookings.find(
-      (b) =>
-        b.eventId.toString() === event._id.toString() &&
-        (b.occurrenceStart && occurrenceStart
-          ? new Date(b.occurrenceStart).getTime() === new Date(occurrenceStart).getTime()
-          : (b.occurrenceStart || null) === (occurrenceStart || null)) &&
-        (b.guestsCount || 1) === safeGuestsCount
-    );
+    const existingPendingBooking = await Booking.findExactPendingBooking(userId, event._id, occurrenceStart, safeGuestsCount);
 
     if (existingPendingBooking && paymentMethod !== 'apple_pay') {
       const payment = existingPendingBooking.paymentIntentId
@@ -403,20 +394,20 @@ const bookEvent = async (req, res, next) => {
       };
 
       try {
-        await sendBookingConfirmedNotification({
+        sendBookingConfirmedNotification({
           user,
           event,
           booking: updatedBooking,
-        });
+        }).catch(err => console.error('Booking confirmation notification failed:', err));
 
         // Notify organiser
-        await sendHostBookingNotification({
+        sendHostBookingNotification({
           player: user,
           event,
           booking: updatedBooking,
-        });
+        }).catch(err => console.error('Host booking notification failed:', err));
       } catch (notificationError) {
-        console.error('Booking confirmation notification failed:', notificationError);
+        console.error('Notification dispatch failed:', notificationError);
       }
 
       return res.status(201).json({

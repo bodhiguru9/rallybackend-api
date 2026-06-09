@@ -118,6 +118,27 @@ class Booking {
     });
   }
 
+  static async findExactPendingBooking(userId, eventId, occurrenceStart, guestsCount) {
+    const db = getDB();
+    const bookingsCollection = db.collection('bookings');
+    
+    let userObjectId, eventObjectId;
+    try {
+      userObjectId = typeof userId === 'string' ? new ObjectId(userId) : userId;
+      eventObjectId = typeof eventId === 'string' ? new ObjectId(eventId) : eventId;
+    } catch (error) {
+      return null;
+    }
+
+    return await bookingsCollection.findOne({
+      userId: userObjectId,
+      eventId: eventObjectId,
+      status: 'pending',
+      occurrenceStart: occurrenceStart ? new Date(occurrenceStart).toISOString() : null,
+      guestsCount: guestsCount || 1,
+    });
+  }
+
   static async updateStatus(bookingId, status, additionalData = {}) {
     const db = getDB();
     const bookingsCollection = db.collection('bookings');
@@ -212,6 +233,16 @@ class Booking {
 
     // Return the most recently created active booking
     return await bookingsCollection.findOne(query, { sort: { createdAt: -1 } });
+  }
+
+  /**
+   * Create database indexes for bookings operations
+   */
+  static async createIndexes() {
+    const db = getDB();
+    const col = db.collection('bookings');
+    // Index for pending state lookup
+    await col.createIndex({ userId: 1, eventId: 1, status: 1 });
   }
 }
 

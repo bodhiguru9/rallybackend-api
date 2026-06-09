@@ -126,14 +126,17 @@ const getOrganiserAttendees = async (req, res, next) => {
       ])
       .toArray();
 
-    const attendeeIds = attendeeAgg.map((attendee) => attendee._id);
+    const validAttendeeAgg = attendeeAgg.filter(a => a && a._id);
+    const attendeeIds = validAttendeeAgg.map((attendee) => attendee._id);
     const attendees = attendeeIds.length > 0
       ? await usersCollection.find({ _id: { $in: attendeeIds } }).toArray()
       : [];
 
     const attendeeMap = new Map();
     attendees.forEach((attendee) => {
-      attendeeMap.set(attendee._id.toString(), attendee);
+      if (attendee && attendee._id) {
+        attendeeMap.set(attendee._id.toString(), attendee);
+      }
     });
 
     const attendeeSpendAgg = await bookingsCollection
@@ -156,13 +159,15 @@ const getOrganiserAttendees = async (req, res, next) => {
       .toArray();
     const spendMap = new Map();
     attendeeSpendAgg.forEach((entry) => {
-      spendMap.set(entry._id.toString(), {
-        totalSpent: entry.totalSpent || 0,
-        lastBookedAt: entry.lastBookedAt || null,
-      });
+      if (entry && entry._id) {
+        spendMap.set(entry._id.toString(), {
+          totalSpent: entry.totalSpent || 0,
+          lastBookedAt: entry.lastBookedAt || null,
+        });
+      }
     });
 
-    const attendeesList = attendeeAgg.map((attendee) => {
+    const attendeesList = validAttendeeAgg.map((attendee) => {
       const user = attendeeMap.get(attendee._id.toString());
       const spend = spendMap.get(attendee._id.toString()) || { totalSpent: 0, lastBookedAt: null };
       return {

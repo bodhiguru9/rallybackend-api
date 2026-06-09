@@ -195,7 +195,8 @@ const getOrganiserAnalytics = async (req, res, next) => {
     const totalBookedRevenue = bookings.reduce((sum, booking) => sum + (booking.finalAmount || booking.amount || 0), 0);
     const bookingsByEvent = new Map();
     bookings.forEach((booking) => {
-      const eventId = booking.eventId.toString();
+      const eventId = booking.eventId ? booking.eventId.toString() : null;
+      if (!eventId) return;
       if (!bookingsByEvent.has(eventId)) {
         bookingsByEvent.set(eventId, { count: 0, revenue: 0 });
       }
@@ -222,7 +223,7 @@ const getOrganiserAnalytics = async (req, res, next) => {
 
       // Calculate revenue for this event
       const eventPayments = payments.filter(
-        p => p.eventId.toString() === event._id.toString()
+        p => p.eventId && p.eventId.toString() === event._id.toString()
       );
       eventData.revenue = eventPayments.reduce((sum, p) => sum + (p.finalAmount || p.amount || 0), 0);
       eventData.totalTransactions = eventPayments.length;
@@ -268,7 +269,7 @@ const getOrganiserAnalytics = async (req, res, next) => {
 
     // Get transaction details
     const transactions = payments.map(payment => {
-      const event = allEvents.find(e => e._id.toString() === payment.eventId.toString());
+      const event = payment.eventId ? allEvents.find(e => e._id.toString() === payment.eventId.toString()) : null;
       return {
         paymentId: payment.paymentId,
         eventId: event ? event.eventId : null,
@@ -336,7 +337,7 @@ const getOrganiserAnalytics = async (req, res, next) => {
           revenueBySport[category] = 0;
         }
         const eventPayments = payments.filter(
-          p => p.eventId.toString() === event._id.toString()
+          p => p.eventId && p.eventId.toString() === event._id.toString()
         );
         const eventRevenue = eventPayments.reduce((sum, p) => sum + (p.finalAmount || p.amount || 0), 0);
         revenueBySport[category] += eventRevenue;

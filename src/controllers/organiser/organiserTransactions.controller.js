@@ -117,8 +117,8 @@ const getOrganiserTransactions = async (req, res, next) => {
     });
 
     const transactions = payments.map((payment) => {
-      const eventData = eventMap.get(payment.eventId.toString()) || { eventId: null, title: null };
-      const payerData = payerMap.get(payment.userId.toString()) || null;
+      const eventData = payment.eventId ? (eventMap.get(payment.eventId.toString()) || { eventId: null, title: null }) : { eventId: null, title: null };
+      const payerData = payment.userId ? (payerMap.get(payment.userId.toString()) || null) : null;
       return {
         paymentId: payment.paymentId,
         eventId: eventData.eventId,

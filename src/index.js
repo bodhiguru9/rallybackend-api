@@ -7,6 +7,7 @@ require('dotenv').config();
 // Import database connection
 const { connectDB, closeDB } = require('./config/database');
 const Follow = require('./models/Follow');
+const Event = require('./models/Event');
 
 // Import routes
 const apiRoutes = require('./routes');
@@ -82,6 +83,7 @@ if (process.env.VERCEL || require.main !== module) {
     try {
       await connectDB();
       await Follow.createIndexes();
+      await Event.createIndexes();
       dbConnected = true;
       console.log('✅ Database pre-connected for serverless');
     } catch (error) {
@@ -104,6 +106,7 @@ if (process.env.VERCEL || require.main !== module) {
           dbConnectionPromise = connectDB()
             .then(async () => {
               await Follow.createIndexes();
+              await Event.createIndexes();
               dbConnected = true;
               dbConnectionError = null;
               console.log('✅ Database connected in serverless middleware');
@@ -565,6 +568,7 @@ async function startServer() {
     // Connect to MongoDB
     await connectDB();
     await Follow.createIndexes();
+    await Event.createIndexes();
 
     // Start Express server
     app.listen(PORT, "0.0.0.0", () => {

@@ -332,9 +332,14 @@ const getFollowing = async (req, res, next) => {
       authenticatedUserFollowingIds = new Set(followingIds.map(id => id.toString()));
     }
 
+    // Apply pagination early
+    const totalCount = followingOrganisers.length;
+    const paginatedOrganisersRaw = followingOrganisers.slice(skip, skip + perPage);
+    const pagination = createPaginationResponse(totalCount, page, perPage);
+
     // Format organisers with complete data (same as getAllOrganisers)
-    const organisersList = await Promise.all(
-      followingOrganisers.map(async (organiser) => {
+    const paginatedOrganisers = await Promise.all(
+      paginatedOrganisersRaw.map(async (organiser) => {
         const organiserId = organiser._id.toString();
         
         // Get actual follower count from follows collection
@@ -382,11 +387,6 @@ const getFollowing = async (req, res, next) => {
         return organiserData;
       })
     );
-
-    // Apply pagination
-    const totalCount = organisersList.length;
-    const paginatedOrganisers = organisersList.slice(skip, skip + perPage);
-    const pagination = createPaginationResponse(totalCount, page, perPage);
 
     res.status(200).json({
       success: true,
@@ -576,9 +576,14 @@ const getMyFollowing = async (req, res, next) => {
     // All organizers in this list are being followed by the logged-in user
     const authenticatedUserFollowingIds = new Set(followingIds.map(id => id.toString()));
 
+    // Apply pagination early
+    const totalCount = followingOrganisers.length;
+    const paginatedOrganisersRaw = followingOrganisers.slice(skip, skip + perPage);
+    const pagination = createPaginationResponse(totalCount, page, perPage);
+
     // Format organisers with complete data (same as getAllOrganisers)
-    const organisersList = await Promise.all(
-      followingOrganisers.map(async (organiser) => {
+    const paginatedOrganisers = await Promise.all(
+      paginatedOrganisersRaw.map(async (organiser) => {
         const organiserId = organiser._id.toString();
         
         // Get actual follower count from follows collection
@@ -620,11 +625,6 @@ const getMyFollowing = async (req, res, next) => {
         return organiserData;
       })
     );
-
-    // Apply pagination
-    const totalCount = organisersList.length;
-    const paginatedOrganisers = organisersList.slice(skip, skip + perPage);
-    const pagination = createPaginationResponse(totalCount, page, perPage);
 
     res.status(200).json({
       success: true,

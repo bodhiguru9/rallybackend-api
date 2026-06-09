@@ -410,6 +410,14 @@ class Event {
 
     return await eventsCollection.countDocuments({ creatorId: creatorQuery });
   }
+  /**
+   * Create database indexes for event operations
+   */
+  static async createIndexes() {
+    const db = getDB();
+    const col = db.collection('events');
+    await col.createIndex({ creatorId: 1 });
+  }
 }
 
 module.exports = Event;

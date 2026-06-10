@@ -239,10 +239,14 @@ class Booking {
    * Create database indexes for bookings operations
    */
   static async createIndexes() {
-    const db = getDB();
-    const col = db.collection('bookings');
-    // Index for pending state lookup
-    await col.createIndex({ userId: 1, eventId: 1, status: 1 });
+    try {
+      const db = getDB();
+      const col = db.collection('bookings');
+      // Index for pending state lookup
+      await col.createIndex({ userId: 1, eventId: 1, status: 1 });
+    } catch (error) {
+      console.error('⚠️ Failed to create Booking indexes:', error.message);
+    }
   }
 }
 

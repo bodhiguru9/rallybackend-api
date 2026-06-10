@@ -416,9 +416,13 @@ class Event {
    * Create database indexes for event operations
    */
   static async createIndexes() {
-    const db = getDB();
-    const col = db.collection('events');
-    await col.createIndex({ creatorId: 1 });
+    try {
+      const db = getDB();
+      const col = db.collection('events');
+      await col.createIndex({ creatorId: 1 });
+    } catch (error) {
+      console.error('⚠️ Failed to create Event indexes:', error.message);
+    }
   }
 }
 

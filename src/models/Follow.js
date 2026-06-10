@@ -230,12 +230,16 @@ class Follow {
    * Create database indexes for follow operations
    */
   static async createIndexes() {
-    const db = getDB();
-    const col = db.collection('follows');
-    // Unique compound index: covers isFollowing(), create(), remove() lookups
-    await col.createIndex({ followerId: 1, followingId: 1 }, { unique: true });
-    // Single-field index: covers getFollowerCount() / getFollowers() scans on followingId
-    await col.createIndex({ followingId: 1 });
+    try {
+      const db = getDB();
+      const col = db.collection('follows');
+      // Unique compound index: covers isFollowing(), create(), remove() lookups
+      await col.createIndex({ followerId: 1, followingId: 1 }, { unique: true });
+      // Single-field index: covers getFollowerCount() / getFollowers() scans on followingId
+      await col.createIndex({ followingId: 1 });
+    } catch (error) {
+      console.error('⚠️ Failed to create Follow indexes:', error.message);
+    }
   }
 }
 

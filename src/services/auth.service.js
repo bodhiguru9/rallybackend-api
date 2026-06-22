@@ -186,7 +186,7 @@ const signup = async (userData) => {
 
   // Cleanup signup OTP data after successful signup
   // Use the verified identifier from signupData
-  signupOTPService.cleanupSignupData(signupData.identifier);
+  await signupOTPService.cleanupSignupData(signupData.identifier);
 
   // Generate tokens (access token and refresh token)
   const mongoUserId = user._id.toString();

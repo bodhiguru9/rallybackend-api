@@ -1,7 +1,6 @@
 const Event = require('../../models/Event');
 const { findEventById, validateEventId } = require('../../utils/eventHelper');
-const fs = require('fs');
-const path = require('path');
+const { safeUnlinkUpload } = require('../../utils/fileCleanup');
 const { getDB } = require('../../config/database');
 const Notification = require('../../models/Notification');
 const User = require('../../models/User');
@@ -310,30 +309,14 @@ const deleteEvent = async (req, res, next) => {
       console.error('Error cleaning up package purchase usage for event:', error);
     }
 
-    // Delete associated files - multiple images
+    // Delete associated local images (non-blocking; legacy on-disk files only — S3 URLs skipped)
     const imagesToDelete = event.gameImages || (event.gameImage ? [event.gameImage] : []);
-    imagesToDelete.forEach((imagePath) => {
-      if (imagePath) {
-        const fullPath = path.join(process.cwd(), imagePath.replace('/uploads/', 'uploads/'));
-        try {
-          if (fs.existsSync(fullPath)) {
-            fs.unlinkSync(fullPath);
-          }
-        } catch (error) {
-          console.error('Error deleting event image:', error);
-        }
-      }
-    });
+    for (const imagePath of imagesToDelete) {
+      await safeUnlinkUpload(imagePath);
+    }
 
     if (event.gameVideo) {
-      const videoPath = path.join(process.cwd(), event.gameVideo.replace('/uploads/', 'uploads/'));
-      try {
-        if (fs.existsSync(videoPath)) {
-          fs.unlinkSync(videoPath);
-        }
-      } catch (error) {
-        console.error('Error deleting event video:', error);
-      }
+      await safeUnlinkUpload(event.gameVideo);
     }
 
     // Delete event

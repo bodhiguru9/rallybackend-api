@@ -1,5 +1,4 @@
 const Booking = require('../../models/Booking');
-const Event = require('../../models/Event');
 const { getPaginationParams, createPaginationResponse } = require('../../utils/pagination');
 
 /**
@@ -15,10 +14,14 @@ const getPendingBookings = async (req, res, next) => {
     // Get pending bookings for user
     const bookings = await Booking.getPendingBookings(userId, perPage, skip);
 
+    // Batch-fetch all events in ONE query (was N Event.findById calls — N+1)
+    const { getEventsByIds } = require('../../utils/batchLoad');
+    const _eventMap = await getEventsByIds(bookings.map((b) => b.eventId));
+
     // Get event details for each booking
     const bookingsWithDetails = await Promise.all(
       bookings.map(async (booking) => {
-        const event = await Event.findById(booking.eventId);
+        const event = _eventMap.get(String(booking.eventId));
         return {
           bookingId: booking.bookingId,
           event: event ? {

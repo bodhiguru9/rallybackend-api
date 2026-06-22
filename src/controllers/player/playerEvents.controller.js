@@ -4,7 +4,6 @@ const Event = require('../../models/Event');
 const EventJoin = require('../../models/EventJoin');
 const Waitlist = require('../../models/Waitlist');
 const EventReminder = require('../../models/EventReminder');
-const User = require('../../models/User');
 const { formatEventResponse, calculateTimeUntilStart } = require('../../utils/eventFields');
 const { getPaginationParams, createPaginationResponse } = require('../../utils/pagination');
 
@@ -148,6 +147,10 @@ const getPlayerEvents = async (req, res, next) => {
       .find({ _id: { $in: allEventIds.map(id => new ObjectId(id)) } })
       .toArray();
 
+    // Batch-fetch all event creators in ONE query (was N User.findById calls — N+1)
+    const { getUsersByIds } = require('../../utils/batchLoad');
+    const _creatorMap = await getUsersByIds(allEvents.map((e) => e.creatorId));
+
     // Process events with their relationships
     const processedEvents = await Promise.all(
       allEvents.map(async (event) => {
@@ -181,8 +184,8 @@ const getPlayerEvents = async (req, res, next) => {
           }
         }
 
-        // Get creator details
-        const creator = await User.findById(event.creatorId);
+        // Get creator details from the pre-fetched batch (no per-event query)
+        const creator = _creatorMap.get(String(event.creatorId));
         const creatorData = creator ? {
           userId: creator.userId,
           fullName: creator.fullName,

@@ -99,10 +99,15 @@ const bookEvent = async (req, res, next) => {
       });
     }
 
-    if (new Date(occurrenceStart) <= new Date()) {
+    // Use occurrenceEnd if available, otherwise default to 1 hour after occurrenceStart
+    const eventEndTimeForBooking = occurrenceEnd 
+      ? new Date(occurrenceEnd) 
+      : new Date(new Date(occurrenceStart).getTime() + 60 * 60 * 1000);
+
+    if (new Date() > eventEndTimeForBooking) {
       return res.status(400).json({
         success: false,
-        error: 'Cannot book a past occurrence',
+        error: 'Cannot book an ended occurrence',
       });
     }
 

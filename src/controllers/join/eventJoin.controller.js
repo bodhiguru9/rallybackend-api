@@ -150,28 +150,46 @@ if (!occurrenceStart) {
       });
     }
 
-    // Check if user has an active package for this organiser
+    // Find any active package for this organiser (read only — the credit is consumed
+    // AFTER a successful join so a race-loss never wastes a package credit).
     let packageUsed = null;
     const Package = require('../../models/Package');
     const activePackage = await PackagePurchase.findAvailablePackageForUser(userId, event.creatorId);
-    
+    const packageDetails = activePackage ? await Package.findById(activePackage.packageId) : null;
+
+    // Join event FIRST, with the atomic capacity guard (prevents overbooking the last
+    // spot under concurrency).
+    try {
+      await EventJoin.join(userId, event._id, occurrenceStart, {
+        occurrenceEnd,
+        parentEventId: event.eventId,
+        guestsCount: safeGuestsCount,
+        capacityLimit: maxGuest,
+      });
+    } catch (joinErr) {
+      if (joinErr && joinErr.code === 'EVENT_FULL') {
+        // Lost the race for the last spot(s) — route to the waitlist (same as the pre-check).
+        const spotsBooked = await EventJoin.getParticipantCount(event._id, occurrenceStart);
+        return res.status(400).json({
+          success: false,
+          error: 'Event is full. All spots have been booked.',
+          message: 'Please join the waitlist to be notified when a spot becomes available.',
+          spotsInfo: { totalSpots: maxGuest, spotsBooked, spotsLeft: 0, spotsFull: true },
+          action: 'join-waitlist',
+          waitlistEndpoint: `/api/events/${eventId}/join-waitlist`,
+        });
+      }
+      throw joinErr; // e.g. 'Already joined this occurrence' → handled by outer catch
+    }
+
+    // Consume the package credit only now that the join has succeeded.
     if (activePackage) {
-      // Get package details
-      const packageDetails = await Package.findById(activePackage.packageId);
-      // Use package to join event
       await PackagePurchase.incrementEventsJoined(activePackage._id, event._id);
       packageUsed = {
         packageId: packageDetails ? packageDetails.packageId : null,
         eventsRemaining: activePackage.maxEvents - activePackage.eventsJoined - 1,
       };
     }
-
-    // Join event (use MongoDB ObjectId from found event)
-    await EventJoin.join(userId, event._id, occurrenceStart, {
-  occurrenceEnd,
-  parentEventId: event.eventId,
-  guestsCount: safeGuestsCount,
-});
 
     // Get updated event
     const updatedEvent = await findEventById(eventId);

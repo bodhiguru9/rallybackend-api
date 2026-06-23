@@ -1,5 +1,4 @@
 const User = require('../../models/User');
-const Follow = require('../../models/Follow');
 const { getPaginationParams, createPaginationResponse } = require('../../utils/pagination');
 const { getDB } = require('../../config/database');
 const { ObjectId } = require('mongodb');
@@ -79,13 +78,28 @@ const getAllOrganisers = async (req, res, next) => {
     const totalCount = allOrganisers.length;
     const paginatedOrganisers = allOrganisers.slice(skip, skip + perPage);
 
+    // Batch follower counts for the page in ONE aggregation (was N countDocuments — N+1)
+    const _orgObjectIds = paginatedOrganisers.map((o) => o._id);
+    const _followerCountAgg = _orgObjectIds.length
+      ? await getDB()
+          .collection('follows')
+          .aggregate([
+            { $match: { followingId: { $in: _orgObjectIds } } },
+            { $group: { _id: '$followingId', count: { $sum: 1 } } },
+          ])
+          .toArray()
+      : [];
+    const _followerCountMap = new Map(
+      _followerCountAgg.map((r) => [r._id.toString(), r.count])
+    );
+
     // Format organisers with their details
     const organisersList = await Promise.all(
       paginatedOrganisers.map(async (organiser) => {
         const organiserId = organiser._id.toString();
         
-        // Get actual follower count from follows collection
-        const followerCount = await Follow.getFollowerCount(organiserId);
+        // Get actual follower count from the pre-fetched batch
+        const followerCount = _followerCountMap.get(organiserId) || 0;
 
         const organiserData = {
           id: organiser.userId,

@@ -1,7 +1,5 @@
 const EventJoin = require('../../models/EventJoin');
-const User = require('../../models/User');
 const Booking = require('../../models/Booking');
-const Payment = require('../../models/Payment');
 const { formatEventResponse, calculateEventStatus } = require('../../utils/eventFields');
 const { getPaginationParams, createPaginationResponse } = require('../../utils/pagination');
 
@@ -50,6 +48,15 @@ const getPlayerBookings = async (req, res, next) => {
 
     const now = new Date();
     
+    // Batch-fetch creators + payments in ONE query each (was N findById calls — N+1)
+    const { getUsersByIds, getByField } = require('../../utils/batchLoad');
+    const _creatorMap = await getUsersByIds(joinedEvents.map((e) => e.creatorId));
+    const _paymentMap = await getByField(
+      'payments',
+      'paymentId',
+      allUserBookings.map((b) => b.paymentId)
+    );
+
     // Get creator details for all events and include bookingId
     const withMeta = await Promise.all(
       joinedEvents.map(async (event) => {
@@ -66,7 +73,7 @@ const getPlayerBookings = async (req, res, next) => {
         let creatorId = null;
         let creatorName = null;
         if (event.creatorId) {
-          const creator = await User.findById(event.creatorId);
+          const creator = _creatorMap.get(String(event.creatorId));
           if (creator) {
             creatorId = creator.userId;
             creatorName = creator.fullName;
@@ -88,7 +95,7 @@ const getPlayerBookings = async (req, res, next) => {
           
           if (eventPrice > 0 && relatedBooking.paymentId) {
             // Fetch payment details
-            const payment = await Payment.findById(relatedBooking.paymentId);
+            const payment = _paymentMap.get(String(relatedBooking.paymentId));
             
             if (payment) {
               // Map payment status to user-friendly values

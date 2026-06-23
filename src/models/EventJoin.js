@@ -55,6 +55,34 @@ const result = await joinsCollection.insertOne({
   joinedAt: now,
 });
 
+// Opt-in atomic capacity guard (prevents overbooking the last spot under concurrency).
+// Enabled by passing extraData.capacityLimit (= eventMaxGuest). We've already inserted
+// our join, so we compute the seats occupied up to and including our OWN row (ordered by
+// _id, scoped to this occurrence). If that exceeds the limit, we lost the race for the
+// last seat(s): roll back our insert and throw EVENT_FULL. Deterministic via ObjectId
+// order → exactly the rows that fit are kept; correct per-occurrence; no transaction
+// needed. Existing callers that don't pass capacityLimit are unaffected.
+const capacityLimit = Number(extraData.capacityLimit);
+if (Number.isFinite(capacityLimit) && capacityLimit > 0) {
+  const upToMe = await joinsCollection.aggregate([
+    {
+      $match: {
+        eventId: eventObjectId,
+        occurrenceStart: normalizedOccurrenceStart,
+        _id: { $lte: result.insertedId },
+      },
+    },
+    { $group: { _id: null, seats: { $sum: { $ifNull: ['$guestsCount', 1] } } } },
+  ]).toArray();
+  const seatsUpToMe = upToMe.length > 0 ? upToMe[0].seats : guestsCount;
+  if (seatsUpToMe > capacityLimit) {
+    await joinsCollection.deleteOne({ _id: result.insertedId });
+    const err = new Error('Event is full. All spots have been booked.');
+    err.code = 'EVENT_FULL';
+    throw err;
+  }
+}
+
 // Increment event attendee count by the full party size (player + guests)
 const Event = require('./Event');
 await Event.updateAttendeeCount(eventId, guestsCount);

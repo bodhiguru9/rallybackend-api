@@ -4,8 +4,7 @@ const EventJoin = require('../../models/EventJoin');
 const Request = require('../../models/Request');
 const Waitlist = require('../../models/Waitlist');
 const Event = require('../../models/Event');
-const fs = require('fs');
-const path = require('path');
+const { safeUnlinkUpload } = require('../../utils/fileCleanup');
 const { getDB } = require('../../config/database');
 
 /**
@@ -65,17 +64,9 @@ const deleteUser = async (req, res, next) => {
 
     const userObjectId = user._id;
 
-    // Delete profile picture if exists
+    // Delete profile picture (non-blocking; S3 URLs are cleaned separately)
     if (user.profilePic) {
-      try {
-        const picPath = path.join(process.cwd(), user.profilePic.replace('/uploads/', 'uploads/'));
-        if (fs.existsSync(picPath)) {
-          fs.unlinkSync(picPath);
-        }
-      } catch (error) {
-        console.error('Error deleting profile picture:', error);
-        // Continue with deletion even if file deletion fails
-      }
+      await safeUnlinkUpload(user.profilePic);
     }
 
     // Clean up follow relationships where user is a follower
@@ -304,31 +295,15 @@ const deleteUser = async (req, res, next) => {
         
         // Delete event files and events
         for (const event of events) {
-          // Delete event images if they exist (handle both gameImages array and gameImage string for backward compatibility)
+          // Delete event images (non-blocking; legacy on-disk files only — S3 URLs skipped)
           const imagesToDelete = event.gameImages || (event.gameImage ? [event.gameImage] : []);
-          imagesToDelete.forEach((imagePath) => {
-            if (imagePath) {
-              try {
-                const fullPath = path.join(process.cwd(), imagePath.replace('/uploads/', 'uploads/'));
-                if (fs.existsSync(fullPath)) {
-                  fs.unlinkSync(fullPath);
-                }
-              } catch (error) {
-                console.error('Error deleting event image:', error);
-              }
-            }
-          });
+          for (const imagePath of imagesToDelete) {
+            await safeUnlinkUpload(imagePath);
+          }
           
-          // Delete event video if exists
+          // Delete event video (non-blocking; legacy on-disk file only)
           if (event.gameVideo) {
-            try {
-              const videoPath = path.join(process.cwd(), event.gameVideo.replace('/uploads/', 'uploads/'));
-              if (fs.existsSync(videoPath)) {
-                fs.unlinkSync(videoPath);
-              }
-            } catch (error) {
-              console.error('Error deleting event video:', error);
-            }
+            await safeUnlinkUpload(event.gameVideo);
           }
           
           // Delete event joins for this event

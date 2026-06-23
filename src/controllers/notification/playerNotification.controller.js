@@ -1,6 +1,4 @@
 const Notification = require('../../models/Notification');
-const User = require('../../models/User');
-const Event = require('../../models/Event');
 const { getPaginationParams, createPaginationResponse } = require('../../utils/pagination');
 const { getDB } = require('../../config/database');
 const { ObjectId } = require('mongodb');
@@ -43,6 +41,15 @@ const getPlayerNotifications = async (req, res, next) => {
     });
     const pagination = createPaginationResponse(totalCount, page, perPage);
 
+    // Batch-fetch referenced organisers + events in ONE query each (was N findById per notification — N+1)
+    const { getUsersByIds, getEventsByAnyId } = require('../../utils/batchLoad');
+    const _orgMap = await getUsersByIds(
+      notifications.map((n) => n.data && n.data.organiserId).filter(Boolean)
+    );
+    const _evtMap = await getEventsByAnyId(
+      notifications.map((n) => n.data && n.data.eventId).filter(Boolean)
+    );
+
     // Enrich notifications with user and event details
     const enrichedNotifications = await Promise.all(
       notifications.map(async (notification) => {
@@ -59,7 +66,7 @@ const getPlayerNotifications = async (req, res, next) => {
         // Add organizer details if organiserId is in data
         if (notification.data && notification.data.organiserId) {
           try {
-            const organiser = await User.findById(notification.data.organiserId);
+            const organiser = _orgMap.get(String(notification.data.organiserId));
             if (organiser) {
               enriched.organiser = {
                 userId: organiser.userId,
@@ -78,7 +85,7 @@ const getPlayerNotifications = async (req, res, next) => {
         // Add event details if eventId is in data
         if (notification.data && notification.data.eventId) {
           try {
-            const event = await Event.findById(notification.data.eventId);
+            const event = _evtMap.get(String(notification.data.eventId));
             if (event) {
               enriched.event = {
                 eventId: event.eventId,

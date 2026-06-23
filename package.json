@@ -9,6 +9,7 @@
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
+    "indexes": "node scripts/createIndexes.js",
     "smoke": "node scripts/smoke-test.js",
     "smoke:local": "node scripts/smoke-test.js http://localhost:3000",
     "lint": "eslint src/",

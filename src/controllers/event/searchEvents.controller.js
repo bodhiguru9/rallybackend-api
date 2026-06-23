@@ -1,5 +1,4 @@
 const Event = require('../../models/Event');
-const User = require('../../models/User');
 const EventJoin = require('../../models/EventJoin');
 const Waitlist = require('../../models/Waitlist');
 const Follow = require('../../models/Follow');
@@ -380,11 +379,15 @@ const searchEvents = async (req, res, next) => {
     
     const totalPages = Math.ceil(totalCount / limit);
 
+    // Batch-fetch all event creators in ONE query (was N User.findById calls — N+1)
+    const { getUsersByIds } = require('../../utils/batchLoad');
+    const _creatorMap = await getUsersByIds(events.map((e) => e.creatorId));
+
     // Get creator details and additional info for each event (matching getAllEvents format)
     const eventsWithFullData = await Promise.all(
       events.map(async (event) => {
-        // Get creator/organiser details (only required fields)
-        const creator = await User.findById(event.creatorId);
+        // Get creator/organiser details from the pre-fetched batch (no per-event query)
+        const creator = _creatorMap.get(String(event.creatorId));
         let creatorData = null;
         
         if (creator && creator.userType === 'organiser') {

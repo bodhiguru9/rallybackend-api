@@ -60,8 +60,12 @@ const getOrganiserEventsWithParticipants = async (req, res, next) => {
     const { page, perPage, skip } = getPaginationParams(req.query.page, req.query.perPage || 20);
     const events = await Event.findByCreator(organiser._id, 1000, 0);
 
-    const eventsWithParticipants = await Promise.all(
-      events.map(async (event) => {
+    // Paginate FIRST, then enrich only the current page (was: enrich all N events, then slice)
+    const totalCount = events.length;
+    const pageEvents = events.slice(skip, skip + perPage);
+
+    const paginatedEvents = await Promise.all(
+      pageEvents.map(async (event) => {
         const participants = await EventJoin.getEventParticipants(event._id, event.eventDateTime || null, 10000, 0);
         return {
           ...formatEventResponse(event),
@@ -71,8 +75,6 @@ const getOrganiserEventsWithParticipants = async (req, res, next) => {
       })
     );
 
-    const totalCount = eventsWithParticipants.length;
-    const paginatedEvents = eventsWithParticipants.slice(skip, skip + perPage);
     const pagination = createPaginationResponse(totalCount, page, perPage);
 
     return res.status(200).json({

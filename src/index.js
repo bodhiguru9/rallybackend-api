@@ -569,29 +569,69 @@ app.use(notFound);
 app.use(errorHandler);
 
 // Start server and connect to database
-async function startServer() {
+async function startServer({ runCron = false } = {}) {
   try {
     // Connect to MongoDB
     await connectDB();
-    await Follow.createIndexes();
-    await Event.createIndexes();
-    await EventJoin.createIndexes();
-    await Booking.createIndexes();
+    // Ensure ALL indexes (idempotent + non-fatal). Single source of truth: scripts/createIndexes.js
+    const { getDB } = require('./config/database');
+    const { createAllIndexes } = require('../scripts/createIndexes');
+    await createAllIndexes(getDB());
 
     // Start Express server
     app.listen(PORT, "0.0.0.0", () => {
-      console.log(`🚀 Server is running on port ${PORT}`);
+      console.log(`🚀 Server is running on port ${PORT} (pid ${process.pid})`);
       console.log(`📍 Environment: ${process.env.NODE_ENV || 'development'}`);
       console.log(`🌐 Health check: http://localhost:${PORT}/health`);
 
-      const { startReminderCronJob } = require('./services/eventReminderCron.service');
-      startReminderCronJob();
+      // Start the reminder cron ONLY when this process owns it (single-process mode).
+      // In cluster mode the cron runs once in the primary (see bottom of file) so it
+      // does not fire in every worker and send duplicate reminders.
+      if (runCron) {
+        const { startReminderCronJob } = require('./services/eventReminderCron.service');
+        startReminderCronJob();
+      }
     });
   } catch (error) {
     console.error('❌ Failed to start server:', error.message);
     process.exit(1);
   }
 }
+
+/**
+ * Cluster primary: run the singleton background reminder cron here (once), without
+ * starting a web server. Web traffic is served by the forked workers.
+ */
+async function startReminderCronInPrimary() {
+  try {
+    await connectDB();
+    const { startReminderCronJob } = require('./services/eventReminderCron.service');
+    startReminderCronJob();
+    console.log(`🕒 Reminder cron started in primary (pid ${process.pid})`);
+  } catch (error) {
+    console.error('❌ Failed to start reminder cron in primary:', error.message);
+  }
+}
+
+// Global async safety net (#7): catch errors that escape all try/catch so one stray
+// async failure is logged instead of silently crashing the server or leaving requests
+// hanging. Registered in every process (primary + workers + single-process mode).
+process.on('unhandledRejection', (reason) => {
+  // A promise rejected with no handler. Log loudly and keep serving — we intentionally
+  // override Node's default (terminate the process) so one stray rejection doesn't take
+  // the whole server (and all users) down.
+  console.error('🚨 Unhandled promise rejection:', reason);
+});
+
+process.on('uncaughtException', (error) => {
+  // A truly unexpected error escaped everything. Process state may be corrupt, so log and
+  // exit cleanly: in cluster mode the primary respawns a fresh worker; under EB / a process
+  // manager the process is restarted. A force-exit timer guards against a hung cleanup.
+  console.error('🚨 Uncaught exception — exiting to recover:', error);
+  const forceExit = setTimeout(() => process.exit(1), 3000);
+  if (typeof forceExit.unref === 'function') forceExit.unref();
+  closeDB().finally(() => process.exit(1));
+});
 
 // Handle graceful shutdown
 process.on('SIGINT', async () => {
@@ -609,7 +649,34 @@ process.on('SIGTERM', async () => {
 // Start the server only if not in serverless mode (Vercel)
 // Check if running as a module (serverless) or directly (standalone server)
 if (require.main === module && !process.env.VERCEL) {
-  startServer();
+  const cluster = require('cluster');
+  const os = require('os');
+
+  // Clustering is OPT-IN via env (CLUSTER_MODE=true) → default behavior is unchanged.
+  // Enable it on multi-core hosts to use every CPU core. WEB_CONCURRENCY caps the
+  // worker count (recommended on low-RAM instances: e.g. 2 on t3.small, 1 on t3.micro).
+  const clusterEnabled = process.env.CLUSTER_MODE === 'true';
+  const cpuCount = (os.cpus() && os.cpus().length) || 1;
+  const workerCount = Number(process.env.WEB_CONCURRENCY) || cpuCount;
+
+  if (clusterEnabled && workerCount > 1) {
+    if (cluster.isPrimary) {
+      // Primary owns the singleton cron; it does NOT serve web traffic.
+      startReminderCronInPrimary();
+      console.log(`🧵 Primary ${process.pid} forking ${workerCount} web workers`);
+      for (let i = 0; i < workerCount; i++) cluster.fork();
+      cluster.on('exit', (worker, code, signal) => {
+        console.error(`⚠️  Worker ${worker.process.pid} exited (${signal || code}); respawning`);
+        cluster.fork();
+      });
+    } else {
+      // Each worker serves web traffic only (cron runs once in the primary).
+      startServer({ runCron: false });
+    }
+  } else {
+    // Single-process mode (default): one process serves web AND runs the cron.
+    startServer({ runCron: true });
+  }
 }
 
 module.exports = app;

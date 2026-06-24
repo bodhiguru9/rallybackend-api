@@ -358,8 +358,16 @@ const bookEvent = async (req, res, next) => {
           occurrenceEnd,
           parentEventId: event.eventId,
           guestsCount: safeGuestsCount,
+          capacityLimit: maxGuest,
         });
       } catch (joinError) {
+        if (joinError.code === 'EVENT_FULL') {
+          await Booking.updateStatus(booking.bookingId, 'failed');
+          return res.status(400).json({
+            success: false,
+            error: 'Event is full. All spots were booked while processing your request.',
+          });
+        }
         if (joinError.message !== 'Already joined this occurrence') {
           console.error('Error joining event:', joinError);
         }

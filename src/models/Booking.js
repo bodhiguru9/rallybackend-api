@@ -205,6 +205,43 @@ class Booking {
   }
 
   /**
+   * Count a user's bookings (optionally by status) WITHOUT fetching documents.
+   * Replaces the old "fetch up to 10,000 rows then take .length" pagination count.
+   */
+  static async countByUser(userId, status = null) {
+    const db = getDB();
+    const bookingsCollection = db.collection('bookings');
+    const usersCollection = db.collection('users');
+
+    let userObjectId;
+    if (!isNaN(userId) && parseInt(userId).toString() === userId.toString()) {
+      const user = await usersCollection.findOne({ userId: parseInt(userId) });
+      if (!user) return 0;
+      userObjectId = user._id;
+    } else {
+      try {
+        userObjectId = typeof userId === 'string' ? new ObjectId(userId) : userId;
+      } catch (error) {
+        return 0;
+      }
+    }
+
+    const query = { userId: userObjectId };
+    if (status) query.status = status;
+    return await bookingsCollection.countDocuments(query);
+  }
+
+  /** A user's pending bookings (status 'pending'). */
+  static async getPendingBookings(userId, limit = 50, skip = 0) {
+    return this.findByUser(userId, 'pending', limit, skip);
+  }
+
+  /** A user's confirmed bookings (status 'booked'). */
+  static async getBookedBookings(userId, limit = 50, skip = 0) {
+    return this.findByUser(userId, 'booked', limit, skip);
+  }
+
+  /**
    * Find the most recent active (booked or pending) booking for a user + event + occurrence.
    * Used when an organiser removes a participant to locate their booking for cancellation.
    */

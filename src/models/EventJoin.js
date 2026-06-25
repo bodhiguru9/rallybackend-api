@@ -44,43 +44,39 @@ if (existing) {
   throw new Error('Already joined this occurrence');
 }
 
-const now = new Date();
-const result = await joinsCollection.insertOne({
-  userId: userObjectId,
-  eventId: eventObjectId,
-  parentEventId: extraData.parentEventId || null,
-  occurrenceStart: normalizedOccurrenceStart,
-  occurrenceEnd: normalizedOccurrenceEnd,
-  guestsCount: guestsCount,
-  joinedAt: now,
-});
-
-// Opt-in atomic capacity guard (prevents overbooking the last spot under concurrency).
-// Enabled by passing extraData.capacityLimit (= eventMaxGuest). We've already inserted
-// our join, so we compute the seats occupied up to and including our OWN row (ordered by
-// _id, scoped to this occurrence). If that exceeds the limit, we lost the race for the
-// last seat(s): roll back our insert and throw EVENT_FULL. Deterministic via ObjectId
-// order → exactly the rows that fit are kept; correct per-occurrence; no transaction
-// needed. Existing callers that don't pass capacityLimit are unaffected.
+// Opt-in atomic capacity guard (prevents overbooking under concurrency). Enabled by
+// passing extraData.capacityLimit (= eventMaxGuest). We RESERVE a seat BEFORE inserting,
+// via an atomic conditional $inc on a per-occurrence counter (see _reserveSeats). MongoDB
+// serializes that per-document, so at most `capacityLimit` seats can ever be reserved →
+// no overbooking, no matter how many requests race. Callers that don't pass capacityLimit
+// skip this entirely (unchanged behaviour).
 const capacityLimit = Number(extraData.capacityLimit);
-if (Number.isFinite(capacityLimit) && capacityLimit > 0) {
-  const upToMe = await joinsCollection.aggregate([
-    {
-      $match: {
-        eventId: eventObjectId,
-        occurrenceStart: normalizedOccurrenceStart,
-        _id: { $lte: result.insertedId },
-      },
-    },
-    { $group: { _id: null, seats: { $sum: { $ifNull: ['$guestsCount', 1] } } } },
-  ]).toArray();
-  const seatsUpToMe = upToMe.length > 0 ? upToMe[0].seats : guestsCount;
-  if (seatsUpToMe > capacityLimit) {
-    await joinsCollection.deleteOne({ _id: result.insertedId });
+const guardEnabled = Number.isFinite(capacityLimit) && capacityLimit > 0;
+if (guardEnabled) {
+  const reserved = await this._reserveSeats(eventObjectId, normalizedOccurrenceStart, guestsCount, capacityLimit);
+  if (!reserved) {
     const err = new Error('Event is full. All spots have been booked.');
     err.code = 'EVENT_FULL';
     throw err;
   }
+}
+
+const now = new Date();
+let result;
+try {
+  result = await joinsCollection.insertOne({
+    userId: userObjectId,
+    eventId: eventObjectId,
+    parentEventId: extraData.parentEventId || null,
+    occurrenceStart: normalizedOccurrenceStart,
+    occurrenceEnd: normalizedOccurrenceEnd,
+    guestsCount: guestsCount,
+    joinedAt: now,
+  });
+} catch (insertErr) {
+  // Insert failed (e.g. unique-index duplicate join) → release the seat we reserved.
+  if (guardEnabled) await this._releaseSeats(eventObjectId, normalizedOccurrenceStart, guestsCount);
+  throw insertErr;
 }
 
 // Increment event attendee count by the full party size (player + guests)
@@ -88,6 +84,54 @@ const Event = require('./Event');
 await Event.updateAttendeeCount(eventId, guestsCount);
 
 return result.insertedId;
+  }
+
+  /**
+   * Atomically reserve `guestsCount` seats for an occurrence, returning true if reserved
+   * or false if it would exceed `capacityLimit`. Uses a per-occurrence counter document in
+   * the `eventOccupancy` collection; the conditional `findOneAndUpdate` is atomic per
+   * document, so concurrent callers can never reserve beyond capacity. The counter is
+   * created lazily, seeded from the current real participant count.
+   */
+  static async _reserveSeats(eventObjectId, normalizedOccurrenceStart, guestsCount, capacityLimit) {
+    const db = getDB();
+    const col = db.collection('eventOccupancy');
+    const key = `${eventObjectId.toString()}|${normalizedOccurrenceStart === null ? 'null' : normalizedOccurrenceStart}`;
+
+    const incIfRoom = () => col.findOneAndUpdate(
+      { _id: key, reserved: { $lte: capacityLimit - guestsCount } },
+      { $inc: { reserved: guestsCount } },
+      { returnDocument: 'after' }
+    );
+
+    // Fast path: counter exists and has room.
+    let doc = await incIfRoom();
+    if (doc) return true;
+
+    // Counter may not exist yet → seed it from the current real participant count.
+    const current = await this.getParticipantCount(eventObjectId, normalizedOccurrenceStart);
+    if (current + guestsCount > capacityLimit) return false; // already full
+    try {
+      await col.insertOne({ _id: key, reserved: current + guestsCount });
+      return true;
+    } catch (e) {
+      if (e.code === 11000) {
+        doc = await incIfRoom(); // created concurrently → retry the atomic reserve
+        return !!doc;
+      }
+      throw e;
+    }
+  }
+
+  /** Release previously-reserved seats for an occurrence (floored at 0). No-op if no counter. */
+  static async _releaseSeats(eventObjectId, normalizedOccurrenceStart, guestsCount) {
+    const db = getDB();
+    const col = db.collection('eventOccupancy');
+    const key = `${eventObjectId.toString()}|${normalizedOccurrenceStart === null ? 'null' : normalizedOccurrenceStart}`;
+    await col.updateOne(
+      { _id: key },
+      [{ $set: { reserved: { $max: [0, { $subtract: [{ $ifNull: ['$reserved', 0] }, guestsCount] }] } } }]
+    );
   }
 
   /**
@@ -119,6 +163,8 @@ return result.insertedId;
       const seatsToFree = (joinRecord && joinRecord.guestsCount >= 1) ? joinRecord.guestsCount : 1;
       const Event = require('./Event');
       await Event.updateAttendeeCount(eventId, -seatsToFree);
+      // Release the reserved seat(s) from the per-occurrence capacity counter (no-op if none).
+      await this._releaseSeats(eventObjectId, normalizedOccurrenceStart, seatsToFree);
     }
 
     return result.deletedCount > 0;
@@ -153,6 +199,8 @@ return result.insertedId;
       const seatsToFree = (joinRecord && joinRecord.guestsCount >= 1) ? joinRecord.guestsCount : 1;
       const Event = require('./Event');
       await Event.updateAttendeeCount(eventId, -seatsToFree);
+      // Release the reserved seat(s) from the per-occurrence capacity counter (no-op if none).
+      await this._releaseSeats(eventObjectId, normalizedOccurrenceStart, seatsToFree);
     }
 
     return result.deletedCount > 0;

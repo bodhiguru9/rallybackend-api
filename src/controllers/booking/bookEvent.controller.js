@@ -99,10 +99,15 @@ const bookEvent = async (req, res, next) => {
       });
     }
 
-    if (new Date(occurrenceStart) <= new Date()) {
+    // Use occurrenceEnd if available, otherwise default to 1 hour after occurrenceStart
+    const eventEndTimeForBooking = occurrenceEnd 
+      ? new Date(occurrenceEnd) 
+      : new Date(new Date(occurrenceStart).getTime() + 60 * 60 * 1000);
+
+    if (new Date() > eventEndTimeForBooking) {
       return res.status(400).json({
         success: false,
-        error: 'Cannot book a past occurrence',
+        error: 'Cannot book an ended occurrence',
       });
     }
 
@@ -353,11 +358,16 @@ const bookEvent = async (req, res, next) => {
           occurrenceEnd,
           parentEventId: event.eventId,
           guestsCount: safeGuestsCount,
+          capacityLimit: maxGuest,
         });
       } catch (joinError) {
-        if (joinError.message !== 'Already joined this occurrence') {
-          console.error('Error joining event:', joinError);
-        }
+        await Booking.updateStatus(booking.bookingId, 'failed');
+        const isDuplicate = joinError.code === 11000 || joinError.message === 'Already joined this occurrence';
+        return res.status(400).json({
+          success: false,
+          error: isDuplicate ? 'Already joined this occurrence' : 'Failed to join event',
+          details: joinError.message,
+        });
       }
 
       const updatedBooking = await Booking.findById(booking._id);// or Booking.findByBookingId(booking.bookingId)

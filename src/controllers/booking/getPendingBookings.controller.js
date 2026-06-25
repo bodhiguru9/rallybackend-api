@@ -12,7 +12,7 @@ const getPendingBookings = async (req, res, next) => {
     const { page, perPage, skip } = getPaginationParams(req.query.page, req.query.limit || 20);
 
     // Get pending bookings for user
-    const bookings = await Booking.getPendingBookings(userId, perPage, skip);
+    const bookings = await Booking.findByUser(userId, 'pending', perPage, skip);
 
     // Batch-fetch all events in ONE query (was N Event.findById calls — N+1)
     const { getEventsByIds } = require('../../utils/batchLoad');

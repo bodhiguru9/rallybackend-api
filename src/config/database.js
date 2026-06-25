@@ -1,4 +1,17 @@
-const { MongoClient } = require('mongodb');
+const { MongoClient, Db } = require('mongodb');
+
+// Override Db.prototype.collection if in test environment to enforce sandbox collection names
+const originalCollection = Db.prototype.collection;
+Db.prototype.collection = function (name, options) {
+  let finalName = name;
+  if (process.env.NODE_ENV === 'test') {
+    const suffix = '_test';
+    if (!name.endsWith(suffix)) {
+      finalName = `${name}${suffix}`;
+    }
+  }
+  return originalCollection.call(this, finalName, options);
+};
 
 let client = null;
 let db = null;
@@ -78,8 +91,10 @@ async function connectDB() {
       `✅ Successfully connected to MongoDB (pool min=${options.minPoolSize} max=${options.maxPoolSize})`
     );
 
-    // Get database name from URL or use default
-    const dbName = process.env.DB_NAME || 'rally';
+    // Get database name from URL or use default (dynamically suffixing _test if NODE_ENV is test)
+    const dbName = process.env.NODE_ENV === 'test'
+      ? (process.env.DB_NAME_TEST || `${process.env.DB_NAME || 'rally'}_test`)
+      : (process.env.DB_NAME || 'rally');
     db = client.db(dbName);
 
     return { client, db };

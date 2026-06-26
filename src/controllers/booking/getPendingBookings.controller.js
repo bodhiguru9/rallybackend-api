@@ -44,8 +44,7 @@ const getPendingBookings = async (req, res, next) => {
     );
 
     // Get total count for pagination
-    const totalPending = await Booking.findByUser(userId, 'pending', 10000, 0);
-    const total = totalPending.length;
+    const total = await Booking.countByUser(userId, 'pending');
 
     res.status(200).json({
       success: true,

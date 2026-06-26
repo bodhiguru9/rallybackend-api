@@ -141,7 +141,121 @@ const createEvent = async (req, res, next) => {
         updatedAt: now, // Timestamp for last update
       };
 
-      // Create event
+      // -----------------------------------------------------------------------
+      // Recurring event batch generation
+      // If the request specifies a weekly or daily frequency with recurrenceWeeks,
+      // generate m×n discrete standalone events instead of one recurring document.
+      // -----------------------------------------------------------------------
+      const rawFrequency = req.body.eventFrequency || [];
+      const frequencyArray = Array.isArray(rawFrequency) ? rawFrequency : [rawFrequency];
+      const recurrenceWeeks = Math.min(Math.max(parseInt(req.body.recurrenceWeeks || 4, 10) || 4, 1), 4);
+
+      const isWeekly = frequencyArray.includes('weekly');
+      const isDaily  = frequencyArray.includes('daily');
+      const isRecurring = isWeekly || isDaily;
+
+      if (isRecurring && eventData.eventDateTime) {
+        // Parse selected weekday indices from the frequency array (e.g., 'mon' → 1)
+        const DAY_ABBREVS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+        const selectedDays = isWeekly
+          ? frequencyArray
+              .filter((f) => DAY_ABBREVS.includes(f.toLowerCase()))
+              .map((f) => DAY_ABBREVS.indexOf(f.toLowerCase()))
+              .sort((a, b) => a - b)
+          : []; // daily: no specific days needed
+
+        // Compute the event duration in ms (for setting end time on each occurrence)
+        const baseStart = new Date(eventData.eventDateTime);
+        const baseEnd   = eventData.eventEndDateTime ? new Date(eventData.eventEndDateTime) : null;
+        const durationMs = baseEnd ? baseEnd.getTime() - baseStart.getTime() : 60 * 60 * 1000; // default 1h
+
+        /**
+         * Generate all occurrence start dates.
+         * For weekly: iterate over m weeks (0..m-1), then over each selected weekday.
+         *   Find the first occurrence of that weekday ON OR AFTER baseStart (within that week offset).
+         * For daily: generate one occurrence per day for (m * 7) days starting from baseStart.
+         */
+        const occurrenceDates = [];
+
+        if (isWeekly && selectedDays.length > 0) {
+          // For each selected weekday, find the first occurrence on or after baseStart,
+          // then advance by 7 days for each subsequent week.
+          for (const targetDay of selectedDays) {
+            let daysAhead = (targetDay - baseStart.getDay() + 7) % 7;
+            // If the base date IS on this weekday and it's week 0, include it (daysAhead = 0).
+            // For subsequent weeks, add 7 * weekIndex.
+            for (let week = 0; week < recurrenceWeeks; week++) {
+              const d = new Date(baseStart);
+              d.setDate(baseStart.getDate() + daysAhead + (week * 7));
+              d.setHours(baseStart.getHours(), baseStart.getMinutes(), 0, 0);
+              occurrenceDates.push(d);
+            }
+          }
+          // Sort chronologically
+          occurrenceDates.sort((a, b) => a - b);
+
+        } else if (isDaily) {
+          // Daily: one event per day for recurrenceWeeks * 7 days from baseStart
+          const totalDays = recurrenceWeeks * 7;
+          for (let i = 0; i < totalDays; i++) {
+            const d = new Date(baseStart);
+            d.setDate(baseStart.getDate() + i);
+            occurrenceDates.push(d);
+          }
+        }
+
+        if (occurrenceDates.length === 0) {
+          // Fallback to single event if we couldn't compute any occurrences
+          const event = await Event.create(eventData);
+          return res.status(201).json({
+            success: true,
+            message: 'Event created successfully',
+            data: { event: formatEventResponse(event) },
+          });
+        }
+
+        // Generate unique IDs for all occurrences (sequential, collision-safe)
+        const { getNextUniqueEventId } = require('../../utils/idManager');
+        const db = getDB();
+        const eventsCollection = db.collection('events');
+
+        const batchDocs = [];
+        for (const occStart of occurrenceDates) {
+          const { eventId } = await getNextUniqueEventId();
+          const occEnd = new Date(occStart.getTime() + durationMs);
+          const doc = {
+            ...eventData,
+            eventId,
+            eventDateTime: occStart.toISOString(),
+            eventEndDateTime: occEnd.toISOString(),
+            // Standalone event — no frequency marker, no occurrenceStart needed for joins
+            eventFrequency: [],
+            createdAt: now,
+            updatedAt: now,
+          };
+          batchDocs.push(doc);
+        }
+
+        // Batch insert
+        await eventsCollection.insertMany(batchDocs);
+
+        // Increment organiser events count by the number of created events
+        await Event.updateEventsCount(req.user.id, batchDocs.length);
+
+        return res.status(201).json({
+          success: true,
+          message: `${batchDocs.length} recurring event${batchDocs.length > 1 ? 's' : ''} created successfully`,
+          data: {
+            eventsCreated: batchDocs.length,
+            recurrenceWeeks,
+            events: batchDocs.map(formatEventResponse),
+          },
+        });
+      }
+
+      // -----------------------------------------------------------------------
+      // Non-recurring: create a single event (original path)
+      // -----------------------------------------------------------------------
       const event = await Event.create(eventData);
 
       res.status(201).json({
@@ -157,6 +271,7 @@ const createEvent = async (req, res, next) => {
     }
   });
 };
+
 
 /**
  * @desc    Get event details

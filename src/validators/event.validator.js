@@ -63,6 +63,14 @@ const validateEvent = (data, isUpdate = false) => {
     }
   }
 
+  // Recurrence weeks validation (optional, 1-4)
+  if (data.recurrenceWeeks !== undefined && data.recurrenceWeeks !== null) {
+    const weeks = parseInt(data.recurrenceWeeks, 10);
+    if (isNaN(weeks) || weeks < 1 || weeks > 4) {
+      errors.push('recurrenceWeeks must be an integer between 1 and 4');
+    }
+  }
+
   // Event location validation
   if (!isUpdate && (!data.eventLocation || data.eventLocation.trim().length < 3)) {
     errors.push('Event location is required (minimum 3 characters)');

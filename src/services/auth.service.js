@@ -249,16 +249,22 @@ const signin = async (emailOrMobile, password) => {
   // Find user by email or mobile number
   const user = await User.findByEmailOrMobile(emailOrMobile);
   if (!user) {
-    throw new Error('Invalid credentials');
+    const err = new Error('Invalid credentials');
+    err.statusCode = 401;
+    throw err;
   }
 
   // Check password (user may have no password if they signed up without one)
   if (!user.password) {
-    throw new Error('No password set. Please use forgot password to set a password.');
+    const err = new Error('No password set. Please use forgot password to set a password.');
+    err.statusCode = 401;
+    throw err;
   }
   const isPasswordValid = await bcrypt.compare(password, user.password);
   if (!isPasswordValid) {
-    throw new Error('Invalid credentials');
+    const err = new Error('Invalid credentials');
+    err.statusCode = 401;
+    throw err;
   }
 
   // Generate tokens (access token and refresh token)
@@ -461,13 +467,17 @@ const verifyForgotPasswordOTP = async (emailOrMobile, otp) => {
       user = await User.findByMobileNumber(normalizedIdentifier);
     } catch (error) {
       console.log('❌ Invalid mobile number format:', error.message);
-      throw new Error('Invalid credentials');
+      const err = new Error('Invalid credentials');
+      err.statusCode = 401;
+      throw err;
     }
   }
 
   if (!user) {
     console.log('❌ User not found');
-    throw new Error('Invalid credentials');
+    const err = new Error('Invalid credentials');
+    err.statusCode = 401;
+    throw err;
   }
 
   console.log('✅ User found');
@@ -480,12 +490,16 @@ const verifyForgotPasswordOTP = async (emailOrMobile, otp) => {
   // Verify OTP and expiry
   if (user.resetPasswordToken !== hashedOTP) {
     console.log('❌ OTP Hash Mismatch!');
-    throw new Error('Invalid OTP');
+    const err = new Error('Invalid OTP');
+    err.statusCode = 401;
+    throw err;
   }
 
   if (!user.resetPasswordExpire || new Date() > user.resetPasswordExpire) {
     console.log('❌ OTP Expired!');
-    throw new Error('OTP has expired');
+    const err = new Error('OTP has expired');
+    err.statusCode = 401;
+    throw err;
   }
 
   console.log('✅ OTP Verified Successfully!');
@@ -531,12 +545,16 @@ const setNewPassword = async (emailOrMobile, verificationToken, newPassword) => 
       normalizedIdentifier = normalizeMobileNumber(emailOrMobile);
       user = await User.findByMobileNumber(normalizedIdentifier);
     } catch (error) {
-      throw new Error('Invalid credentials');
+      const err = new Error('Invalid credentials');
+      err.statusCode = 401;
+      throw err;
     }
   }
 
   if (!user) {
-    throw new Error('Invalid credentials');
+    const err = new Error('Invalid credentials');
+    err.statusCode = 401;
+    throw err;
   }
 
   // Hash the verification token to compare with stored hash
@@ -544,11 +562,15 @@ const setNewPassword = async (emailOrMobile, verificationToken, newPassword) => 
 
   // Verify token and expiry
   if (user.resetPasswordToken !== hashedToken) {
-    throw new Error('Invalid or expired verification token. Please verify OTP again.');
+    const err = new Error('Invalid or expired verification token. Please verify OTP again.');
+    err.statusCode = 401;
+    throw err;
   }
 
   if (!user.resetPasswordExpire || new Date() > user.resetPasswordExpire) {
-    throw new Error('Verification token has expired. Please request a new OTP.');
+    const err = new Error('Verification token has expired. Please request a new OTP.');
+    err.statusCode = 401;
+    throw err;
   }
 
   // Update password and clear verification token
@@ -631,12 +653,16 @@ const resetPassword = async (emailOrMobile, otp, newPassword) => {
       normalizedIdentifier = normalizeMobileNumber(emailOrMobile);
       user = await User.findByMobileNumber(normalizedIdentifier);
     } catch (error) {
-      throw new Error('Invalid credentials');
+      const err = new Error('Invalid credentials');
+      err.statusCode = 401;
+      throw err;
     }
   }
 
   if (!user) {
-    throw new Error('Invalid credentials');
+    const err = new Error('Invalid credentials');
+    err.statusCode = 401;
+    throw err;
   }
 
   // Hash the OTP to compare with stored hash
@@ -644,11 +670,15 @@ const resetPassword = async (emailOrMobile, otp, newPassword) => {
 
   // Verify OTP and expiry
   if (user.resetPasswordToken !== hashedOTP) {
-    throw new Error('Invalid OTP');
+    const err = new Error('Invalid OTP');
+    err.statusCode = 401;
+    throw err;
   }
 
   if (!user.resetPasswordExpire || new Date() > user.resetPasswordExpire) {
-    throw new Error('OTP has expired');
+    const err = new Error('OTP has expired');
+    err.statusCode = 401;
+    throw err;
   }
 
   // Update password and clear OTP
@@ -719,7 +749,9 @@ const verifyOTP = async (mobileNumber, otp) => {
   const user = await User.findByMobileWithValidOTP(mobileNumber, otp);
   
   if (!user) {
-    throw new Error('Invalid or expired OTP');
+    const err = new Error('Invalid or expired OTP');
+    err.statusCode = 401;
+    throw err;
   }
 
   // Update user - mark mobile as verified and clear OTP
@@ -867,7 +899,9 @@ const verifyWhatsAppLogin = async (mobileNumber, otp) => {
   const user = await User.findByMobileWithValidOTP(mobileNumber, otp);
   
   if (!user) {
-    throw new Error('Invalid or expired OTP');
+    const err = new Error('Invalid or expired OTP');
+    err.statusCode = 401;
+    throw err;
   }
 
   // Clear OTP after successful login
@@ -938,7 +972,9 @@ const refreshAccessToken = async (refreshToken) => {
   const tokenDoc = await Token.findByToken(refreshToken);
   
   if (!tokenDoc) {
-    throw new Error('Invalid or expired refresh token');
+    const err = new Error('Invalid or expired refresh token');
+    err.statusCode = 401;
+    throw err;
   }
 
   // Generate new access token

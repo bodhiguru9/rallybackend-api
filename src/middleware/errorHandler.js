@@ -24,6 +24,22 @@ const errorHandler = (err, req, res, next) => {
     error = { message, statusCode: 400 };
   }
 
+  // Auth errors safety net: if service threw a known auth error without statusCode,
+  // classify it as 401 rather than defaulting to 500
+  const AUTH_ERROR_MESSAGES = [
+    'Invalid credentials',
+    'No password set',
+    'Invalid OTP',
+    'OTP has expired',
+    'Invalid or expired OTP',
+    'Invalid or expired verification token',
+    'Verification token has expired',
+    'Invalid or expired refresh token',
+  ];
+  if (!error.statusCode && AUTH_ERROR_MESSAGES.some(msg => err.message && err.message.startsWith(msg))) {
+    error.statusCode = 401;
+  }
+
   res.status(error.statusCode || 500).json({
     success: false,
     error: error.message || 'Server Error',

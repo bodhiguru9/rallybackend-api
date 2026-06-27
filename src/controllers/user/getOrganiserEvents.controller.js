@@ -58,22 +58,27 @@ const getOrganiserEventsWithParticipants = async (req, res, next) => {
     }
 
     const { page, perPage, skip } = getPaginationParams(req.query.page, req.query.perPage || 20);
-    const events = await Event.findByCreator(organiser._id, 1000, 0);
 
-    // Paginate FIRST, then enrich only the current page (was: enrich all N events, then slice)
-    const totalCount = events.length;
-    const pageEvents = events.slice(skip, skip + perPage);
+    // DB-level pagination — only fetch the current page (was: fetch 1000, slice in JS)
+    const totalCount = await Event.getEventCount(organiser._id);
+    const pageEvents = await Event.findByCreator(organiser._id, perPage, skip);
 
-    const paginatedEvents = await Promise.all(
-      pageEvents.map(async (event) => {
-        const participants = await EventJoin.getEventParticipants(event._id, event.eventDateTime || null, 10000, 0);
-        return {
-          ...formatEventResponse(event),
-          participants,
-          participantsCount: await EventJoin.getParticipantCount(event._id, event.eventDateTime || null),
-        };
-      })
-    );
+    // Batch-fetch participant counts and participants for the page in bulk
+    const { batchParticipantCounts, batchEventParticipants } = require('../../utils/batchEventData');
+    const pageEventIds = pageEvents.map((e) => e._id);
+    const [participantCountMap, participantsMap] = await Promise.all([
+      batchParticipantCounts(pageEventIds),
+      batchEventParticipants(pageEventIds, 100), // organiser dashboard needs full list
+    ]);
+
+    const paginatedEvents = pageEvents.map((event) => {
+      const eventIdStr = event._id.toString();
+      return {
+        ...formatEventResponse(event),
+        participants: participantsMap.get(eventIdStr) || [],
+        participantsCount: participantCountMap.get(eventIdStr) || 0,
+      };
+    });
 
     const pagination = createPaginationResponse(totalCount, page, perPage);
 

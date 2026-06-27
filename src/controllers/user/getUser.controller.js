@@ -76,68 +76,84 @@ const getUser = async (req, res, next) => {
       userResponse.instagramLink = user.instagramLink || null;
       userResponse.profileVisibility = user.profileVisibility || 'private';
       
-      // Get actual follower count from follows collection
-      const followerCount = await Follow.getFollowerCount(user._id.toString());
-      userResponse.followersCount = followerCount;
-      
-      userResponse.eventsCreated = user.eventsCreated || 0;
-      userResponse.totalAttendees = user.totalAttendees || 0;
-      userResponse.followingCount = user.followingCount || 0;
+      // Run ALL independent queries in parallel (was: 7 sequential awaits)
+      const db = getDB();
+      const eventsCollection = db.collection('events');
+      const joinsCollection = db.collection('eventJoins');
+      const organiserId = user._id;
+      const organiserIdString = organiserId.toString();
 
-      try {
-        const db = getDB();
-        const eventsCollection = db.collection('events');
-        const joinsCollection = db.collection('eventJoins');
-        const organiserId = user._id;
-        const organiserIdString = organiserId.toString();
-
-        const events = await eventsCollection
+      const [
+        followerCount,
+        eventsResult,
+        isFollowing,
+        isRequested,
+        favoriteEvents,
+        bookingStatsMap,
+      ] = await Promise.all([
+        Follow.getFollowerCount(user._id.toString()),
+        eventsCollection
           .find({ $or: [{ creatorId: organiserId }, { creatorId: organiserIdString }] })
           .project({ _id: 1 })
-          .toArray();
-        if (events.length === 0) {
-          userResponse.totalAttendees = 0;
-        } else {
-          const eventIds = events.map((event) => event._id);
-          const distinctUserIds = await joinsCollection.distinct('userId', {
-            eventId: { $in: eventIds },
-          });
-          userResponse.totalAttendees = distinctUserIds.length;
-        }
-      } catch (error) {
-        // Keep stored totalAttendees if recalculation fails
-      }
+          .toArray(),
+        authenticatedUserId
+          ? Follow.isFollowing(authenticatedUserId, user._id.toString())
+          : Promise.resolve(false),
+        authenticatedUserId
+          ? Request.hasPendingRequest(authenticatedUserId, user._id.toString())
+          : Promise.resolve(false),
+        Favorite.getUserFavorites(user._id, 20, 0),
+        getBookingStatsByUsers([user._id]),
+      ]);
 
-      // If user is authenticated, check if they are following this organiser
-      if (authenticatedUserId) {
-        const isFollowing = await Follow.isFollowing(authenticatedUserId, user._id.toString());
-        userResponse.isFollowing = isFollowing;
+      userResponse.followersCount = followerCount;
 
-        const isRequested = await Request.hasPendingRequest(authenticatedUserId, user._id.toString());
-        userResponse.isRequested = isRequested;
+      // Compute totalAttendees from eventsResult (synchronous after the parallel fetch)
+      if (eventsResult.length === 0) {
+        userResponse.totalAttendees = 0;
       } else {
-        userResponse.isFollowing = false;
-        userResponse.isRequested = false;
+        const eventIds = eventsResult.map((event) => event._id);
+        const distinctUserIds = await joinsCollection.distinct('userId', {
+          eventId: { $in: eventIds },
+        });
+        userResponse.totalAttendees = distinctUserIds.length;
       }
+
+      userResponse.isFollowing = isFollowing;
+      userResponse.isRequested = isRequested;
 
       // Show if organiser can be followed (is public)
       userResponse.canFollow = user.profileVisibility === 'public';
 
+      // Favorite events
+      const favoriteEventNames = favoriteEvents
+        .map((fav) => fav.event?.eventName || fav.event?.eventTitle)
+        .filter(Boolean);
+      userResponse.favoriteEvents = favoriteEventNames;
+      userResponse.favoriteEventsCount = favoriteEvents.length;
+
+      // Booking stats
+      const bookingStats = bookingStatsMap.get(user._id.toString()) || { bookedCount: 0, totalSpent: 0 };
+      userResponse.totalBookedEvents = bookingStats.bookedCount;
+      userResponse.totalBookingAmount = bookingStats.totalSpent;
+
+    } else {
+      // Non-organiser users: simpler path
+      const [favoriteEvents, bookingStatsMap] = await Promise.all([
+        Favorite.getUserFavorites(user._id, 20, 0),
+        getBookingStatsByUsers([user._id]),
+      ]);
+
+      const favoriteEventNames = favoriteEvents
+        .map((fav) => fav.event?.eventName || fav.event?.eventTitle)
+        .filter(Boolean);
+      userResponse.favoriteEvents = favoriteEventNames;
+      userResponse.favoriteEventsCount = favoriteEvents.length;
+
+      const bookingStats = bookingStatsMap.get(user._id.toString()) || { bookedCount: 0, totalSpent: 0 };
+      userResponse.totalBookedEvents = bookingStats.bookedCount;
+      userResponse.totalBookingAmount = bookingStats.totalSpent;
     }
-
-    // Get favorite events for this user
-    const favoriteEvents = await Favorite.getUserFavorites(user._id, 20, 0);
-    const favoriteEventNames = favoriteEvents
-      .map((fav) => fav.event?.eventName || fav.event?.eventTitle)
-      .filter(Boolean);
-
-    userResponse.favoriteEvents = favoriteEventNames;
-    userResponse.favoriteEventsCount = favoriteEvents.length;
-
-    const bookingStatsMap = await getBookingStatsByUsers([user._id]);
-    const bookingStats = bookingStatsMap.get(user._id.toString()) || { bookedCount: 0, totalSpent: 0 };
-    userResponse.totalBookedEvents = bookingStats.bookedCount;
-    userResponse.totalBookingAmount = bookingStats.totalSpent;
 
     res.status(200).json({
       success: true,

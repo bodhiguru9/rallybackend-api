@@ -151,7 +151,20 @@ if (process.env.VERCEL || require.main !== module) {
   });
 }
 
-// API routes
+// Global API request timeout — prevents 499s from clients waiting indefinitely.
+// Returns a clean 503 JSON instead of the client closing the connection (which shows as 499 in logs).
+app.use('/api', (req, res, next) => {
+  res.setTimeout(15000, () => {
+    if (!res.headersSent) {
+      res.status(503).json({
+        success: false,
+        error: 'Request timed out. Please try again.',
+      });
+    }
+  });
+  next();
+});
+
 // API routes
 app.use('/api', apiRoutes);
 

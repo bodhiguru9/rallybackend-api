@@ -73,8 +73,8 @@ const getOrganiserAnalytics = async (req, res, next) => {
       }
     }
 
-    // Get Organiser's MongoDB ObjectId for querying events
-    const organizerUser = await User.findByUserId(organizerUserId);
+    // Reuse the organizer object already fetched above (was: duplicate User.findByUserId call)
+    const organizerUser = queryOrganizerId ? (await User.findByUserId(organizerUserId)) : req.user;
     if (!organizerUser) {
       return res.status(404).json({
         success: false,
@@ -184,13 +184,23 @@ const getOrganiserAnalytics = async (req, res, next) => {
       ...revenueDateFilter,
     };
 
-    const payments = await paymentsCollection.find(paymentQuery).toArray();
+    // Fetch payments and bookings in parallel (was: sequential)
+    const [payments, bookings] = await Promise.all([
+      paymentsCollection.find(paymentQuery).toArray(),
+      bookingsCollection.find({
+        eventId: { $in: eventObjectIds },
+        status: 'booked',
+      }).toArray(),
+    ]);
 
-    // Get all booked bookings for Organiser's events
-    const bookings = await bookingsCollection.find({
-      eventId: { $in: eventObjectIds },
-      status: 'booked',
-    }).toArray();
+    // Pre-build paymentsByEvent Map (O(N)) to replace O(N²) filter loops later
+    const paymentsByEvent = new Map();
+    for (const p of payments) {
+      const key = p.eventId ? p.eventId.toString() : null;
+      if (!key) continue;
+      if (!paymentsByEvent.has(key)) paymentsByEvent.set(key, []);
+      paymentsByEvent.get(key).push(p);
+    }
 
     const totalBookedRevenue = bookings.reduce((sum, booking) => sum + (booking.finalAmount || booking.amount || 0), 0);
     const bookingsByEvent = new Map();
@@ -221,10 +231,8 @@ const getOrganiserAnalytics = async (req, res, next) => {
         mongoId: event._id.toString(), // MongoDB ObjectId for reference
       };
 
-      // Calculate revenue for this event
-      const eventPayments = payments.filter(
-        p => p.eventId && p.eventId.toString() === event._id.toString()
-      );
+      // Calculate revenue for this event using pre-built Map (was: O(N×M) filter per event)
+      const eventPayments = paymentsByEvent.get(event._id.toString()) || [];
       eventData.revenue = eventPayments.reduce((sum, p) => sum + (p.finalAmount || p.amount || 0), 0);
       eventData.totalTransactions = eventPayments.length;
       const bookingStats = bookingsByEvent.get(event._id.toString()) || { count: 0, revenue: 0 };
@@ -286,13 +294,18 @@ const getOrganiserAnalytics = async (req, res, next) => {
       };
     }).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 
-    const bookedEvents = await Promise.all(
-      allEvents
-        .filter((event) => bookingsByEvent.has(event._id.toString()))
-        .map(async (event) => {
+    // Batch-fetch participant counts and preview for booked events
+    const { batchParticipantCounts, batchEventParticipants } = require('../../utils/batchEventData');
+    const bookedEventsList = allEvents.filter((event) => bookingsByEvent.has(event._id.toString()));
+    const bookedEventIds = bookedEventsList.map((e) => e._id);
+    const [bookedCountMap, bookedParticipantsMap] = await Promise.all([
+      batchParticipantCounts(bookedEventIds),
+      batchEventParticipants(bookedEventIds, 10),
+    ]);
+
+    const bookedEvents = bookedEventsList.map((event) => {
           const bookingStats = bookingsByEvent.get(event._id.toString());
-          const participantsCount = await EventJoin.getParticipantCount(event._id);
-          const participants = await EventJoin.getEventParticipants(event._id, null, 10, 0);
+          const eventIdStr = event._id.toString();
 
           return {
             eventId: event.eventId,
@@ -306,13 +319,12 @@ const getOrganiserAnalytics = async (req, res, next) => {
             eventImage: (event.eventImages && event.eventImages.length > 0)
               ? event.eventImages[0]
               : (event.gameImages && event.gameImages.length > 0 ? event.gameImages[0] : null),
-            participants,
-            participantsCount,
+            participants: bookedParticipantsMap.get(eventIdStr) || [],
+            participantsCount: bookedCountMap.get(eventIdStr) || 0,
             bookedCount: bookingStats.count,
             bookedRevenue: bookingStats.revenue,
           };
-        })
-    );
+        });
 
     // Calculate statistics
     const stats = {
@@ -336,9 +348,7 @@ const getOrganiserAnalytics = async (req, res, next) => {
         if (!revenueBySport[category]) {
           revenueBySport[category] = 0;
         }
-        const eventPayments = payments.filter(
-          p => p.eventId && p.eventId.toString() === event._id.toString()
-        );
+        const eventPayments = paymentsByEvent.get(event._id.toString()) || [];
         const eventRevenue = eventPayments.reduce((sum, p) => sum + (p.finalAmount || p.amount || 0), 0);
         revenueBySport[category] += eventRevenue;
       }

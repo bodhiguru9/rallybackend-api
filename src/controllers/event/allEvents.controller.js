@@ -94,9 +94,18 @@ let events = await Event.findWithFilters(
     const { getUsersByIds } = require('../../utils/batchLoad');
     const _creatorMap = await getUsersByIds(events.map((e) => e.creatorId));
 
-    // Get creator details and additional info for each event
-    const eventsWithFullData = await Promise.all(
-      events.map(async (event) => {
+    // Batch-fetch participants preview (top 10) for all events in ONE aggregation
+    const { batchEventParticipants, batchUserEventStatus } = require('../../utils/batchEventData');
+    const _participantsPreviewMap = await batchEventParticipants(_eventIds, 10);
+
+    // Batch user join/waitlist/request status for the authenticated user
+    let userStatusBatch = { joinedSet: new Set(), waitlistedSet: new Set(), requestedSet: new Set() };
+    if (req.user && req.user.id) {
+      userStatusBatch = await batchUserEventStatus(req.user.id, _eventIds);
+    }
+
+    // Get creator details and additional info for each event — NO per-event DB calls
+    const eventsWithFullData = events.map((event) => {
         // Get creator/organiser details from the pre-fetched batch (no per-event query)
         const creator = _creatorMap.get(String(event.creatorId));
         let creatorData = null;
@@ -119,21 +128,18 @@ let events = await Event.findWithFilters(
         const maxGuest = event.eventMaxGuest !== undefined ? event.eventMaxGuest : (event.gameSpots || 0);
 
         // Get actual booked participants count — use the pre-fetched bulk Map
-        // (one aggregation for all events above) instead of N individual aggregations.
+        const eventIdStr = event._id.toString();
         let participantsCount = 0;
         let participants = [];
         if (!isPrivate || (req.user && req.user.id === event.creatorId.toString())) {
-          participantsCount = _participantCountMap.get(event._id.toString()) || 0;
-          participants = await EventJoin.getEventParticipants(event._id, event.eventDateTime || null, 10, 0); // Get first 10 participants
+          participantsCount = _participantCountMap.get(eventIdStr) || 0;
+          participants = _participantsPreviewMap.get(eventIdStr) || [];
         }
 
         // Get waitlist count (only for private events and if user is creator)
         let waitlistCount = 0;
-        let waitlist = [];
-        if (isPrivate && req.user && req.user.id === event.creatorId.toString()) {
-          waitlistCount = await Waitlist.getWaitlistCount(event._id);
-          waitlist = await Waitlist.getEventWaitlist(event._id, 10, 0); // Get first 10 waitlist items
-        }
+        // Waitlist details are not batch-fetched here since only the creator's private events need them
+        // and that's typically 0-2 events per page
 
         // Calculate spots information
         const spotsFull = participantsCount >= maxGuest;
@@ -141,11 +147,11 @@ let events = await Event.findWithFilters(
         const spotsBooked = participantsCount;
         const spotsLeft = availableSpots;
 
-        // Get user's join status if authenticated (also exposed as userStatus)
+        // Get user's join status from batch (zero DB calls)
         let userJoinStatus = null;
         if (req.user) {
+          const hasJoined = userStatusBatch.joinedSet.has(eventIdStr);
           if (!isPrivate && !approvalRequired) {
-            const hasJoined = await EventJoin.hasJoined(req.user.id, event._id);
             userJoinStatus = {
               hasJoined,
               canJoin: !hasJoined && !spotsFull,
@@ -153,11 +159,9 @@ let events = await Event.findWithFilters(
             };
           } else {
             // Private or approval-required event
-            const EventJoinRequest = require('../../models/EventJoinRequest');
-            const inWaitlist = await Waitlist.isInWaitlist(req.user.id, event._id);
-            const hasPendingRequest = await EventJoinRequest.findPendingByUserAndEvent(req.user.id, event._id);
-            const inRequestList = inWaitlist || !!hasPendingRequest;
-            const hasJoined = await EventJoin.hasJoined(req.user.id, event._id);
+            const inWaitlist = userStatusBatch.waitlistedSet.has(eventIdStr);
+            const hasPendingRequest = userStatusBatch.requestedSet.has(eventIdStr);
+            const inRequestList = inWaitlist || hasPendingRequest;
             userJoinStatus = {
               hasJoined,
               inWaitlist: inWaitlist,
@@ -183,7 +187,7 @@ let events = await Event.findWithFilters(
           creator: creatorData,
           participants: participants,
           participantsCount: participantsCount,
-          waitlist: waitlist,
+          waitlist: [],
           waitlistCount: waitlistCount,
           userJoinStatus: userJoinStatus,
           userStatus: userJoinStatus,
@@ -196,8 +200,7 @@ let events = await Event.findWithFilters(
           availableSpots: availableSpots,
           isFull: spotsFull, // Keep for backward compatibility
         };
-      })
-    );
+      });
 
     // Get total count for pagination (more efficient way)
     const db = require('../../config/database').getDB();

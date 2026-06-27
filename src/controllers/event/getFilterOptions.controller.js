@@ -1,6 +1,11 @@
 const { getDB } = require('../../config/database');
 const Sport = require('../../models/Sport');
 
+// In-process TTL cache for filter options (changes rarely, queried often)
+let _filterOptionsCache = null;
+let _filterOptionsCacheExpiry = 0;
+const FILTER_OPTIONS_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
 /**
  * @desc    Get unique filter options (sports, eventTypes, locations, prices) from all events
  * @route   GET /api/events/filter-options
@@ -18,6 +23,11 @@ const Sport = require('../../models/Sport');
  * 2. Sports from events (eventSports field)
  */
 const getFilterOptions = async (req, res, next) => {
+  // Serve from cache if fresh
+  if (_filterOptionsCache && Date.now() < _filterOptionsCacheExpiry) {
+    return res.status(200).json(_filterOptionsCache);
+  }
+
   try {
     const db = getDB();
     const eventsCollection = db.collection('events');
@@ -160,7 +170,7 @@ const getFilterOptions = async (req, res, next) => {
       .filter((value, index, self) => self.indexOf(value) === index) // Remove duplicates
       .sort((a, b) => a - b); // Sort prices ascending
 
-    res.status(200).json({
+    const responsePayload = {
       success: true,
       message: 'Filter options retrieved successfully',
       data: {
@@ -169,7 +179,13 @@ const getFilterOptions = async (req, res, next) => {
         locations,
         prices
       }
-    });
+    };
+
+    // Store in cache
+    _filterOptionsCache = responsePayload;
+    _filterOptionsCacheExpiry = Date.now() + FILTER_OPTIONS_TTL_MS;
+
+    res.status(200).json(responsePayload);
   } catch (error) {
     next(error);
   }

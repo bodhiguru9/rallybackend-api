@@ -49,29 +49,37 @@ const getCommunityDetails = async (req, res, next) => {
       });
     }
 
-    // Get all events created by this organiser
-    const allEvents = await Event.findByCreator(organiser._id, 10000, 0);
-    const totalEventsHosted = allEvents.length;
+    // Get total event count and only the current page of events (DB-level pagination)
+    const Event = require('../../models/Event');
+    const totalEventsHosted = await Event.getEventCount(organiser._id);
+    const pageEvents = await Event.findByCreator(organiser._id, perPage, skip);
 
-    // Calculate total attendees across all events
-    const allEventIds = allEvents.map((e) => e._id);
+    // Calculate total attendees across all events (single aggregation)
     let totalAttendees = 0;
-    if (allEventIds.length > 0) {
+    if (totalEventsHosted > 0) {
       const eventJoinsCollection = db.collection('eventJoins');
-      const attendeesByEvent = await eventJoinsCollection
-        .aggregate([
-          { $match: { eventId: { $in: allEventIds } } },
-          { $group: { _id: '$eventId', count: { $sum: 1 } } },
-        ])
+      const eventsCollection = db.collection('events');
+
+      // Get all event IDs for this organiser (lightweight — only _id projection)
+      const allEventDocs = await eventsCollection
+        .find({ creatorId: { $in: [organiser._id, organiser._id.toString()] } })
+        .project({ _id: 1 })
         .toArray();
+      const allEventIds = allEventDocs.map((e) => e._id);
 
-      attendeesByEvent.forEach((ae) => {
-        totalAttendees += ae.count || 0;
-      });
+      if (allEventIds.length > 0) {
+        const attendeesByEvent = await eventJoinsCollection
+          .aggregate([
+            { $match: { eventId: { $in: allEventIds } } },
+            { $group: { _id: '$eventId', count: { $sum: 1 } } },
+          ])
+          .toArray();
+
+        attendeesByEvent.forEach((ae) => {
+          totalAttendees += ae.count || 0;
+        });
+      }
     }
-
-    // Always show all events (removed private/public visibility logic)
-    const events = allEvents;
 
     // Get follower count (total subscribers)
     const totalSubscribers = await Follow.getFollowerCount(organiser._id.toString());
@@ -88,61 +96,35 @@ const getCommunityDetails = async (req, res, next) => {
       });
     }
 
-    // Format events with full details including spots information
-    const eventsWithDetails = await Promise.all(
-      events.map(async (event) => {
+    // Batch-fetch participant counts and participants preview for the current page only
+    const { batchParticipantCounts, batchEventParticipants, batchUserEventStatus } = require('../../utils/batchEventData');
+    const pageEventIds = pageEvents.map((e) => e._id);
+    const [participantCountMap, participantsPreviewMap] = await Promise.all([
+      batchParticipantCounts(pageEventIds),
+      batchEventParticipants(pageEventIds, 10),
+    ]);
+
+    // Batch user status if authenticated
+    let userStatusBatch = { joinedSet: new Set(), waitlistedSet: new Set(), requestedSet: new Set() };
+    if (req.user && req.user.id) {
+      userStatusBatch = await batchUserEventStatus(req.user.id, pageEventIds);
+    }
+
+    // Format events with full details — NO per-event DB calls
+    const eventsWithDetails = pageEvents.map((event) => {
         // Support both old and new field names for backward compatibility
         const isPrivate = event.IsPrivateEvent !== undefined ? event.IsPrivateEvent : (event.visibility === 'private');
         const maxGuest = event.eventMaxGuest !== undefined ? event.eventMaxGuest : (event.gameSpots || 0);
 
-        // Get actual booked participants count
-        let participantsCount = 0;
-        let participants = [];
-        if (!isPrivate) {
-          participantsCount = await EventJoin.getParticipantCount(event._id);
-          participants = await EventJoin.getEventParticipants(event._id, null, 10, 0); // Get first 10 participants
-        }
-
-        // Get waitlist count for private events
-        let waitlistCount = 0;
-        if (isPrivate) {
-          waitlistCount = await Waitlist.getWaitlistCount(event._id);
-        }
+        const eventIdStr = event._id.toString();
+        const participantsCount = participantCountMap.get(eventIdStr) || 0;
+        const participants = participantsPreviewMap.get(eventIdStr) || [];
 
         // Calculate spots information
         const spotsFull = participantsCount >= maxGuest;
         const availableSpots = Math.max(0, maxGuest - participantsCount);
         const spotsBooked = participantsCount;
         const spotsLeft = availableSpots;
-
-        // Get user's join status if authenticated
-        let userJoinStatus = null;
-        if (req.user) {
-          if (!isPrivate) {
-            const hasJoined = await EventJoin.hasJoined(req.user.id, event._id);
-            const inWaitlist = await Waitlist.isInWaitlist(req.user.id, event._id);
-            userJoinStatus = {
-              hasJoined,
-              inWaitlist,
-              canJoin: !hasJoined && !spotsFull && !inWaitlist,
-              action: hasJoined ? 'joined' : inWaitlist ? 'requested' : spotsFull ? 'join-waitlist' : 'join',
-            };
-          } else {
-            const inWaitlist = await Waitlist.isInWaitlist(req.user.id, event._id);
-            const hasJoined = await EventJoin.hasJoined(req.user.id, event._id);
-            userJoinStatus = {
-              hasJoined,
-              inWaitlist,
-              canRequest: !hasJoined && !inWaitlist,
-              action: hasJoined ? 'joined' : inWaitlist ? 'requested' : 'request-join',
-            };
-          }
-        } else {
-          userJoinStatus = {
-            action: !isPrivate ? (spotsFull ? 'join-waitlist' : 'join') : 'request-join',
-            requiresAuth: true,
-          };
-        }
 
         // Return only limited event fields as requested
         return {
@@ -170,12 +152,10 @@ const getCommunityDetails = async (req, res, next) => {
           eventCreatorName: organiser.fullName,
           eventCreatorProfilePic: organiser.profilePic,
         };
-      })
-    );
+      });
 
-    // Apply pagination to events
-    const totalCount = eventsWithDetails.length;
-    const paginatedEvents = eventsWithDetails.slice(skip, skip + perPage);
+    // Pagination uses the DB total count
+    const totalCount = totalEventsHosted;
     const pagination = createPaginationResponse(totalCount, page, perPage);
 
     return res.status(200).json({
@@ -197,7 +177,7 @@ const getCommunityDetails = async (req, res, next) => {
           isVerified: !!(organiser.isEmailVerified || organiser.isMobileVerified),
           instagramLink: organiser.instagramLink || organiser.instagram_link || null,
         },
-        events: paginatedEvents,
+        events: eventsWithDetails,
         pagination,
         summary: {
           totalEvents: totalCount,

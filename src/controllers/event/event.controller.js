@@ -8,7 +8,7 @@ const Payment = require('../../models/Payment');
 const { validateEvent, validateEventFilters } = require('../../validators/event.validator');
 const { uploadEventMedia } = require('../../middleware/eventUpload');
 const { findEventById, validateEventId } = require('../../utils/eventHelper');
-const { processEventData, formatEventResponse } = require('../../utils/eventFields');
+const { processEventData, formatEventResponse, calculateEventStatus } = require('../../utils/eventFields');
 const fs = require('fs');
 const EventJoinRequest = require('../../models/EventJoinRequest');
 const { getDB } = require('../../config/database');
@@ -235,17 +235,22 @@ const createEvent = async (req, res, next) => {
         for (const occStart of occurrenceDates) {
           const { eventId } = await getNextUniqueEventId();
           const occEnd = new Date(occStart.getTime() + durationMs);
-          const doc = {
+          
+          const docData = {
             ...eventData,
             eventId,
-            eventDateTime: occStart.toISOString(),
-            eventEndDateTime: occEnd.toISOString(),
+            eventDateTime: occStart,
+            eventEndDateTime: occEnd,
             // Standalone event — no frequency marker, no occurrenceStart needed for joins
             eventFrequency: [],
-            createdAt: now,
-            updatedAt: now,
+            eventStatus: calculateEventStatus(occStart),
           };
-          batchDocs.push(doc);
+          
+          const eventInstance = new Event(docData);
+          eventInstance.createdAt = now;
+          eventInstance.updatedAt = now;
+          
+          batchDocs.push(eventInstance);
         }
 
         // Batch insert

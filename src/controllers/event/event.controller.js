@@ -48,6 +48,12 @@ const createEvent = async (req, res, next) => {
         });
       }
 
+      // Normalize 'eventFrequency[]' bracket key to 'eventFrequency' so validators
+      // and processEventData can find it under the expected property name.
+      if (req.body['eventFrequency[]'] && !req.body.eventFrequency) {
+        req.body.eventFrequency = req.body['eventFrequency[]'];
+      }
+
       // Validate input
       const validation = validateEvent(req.body);
       if (!validation.isValid) {
@@ -146,7 +152,13 @@ const createEvent = async (req, res, next) => {
       // If the request specifies a weekly or daily frequency with recurrenceWeeks,
       // generate m×n discrete standalone events instead of one recurring document.
       // -----------------------------------------------------------------------
-      const rawFrequency = req.body.eventFrequency || [];
+      // Support both 'eventFrequency' and 'eventFrequency[]' FormData keys.
+      // Multer stores repeated append('eventFrequency[]', v) under req.body['eventFrequency[]'],
+      // NOT req.body.eventFrequency, so we check both to be safe.
+      const rawFrequency =
+        req.body.eventFrequency ||
+        req.body['eventFrequency[]'] ||
+        [];
       const frequencyArray = Array.isArray(rawFrequency) ? rawFrequency : [rawFrequency];
       const recurrenceWeeks = Math.min(Math.max(parseInt(req.body.recurrenceWeeks || 4, 10) || 4, 1), 4);
 

@@ -137,11 +137,16 @@ const deleteEvent = async (req, res, next) => {
     const db = getDB();
     const eventObjectId = event._id;
     const eventIdString = eventObjectId.toString();
+    const eventSeqId = event.eventId || null;
+
+    const eventIdQuery = {
+      $in: [eventObjectId, eventIdString, eventSeqId].filter(Boolean)
+    };
 
     // Remove joins (participants)
     try {
       const joinsCollection = db.collection('eventJoins');
-      await joinsCollection.deleteMany({ eventId: eventObjectId });
+      await joinsCollection.deleteMany({ eventId: eventIdQuery });
     } catch (error) {
       console.error('Error cleaning up event joins:', error);
     }
@@ -149,7 +154,7 @@ const deleteEvent = async (req, res, next) => {
     // Remove waitlist entries
     try {
       const waitlistCollection = db.collection('waitlist');
-      await waitlistCollection.deleteMany({ eventId: eventObjectId });
+      await waitlistCollection.deleteMany({ eventId: eventIdQuery });
     } catch (error) {
       console.error('Error cleaning up waitlist:', error);
     }
@@ -157,7 +162,7 @@ const deleteEvent = async (req, res, next) => {
     // Remove pending private-event join requests
     try {
       const eventJoinRequestsCollection = db.collection('eventJoinRequests');
-      await eventJoinRequestsCollection.deleteMany({ eventId: eventObjectId });
+      await eventJoinRequestsCollection.deleteMany({ eventId: eventIdQuery });
     } catch (error) {
       console.error('Error cleaning up event join requests:', error);
     }
@@ -165,7 +170,7 @@ const deleteEvent = async (req, res, next) => {
     // Remove event invites
     try {
       const invitesCollection = db.collection('eventInvites');
-      await invitesCollection.deleteMany({ eventId: eventObjectId });
+      await invitesCollection.deleteMany({ eventId: eventIdQuery });
     } catch (error) {
       console.error('Error cleaning up event invites:', error);
     }
@@ -173,7 +178,7 @@ const deleteEvent = async (req, res, next) => {
     // Remove event reminders
     try {
       const remindersCollection = db.collection('eventReminders');
-      await remindersCollection.deleteMany({ eventId: eventObjectId });
+      await remindersCollection.deleteMany({ eventId: eventIdQuery });
     } catch (error) {
       console.error('Error cleaning up event reminders:', error);
     }
@@ -181,7 +186,7 @@ const deleteEvent = async (req, res, next) => {
     // Remove favorites for this event
     try {
       const favoritesCollection = db.collection('favorites');
-      await favoritesCollection.deleteMany({ eventId: eventObjectId });
+      await favoritesCollection.deleteMany({ eventId: eventIdQuery });
     } catch (error) {
       console.error('Error cleaning up favorites:', error);
     }
@@ -189,7 +194,7 @@ const deleteEvent = async (req, res, next) => {
     // Remove blocks for this event
     try {
       const eventBlocksCollection = db.collection('eventBlocks');
-      await eventBlocksCollection.deleteMany({ eventId: eventObjectId });
+      await eventBlocksCollection.deleteMany({ eventId: eventIdQuery });
     } catch (error) {
       console.error('Error cleaning up event blocks:', error);
     }
@@ -246,14 +251,14 @@ const deleteEvent = async (req, res, next) => {
     // Remove bookings/payments tied to this event
     try {
       const bookingsCollection = db.collection('bookings');
-      await bookingsCollection.deleteMany({ eventId: eventObjectId });
+      await bookingsCollection.deleteMany({ eventId: eventIdQuery });
     } catch (error) {
       console.error('Error cleaning up bookings:', error);
     }
 
     try {
       const paymentsCollection = db.collection('payments');
-      await paymentsCollection.deleteMany({ eventId: eventObjectId });
+      await paymentsCollection.deleteMany({ eventId: eventIdQuery });
     } catch (error) {
       console.error('Error cleaning up payments:', error);
     }

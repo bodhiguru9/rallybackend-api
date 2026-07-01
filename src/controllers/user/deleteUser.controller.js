@@ -290,10 +290,21 @@ const deleteUser = async (req, res, next) => {
         const db = getDB();
         const eventsCollection = db.collection('events');
         
-        // Find all events created by this user
-        const events = await eventsCollection.find({ creatorId: userObjectId }).toArray();
+        // Build comprehensive creator query matching ObjectId, string _id, sequential string/number userId
+        const creatorIdQueries = [
+          userObjectId,
+          userId,
+          user.userId,
+          user.userId !== undefined && user.userId !== null ? String(user.userId) : null,
+          user.userId !== undefined && user.userId !== null && !isNaN(user.userId) ? Number(user.userId) : null,
+        ].filter(Boolean);
+
+        const creatorQuery = { $in: creatorIdQueries };
         
-        // Delete event files and events
+        // Find all events created by this user
+        const events = await eventsCollection.find({ creatorId: creatorQuery }).toArray();
+        
+        // Delete event files and associated records for each event
         for (const event of events) {
           // Delete event images (non-blocking; legacy on-disk files only — S3 URLs skipped)
           const imagesToDelete = event.gameImages || (event.gameImage ? [event.gameImage] : []);
@@ -306,22 +317,55 @@ const deleteUser = async (req, res, next) => {
             await safeUnlinkUpload(event.gameVideo);
           }
           
+          // Match event by ObjectId, String _id, or sequential eventId (e.g. 'E108')
+          const eventIdsToClean = [
+            event._id,
+            event._id ? event._id.toString() : null,
+            event.eventId || null,
+          ].filter(Boolean);
+
+          const eventIdQuery = { $in: eventIdsToClean };
+
           // Delete event joins for this event
           const joinsCollection = db.collection('eventJoins');
-          await joinsCollection.deleteMany({ eventId: event._id });
+          await joinsCollection.deleteMany({ eventId: eventIdQuery });
           
           // Delete waitlist entries for this event
           const waitlistCollection = db.collection('waitlist');
-          await waitlistCollection.deleteMany({ eventId: event._id });
+          await waitlistCollection.deleteMany({ eventId: eventIdQuery });
+
+          // Delete bookings for this event
+          const bookingsCollection = db.collection('bookings');
+          await bookingsCollection.deleteMany({ eventId: eventIdQuery });
+
+          // Delete join requests for this event
+          const joinRequestsCollection = db.collection('eventJoinRequests');
+          await joinRequestsCollection.deleteMany({ eventId: eventIdQuery });
+
+          // Delete invites for this event
+          const invitesCollection = db.collection('eventInvites');
+          await invitesCollection.deleteMany({ eventId: eventIdQuery });
+
+          // Delete reminders for this event
+          const remindersCollection = db.collection('eventReminders');
+          await remindersCollection.deleteMany({ eventId: eventIdQuery });
+
+          // Delete favorites for this event
+          const favoritesCollection = db.collection('favorites');
+          await favoritesCollection.deleteMany({ eventId: eventIdQuery });
+
+          // Delete blocks for this event
+          const eventBlocksCollection = db.collection('eventBlocks');
+          await eventBlocksCollection.deleteMany({ eventId: eventIdQuery });
         }
         
         // Update events count before deleting (decrement by number of events)
         if (events.length > 0) {
-          await Event.updateEventsCount(userObjectId.toString(), -events.length);
+          await Event.updateEventsCount(userId, -events.length);
         }
         
         // Delete all events created by this user
-        await eventsCollection.deleteMany({ creatorId: userObjectId });
+        await eventsCollection.deleteMany({ creatorId: creatorQuery });
       } catch (error) {
         console.error('Error cleaning up events:', error);
       }
@@ -329,11 +373,19 @@ const deleteUser = async (req, res, next) => {
 
     // If user is an organiser, also delete organiser-specific related data (packages, organiser purchases, bank details)
     if (user.userType === 'organiser') {
+      const creatorIdQueries = [
+        userObjectId,
+        userId,
+        user.userId,
+        user.userId !== undefined && user.userId !== null ? String(user.userId) : null,
+        user.userId !== undefined && user.userId !== null && !isNaN(user.userId) ? Number(user.userId) : null,
+      ].filter(Boolean);
+
       // Delete packages created by organiser
       try {
         const db = getDB();
         const packagesCollection = db.collection('packages');
-        await packagesCollection.deleteMany({ organiserId: userObjectId });
+        await packagesCollection.deleteMany({ organiserId: { $in: creatorIdQueries } });
       } catch (error) {
         console.error('Error cleaning up packages:', error);
       }
@@ -342,16 +394,16 @@ const deleteUser = async (req, res, next) => {
       try {
         const db = getDB();
         const packagePurchasesCollection = db.collection('packagePurchases');
-        await packagePurchasesCollection.deleteMany({ organiserId: userObjectId });
+        await packagePurchasesCollection.deleteMany({ organiserId: { $in: creatorIdQueries } });
       } catch (error) {
         console.error('Error cleaning up organiser package purchases:', error);
       }
 
-      // Delete organiser bank details (stored by sequential userId in organizerBankDetails collection)
+      // Delete organiser bank details (stored by sequential userId or ObjectId in organizerBankDetails collection)
       try {
         const db = getDB();
         const bankDetailsCollection = db.collection('organizerBankDetails');
-        await bankDetailsCollection.deleteMany({ organizerId: user.userId });
+        await bankDetailsCollection.deleteMany({ organizerId: { $in: creatorIdQueries } });
       } catch (error) {
         console.error('Error cleaning up organiser bank details:', error);
       }

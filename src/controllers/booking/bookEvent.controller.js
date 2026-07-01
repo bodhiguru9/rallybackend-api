@@ -186,6 +186,31 @@ const bookEvent = async (req, res, next) => {
       });
     }
 
+    // Ensure user has a valid Stripe customer ID before inspecting or creating PaymentIntents
+    const stripeInstance = getStripeInstance();
+    let customerId = user.stripeCustomerId || user.stripe_customer_id || null;
+    if (customerId) {
+      try {
+        await stripeInstance.customers.retrieve(customerId);
+      } catch (e) {
+        customerId = null;
+      }
+    }
+    if (!customerId) {
+      const customer = await stripeInstance.customers.create({
+        email: user.email || undefined,
+        name: user.fullName || undefined,
+        phone: user.mobileNumber || undefined,
+        metadata: {
+          mongoUserId: user._id.toString(),
+          userId: String(user.userId),
+        },
+      });
+      customerId = customer.id;
+      await User.updateById(userId, { stripeCustomerId: customerId });
+      user.stripeCustomerId = customerId;
+    }
+
     // Skip reuse for Apple Pay — old PaymentIntents may have setup_future_usage
     // which is incompatible with Apple Pay tokens.
     const existingPendingBooking = await Booking.findExactPendingBooking(userId, event._id, occurrenceStart, safeGuestsCount);
@@ -196,9 +221,20 @@ const bookEvent = async (req, res, next) => {
         : null;
 
       if (payment && payment.stripePaymentIntentId) {
-        const stripeInstance = getStripeInstance();
         try {
-          const paymentIntent = await stripeInstance.paymentIntents.retrieve(payment.stripePaymentIntentId);
+          let paymentIntent = await stripeInstance.paymentIntents.retrieve(payment.stripePaymentIntentId);
+
+          // Ensure existing PaymentIntent is attached to the user's customer ID.
+          // Reusing a PaymentIntent without Customer attachment throws Stripe error when confirming with saved card.
+          if (paymentIntent.customer !== customerId) {
+            if (paymentIntent.status === 'requires_payment_method') {
+              paymentIntent = await stripeInstance.paymentIntents.update(paymentIntent.id, {
+                customer: customerId,
+              });
+            } else {
+              throw new Error('Mismatched customer on existing PaymentIntent');
+            }
+          }
 
           const userDetails = {
             userId: user?.userId || null,
@@ -451,7 +487,6 @@ const bookEvent = async (req, res, next) => {
     }
 
     // STEP 2: Create Stripe Payment Intent and Checkout Session (only for paid events)
-    const stripeInstance = getStripeInstance();
     let paymentIntent;
     let checkoutSession = null;
 
@@ -483,22 +518,7 @@ const bookEvent = async (req, res, next) => {
     }
 
     try {
-
       let customerId = user.stripeCustomerId;
-
-      if (!customerId) {
-        const customer = await stripeInstance.customers.create({
-          email: user.email,
-          name: user.fullName,
-        });
-
-        customerId = customer.id;
-
-        // Save in DB
-        await User.updateById(userId, {
-          stripeCustomerId: customerId,
-        });
-      }
 
       // NOTE: Do NOT set setup_future_usage here.
       // Cards are saved independently via /api/cards endpoint.

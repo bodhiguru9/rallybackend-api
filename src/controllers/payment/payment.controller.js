@@ -181,11 +181,34 @@ const createPaymentOrder = async (req, res, next) => {
     }
     let organiserId = event.creatorId ? String(event.creatorId) : '';
 
-    // Create Stripe Payment Intent
+    // Ensure user has a valid Stripe customer ID before creating PaymentIntent
     const stripeInstance = getStripeInstance();
+    let customerId = paymentUser?.stripeCustomerId || paymentUser?.stripe_customer_id || null;
+    if (customerId) {
+      try {
+        await stripeInstance.customers.retrieve(customerId);
+      } catch (e) {
+        customerId = null;
+      }
+    }
+    if (!customerId && paymentUser) {
+      const customer = await stripeInstance.customers.create({
+        email: paymentUser.email || undefined,
+        name: paymentUser.fullName || undefined,
+        phone: paymentUser.mobileNumber || undefined,
+        metadata: {
+          mongoUserId: paymentUser._id.toString(),
+          userId: String(paymentUser.userId),
+        },
+      });
+      customerId = customer.id;
+      await User.updateById(userId, { stripeCustomerId: customerId });
+    }
+
     const paymentIntent = await stripeInstance.paymentIntents.create({
       amount: amountInCents,
       currency: 'aed', // Change to your preferred currency (usd, eur, inr, etc.)
+      customer: customerId || undefined,
       metadata: {
         eventId: event.eventId,
         eventTitle: event.eventName || '',

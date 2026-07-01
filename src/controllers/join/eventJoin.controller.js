@@ -74,6 +74,17 @@ if (!occurrenceStart) {
   });
 }
 
+const eventEndTimeForJoining = occurrenceEnd 
+  ? new Date(occurrenceEnd) 
+  : new Date(new Date(occurrenceStart).getTime() + 60 * 60 * 1000);
+
+if (new Date() > eventEndTimeForJoining) {
+  return res.status(400).json({
+    success: false,
+    error: 'Cannot join an ended occurrence',
+  });
+}
+
     // Support both old and new field names for backward compatibility
     const isPrivate = event.IsPrivateEvent !== undefined ? event.IsPrivateEvent : (event.visibility === 'private');
     const approvalRequired = event.eventApprovalRequired === true || event.eventApprovalReq === true;

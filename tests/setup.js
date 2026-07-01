@@ -1,3 +1,4 @@
+require('dotenv').config();
 const { connectDB, closeDB, getDB } = require('../src/config/database');
 const { createAllIndexes } = require('../scripts/createIndexes');
 

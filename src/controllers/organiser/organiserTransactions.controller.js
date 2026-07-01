@@ -84,11 +84,22 @@ const getOrganiserTransactions = async (req, res, next) => {
       });
     }
 
-    const eventIds = events.map((event) => event._id);
-    const totalCount = await paymentsCollection.countDocuments({ eventId: { $in: eventIds } });
+    const eventObjectIds = events.map((event) => event._id);
+    const eventIdStrings = events.map((event) => event._id.toString());
+    const eventSeqIds = events.map((event) => event.eventId).filter(Boolean);
+    const allEventIds = [...eventObjectIds, ...eventIdStrings, ...eventSeqIds];
+
+    const paymentQuery = {
+      $or: [
+        { eventId: { $in: allEventIds } },
+        { parentEventId: { $in: allEventIds } }
+      ]
+    };
+
+    const totalCount = await paymentsCollection.countDocuments(paymentQuery);
 
     const payments = await paymentsCollection
-      .find({ eventId: { $in: eventIds } })
+      .find(paymentQuery)
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(perPage)
@@ -96,10 +107,8 @@ const getOrganiserTransactions = async (req, res, next) => {
 
     const eventMap = new Map();
     events.forEach((event) => {
-      eventMap.set(event._id.toString(), {
-        eventId: event.eventId || null,
-        title: event.eventName || null,
-      });
+      if (event._id) eventMap.set(event._id.toString(), { eventId: event.eventId || null, title: event.eventName || null });
+      if (event.eventId) eventMap.set(event.eventId.toString(), { eventId: event.eventId || null, title: event.eventName || null });
     });
 
     const payerIds = payments.map((payment) => payment.userId).filter(Boolean);
@@ -117,7 +126,9 @@ const getOrganiserTransactions = async (req, res, next) => {
     });
 
     const transactions = payments.map((payment) => {
-      const eventData = payment.eventId ? (eventMap.get(payment.eventId.toString()) || { eventId: null, title: null }) : { eventId: null, title: null };
+      const eventData = (payment.eventId && eventMap.get(payment.eventId.toString())) ||
+                        (payment.parentEventId && eventMap.get(payment.parentEventId.toString())) ||
+                        { eventId: null, title: null };
       const payerData = payment.userId ? (payerMap.get(payment.userId.toString()) || null) : null;
       return {
         paymentId: payment.paymentId,

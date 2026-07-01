@@ -304,11 +304,22 @@ const searchEvents = async (req, res, next) => {
       const endOfDay = new Date(startDateObj);
       endOfDay.setHours(23, 59, 59, 999);
       
-      // Match events on this exact date (between start and end of day)
-      query.eventDateTime = {
-        $gte: startOfDay,
-        $lte: endOfDay,
-      };
+      // Match events active on this exact date (between start and end of day)
+      const fallbackStart = new Date(startOfDay.getTime() - 24 * 60 * 60 * 1000);
+      if (!query.$and) query.$and = [];
+      query.$and.push({ eventDateTime: { $lte: endOfDay } });
+      query.$and.push({
+        $or: [
+          { eventEndDateTime: { $gte: startOfDay } },
+          { eventEndDateTime: { $gte: startOfDay.toISOString() } },
+          {
+            $and: [
+              { $or: [{ eventEndDateTime: null }, { eventEndDateTime: { $exists: false } }, { eventEndDateTime: "" }] },
+              { eventDateTime: { $gte: fallbackStart } }
+            ]
+          }
+        ]
+      });
     }
     
     // Get events

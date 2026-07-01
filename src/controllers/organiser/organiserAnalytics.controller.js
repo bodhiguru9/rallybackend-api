@@ -177,27 +177,49 @@ const getOrganiserAnalytics = async (req, res, next) => {
         break;
     }
 
+    // Construct robust ID arrays for matching payments & bookings across ObjectId, String, and Sequential IDs
+    const eventIdStrings = allEvents.map(e => e._id.toString());
+    const eventSeqIds = allEvents.map(e => e.eventId).filter(Boolean);
+    const allEventIds = [...eventObjectIds, ...eventIdStrings, ...eventSeqIds];
+
+    const eventLookupMap = new Map();
+    for (const e of allEvents) {
+      if (e._id) eventLookupMap.set(e._id.toString(), e);
+      if (e.eventId) eventLookupMap.set(e.eventId.toString(), e);
+    }
+
     // Get all successful payments for Organiser's events
     const paymentQuery = {
-      eventId: { $in: eventObjectIds },
+      $or: [
+        { eventId: { $in: allEventIds } },
+        { parentEventId: { $in: allEventIds } }
+      ],
       status: 'success',
       ...revenueDateFilter,
     };
 
-    // Fetch payments and bookings in parallel (was: sequential)
-    const [payments, bookings] = await Promise.all([
+    // Fetch payments, bookings, and participant data in parallel
+    const { batchParticipantCounts, batchEventParticipants } = require('../../utils/batchEventData');
+    const [payments, bookings, allCountMap, allParticipantsMap] = await Promise.all([
       paymentsCollection.find(paymentQuery).toArray(),
       bookingsCollection.find({
-        eventId: { $in: eventObjectIds },
+        $or: [
+          { eventId: { $in: allEventIds } },
+          { parentEventId: { $in: allEventIds } }
+        ],
         status: 'booked',
       }).toArray(),
+      batchParticipantCounts(eventObjectIds),
+      batchEventParticipants(eventObjectIds, 10),
     ]);
 
-    // Pre-build paymentsByEvent Map (O(N)) to replace O(N²) filter loops later
+    // Pre-build paymentsByEvent Map using eventLookupMap to map back to ObjectId string
     const paymentsByEvent = new Map();
     for (const p of payments) {
-      const key = p.eventId ? p.eventId.toString() : null;
-      if (!key) continue;
+      const targetEvent = (p.eventId && eventLookupMap.get(p.eventId.toString())) ||
+                          (p.parentEventId && eventLookupMap.get(p.parentEventId.toString()));
+      if (!targetEvent) continue;
+      const key = targetEvent._id.toString();
       if (!paymentsByEvent.has(key)) paymentsByEvent.set(key, []);
       paymentsByEvent.get(key).push(p);
     }
@@ -205,12 +227,14 @@ const getOrganiserAnalytics = async (req, res, next) => {
     const totalBookedRevenue = bookings.reduce((sum, booking) => sum + (booking.finalAmount || booking.amount || 0), 0);
     const bookingsByEvent = new Map();
     bookings.forEach((booking) => {
-      const eventId = booking.eventId ? booking.eventId.toString() : null;
-      if (!eventId) return;
-      if (!bookingsByEvent.has(eventId)) {
-        bookingsByEvent.set(eventId, { count: 0, revenue: 0 });
+      const targetEvent = (booking.eventId && eventLookupMap.get(booking.eventId.toString())) ||
+                          (booking.parentEventId && eventLookupMap.get(booking.parentEventId.toString()));
+      if (!targetEvent) return;
+      const key = targetEvent._id.toString();
+      if (!bookingsByEvent.has(key)) {
+        bookingsByEvent.set(key, { count: 0, revenue: 0 });
       }
-      const entry = bookingsByEvent.get(eventId);
+      const entry = bookingsByEvent.get(key);
       entry.count += 1;
       entry.revenue += booking.finalAmount || booking.amount || 0;
     });
@@ -226,18 +250,22 @@ const getOrganiserAnalytics = async (req, res, next) => {
     for (const event of allEvents) {
       // Use centralized formatEventResponse function
       const { formatEventResponse } = require('../../utils/eventFields');
+      const eventIdStr = event._id.toString();
       const eventData = {
         ...formatEventResponse(event),
-        mongoId: event._id.toString(), // MongoDB ObjectId for reference
+        mongoId: eventIdStr, // MongoDB ObjectId for reference
       };
 
-      // Calculate revenue for this event using pre-built Map (was: O(N×M) filter per event)
-      const eventPayments = paymentsByEvent.get(event._id.toString()) || [];
-      eventData.revenue = eventPayments.reduce((sum, p) => sum + (p.finalAmount || p.amount || 0), 0);
+      // Calculate revenue and bookings for this event using pre-built Maps
+      const eventPayments = paymentsByEvent.get(eventIdStr) || [];
+      const paymentRevenue = eventPayments.reduce((sum, p) => sum + (p.finalAmount || p.amount || 0), 0);
+      const bookingStats = bookingsByEvent.get(eventIdStr) || { count: 0, revenue: 0 };
+      const countFromJoins = allCountMap.get(eventIdStr) || 0;
+
+      eventData.revenue = Math.max(paymentRevenue, bookingStats.revenue);
       eventData.totalTransactions = eventPayments.length;
-      const bookingStats = bookingsByEvent.get(event._id.toString()) || { count: 0, revenue: 0 };
-      eventData.bookedCount = bookingStats.count;
-      eventData.bookedRevenue = bookingStats.revenue;
+      eventData.bookedCount = Math.max(bookingStats.count, countFromJoins, eventPayments.length);
+      eventData.bookedRevenue = Math.max(bookingStats.revenue, paymentRevenue);
 
       // Categorize by status
       const eventStartDate = event.eventDateTime ? new Date(event.eventDateTime) : null;
@@ -277,7 +305,8 @@ const getOrganiserAnalytics = async (req, res, next) => {
 
     // Get transaction details
     const transactions = payments.map(payment => {
-      const event = payment.eventId ? allEvents.find(e => e._id.toString() === payment.eventId.toString()) : null;
+      const event = (payment.eventId && eventLookupMap.get(payment.eventId.toString())) ||
+                    (payment.parentEventId && eventLookupMap.get(payment.parentEventId.toString())) || null;
       return {
         paymentId: payment.paymentId,
         eventId: event ? event.eventId : null,
@@ -294,37 +323,45 @@ const getOrganiserAnalytics = async (req, res, next) => {
       };
     }).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 
-    // Batch-fetch participant counts and preview for booked events
-    const { batchParticipantCounts, batchEventParticipants } = require('../../utils/batchEventData');
-    const bookedEventsList = allEvents.filter((event) => bookingsByEvent.has(event._id.toString()));
-    const bookedEventIds = bookedEventsList.map((e) => e._id);
-    const [bookedCountMap, bookedParticipantsMap] = await Promise.all([
-      batchParticipantCounts(bookedEventIds),
-      batchEventParticipants(bookedEventIds, 10),
-    ]);
+    // Filter booked events list based on joins, bookings, or payments
+    const bookedEventsList = allEvents.filter((event) => {
+      const eventIdStr = event._id.toString();
+      const countFromJoins = allCountMap.get(eventIdStr) || 0;
+      const paymentList = paymentsByEvent.get(eventIdStr) || [];
+      return countFromJoins > 0 || bookingsByEvent.has(eventIdStr) || paymentList.length > 0;
+    });
 
     const bookedEvents = bookedEventsList.map((event) => {
-          const bookingStats = bookingsByEvent.get(event._id.toString());
-          const eventIdStr = event._id.toString();
+      const eventIdStr = event._id.toString();
+      const bookingStats = bookingsByEvent.get(eventIdStr) || { count: 0, revenue: 0 };
+      const paymentList = paymentsByEvent.get(eventIdStr) || [];
+      const paymentRevenue = paymentList.reduce((sum, p) => sum + (p.finalAmount || p.amount || 0), 0);
+      const countFromJoins = allCountMap.get(eventIdStr) || 0;
 
-          return {
-            eventId: event.eventId,
-            title: event.eventName || null,
-            sports: event.eventSports || [],
-            dateTime: event.eventDateTime || null,
-            address: event.eventLocation || null,
-            price: event.eventPricePerGuest !== undefined && event.eventPricePerGuest !== null
-              ? event.eventPricePerGuest
-              : (event.gameJoinPrice || 0),
-            eventImage: (event.eventImages && event.eventImages.length > 0)
-              ? event.eventImages[0]
-              : (event.gameImages && event.gameImages.length > 0 ? event.gameImages[0] : null),
-            participants: bookedParticipantsMap.get(eventIdStr) || [],
-            participantsCount: bookedCountMap.get(eventIdStr) || 0,
-            bookedCount: bookingStats.count,
-            bookedRevenue: bookingStats.revenue,
-          };
-        });
+      const eventRevenue = Math.max(bookingStats.revenue, paymentRevenue);
+      const eventBookedCount = Math.max(bookingStats.count, countFromJoins, paymentList.length);
+
+      return {
+        eventId: event.eventId,
+        title: event.eventName || null,
+        sports: event.eventSports || [],
+        dateTime: event.eventDateTime || null,
+        address: event.eventLocation || null,
+        price: event.eventPricePerGuest !== undefined && event.eventPricePerGuest !== null
+          ? event.eventPricePerGuest
+          : (event.gameJoinPrice || 0),
+        eventImage: (event.eventImages && event.eventImages.length > 0)
+          ? event.eventImages[0]
+          : (event.gameImages && event.gameImages.length > 0 ? event.gameImages[0] : null),
+        participants: allParticipantsMap.get(eventIdStr) || [],
+        participantsCount: countFromJoins,
+        bookedCount: eventBookedCount,
+        bookedRevenue: eventRevenue,
+      };
+    });
+
+    const totalBookedCountComputed = bookedEvents.reduce((acc, e) => acc + (e.bookedCount || 0), 0);
+    const totalBookedRevenueComputed = bookedEvents.reduce((acc, e) => acc + (e.bookedRevenue || 0), 0);
 
     // Calculate statistics
     const stats = {
@@ -332,10 +369,10 @@ const getOrganiserAnalytics = async (req, res, next) => {
       upcomingEvents: upcoming.length,
       ongoingEvents: ongoing.length,
       pastEvents: past.length,
-      totalRevenue: totalRevenue,
+      totalRevenue: Math.max(totalRevenue, totalBookedRevenueComputed),
       totalTransactions: payments.length,
-      totalBookedRevenue: totalBookedRevenue,
-      totalBookings: bookings.length,
+      totalBookedRevenue: Math.max(totalBookedRevenue, totalBookedRevenueComputed, totalRevenue),
+      totalBookings: Math.max(bookings.length, totalBookedCountComputed),
       averageRevenuePerEvent: allEvents.length > 0 ? totalRevenue / allEvents.length : 0,
       revenuePeriod: revenuePeriod,
     };

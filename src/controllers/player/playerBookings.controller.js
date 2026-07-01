@@ -63,7 +63,7 @@ const getPlayerBookings = async (req, res, next) => {
         const eventDateTime = event.eventDateTime || event.gameStartDate || null;
         
         // Calculate event status properly (past, ongoing, or upcoming)
-        const computedStatus = eventDateTime ? calculateEventStatus(eventDateTime) : 'upcoming';
+        const computedStatus = eventDateTime ? calculateEventStatus(eventDateTime, event.eventEndDateTime) : 'upcoming';
         
         const isPast = computedStatus === 'past';
         const isOngoing = computedStatus === 'ongoing';
@@ -190,7 +190,7 @@ const getPlayerBookings = async (req, res, next) => {
     // Filter events based on status
     const filtered = withMeta.filter((e) => {
       if (status === 'past') return e.booking.isPast;
-      if (status === 'upcoming') return e.booking.isUpcoming;
+      if (status === 'upcoming') return e.booking.isUpcoming || e.booking.isOngoing;
       // status === 'all' - return all events (past, ongoing, upcoming)
       return true;
     });

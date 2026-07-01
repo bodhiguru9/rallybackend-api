@@ -8,11 +8,24 @@
  * Calculate event status based on eventDateTime
  * Returns: 'past', 'ongoing', or 'upcoming'
  */
-const calculateEventStatus = (eventDateTime) => {
+const calculateEventStatus = (eventDateTime, eventEndDateTime) => {
   if (!eventDateTime) return 'upcoming';
   
   const eventDate = new Date(eventDateTime);
   const now = new Date();
+  
+  if (eventEndDateTime) {
+    const endDate = new Date(eventEndDateTime);
+    if (!isNaN(endDate.getTime())) {
+      if (endDate < now) {
+        return 'past';
+      }
+      if (eventDate <= now) {
+        return 'ongoing';
+      }
+      return 'upcoming';
+    }
+  }
   
   // If event date is in the past (more than 24 hours ago), it's past
   const hoursDiff = (now - eventDate) / (1000 * 60 * 60);
@@ -38,8 +51,8 @@ const processEventData = (reqBody, organiserData = {}) => {
   const eventDateTime = reqBody.eventDateTime ? new Date(reqBody.eventDateTime) : null;
   const eventEndDateTime = reqBody.eventEndDateTime ? new Date(reqBody.eventEndDateTime) : null;
   
-  // Calculate eventStatus automatically based on eventDateTime
-  let eventStatus = calculateEventStatus(eventDateTime);
+  // Calculate eventStatus automatically based on eventDateTime and eventEndDateTime
+  let eventStatus = calculateEventStatus(eventDateTime, eventEndDateTime);
   
   // Override if status is explicitly provided (for draft or manual status)
   if (reqBody.eventStatus && ['draft', 'past', 'ongoing', 'upcoming', 'completed', 'cancelled'].includes(reqBody.eventStatus)) {
@@ -221,7 +234,7 @@ const formatEventResponse = (event) => {
   // Calculate eventStatus if not present or if eventDateTime exists
   let eventStatus = event.eventStatus;
   if (eventStatus !== 'draft' && event.eventDateTime) {
-    eventStatus = calculateEventStatus(event.eventDateTime);
+    eventStatus = calculateEventStatus(event.eventDateTime, event.eventEndDateTime);
   }
 
   if (!eventStatus) {
@@ -356,22 +369,52 @@ const buildEventQuery = (filters = {}) => {
     query.eventStatus = { $ne: 'draft' };
   }
 
-  // Date filtering (using eventDateTime)
+  // Date filtering (using eventDateTime and eventEndDateTime)
   if (filters.startDate || filters.endDate) {
-    query.eventDateTime = {};
-    
-    if (filters.startDate) {
+    if (filters.startDate && !filters.endDate) {
       const startDate = new Date(filters.startDate);
       if (!isNaN(startDate.getTime())) {
-        query.eventDateTime.$gte = startDate;
+        const fallbackStart = new Date(startDate.getTime() - 24 * 60 * 60 * 1000);
+        if (!query.$and) query.$and = [];
+        query.$and.push({
+          $or: [
+            { eventEndDateTime: { $gte: startDate } },
+            { eventEndDateTime: { $gte: startDate.toISOString() } },
+            {
+              $and: [
+                { $or: [{ eventEndDateTime: null }, { eventEndDateTime: { $exists: false } }, { eventEndDateTime: "" }] },
+                { eventDateTime: { $gte: fallbackStart } }
+              ]
+            }
+          ]
+        });
       }
-    }
-    
-    if (filters.endDate) {
+    } else if (!filters.startDate && filters.endDate) {
       const endDate = new Date(filters.endDate);
       if (!isNaN(endDate.getTime())) {
         endDate.setHours(23, 59, 59, 999);
-        query.eventDateTime.$lte = endDate;
+        query.eventDateTime = { $lte: endDate };
+      }
+    } else if (filters.startDate && filters.endDate) {
+      const startDate = new Date(filters.startDate);
+      const endDate = new Date(filters.endDate);
+      if (!isNaN(startDate.getTime()) && !isNaN(endDate.getTime())) {
+        endDate.setHours(23, 59, 59, 999);
+        const fallbackStart = new Date(startDate.getTime() - 24 * 60 * 60 * 1000);
+        if (!query.$and) query.$and = [];
+        query.$and.push({ eventDateTime: { $lte: endDate } });
+        query.$and.push({
+          $or: [
+            { eventEndDateTime: { $gte: startDate } },
+            { eventEndDateTime: { $gte: startDate.toISOString() } },
+            {
+              $and: [
+                { $or: [{ eventEndDateTime: null }, { eventEndDateTime: { $exists: false } }, { eventEndDateTime: "" }] },
+                { eventDateTime: { $gte: fallbackStart } }
+              ]
+            }
+          ]
+        });
       }
     }
   }

@@ -189,6 +189,16 @@ const updateEvent = async (req, res, next) => {
 
         updateData.gameImages = gameImages;
         updateData.eventImages = gameImages; // Also update new field name
+      } else {
+        const rawUrls = req.body.eventImages || req.body.gameImages || req.body.imageUri || req.body.eventImage || req.body.game_image;
+        if (rawUrls !== undefined && rawUrls !== null) {
+          const urlsArray = Array.isArray(rawUrls) ? rawUrls : [rawUrls];
+          const validUrls = urlsArray.filter((u) => typeof u === 'string' && u.trim().length > 0 && !u.startsWith('file://'));
+          if (validUrls.length > 0) {
+            updateData.gameImages = validUrls;
+            updateData.eventImages = validUrls;
+          }
+        }
       }
 
       // Handle video upload (use S3 URL)

@@ -319,15 +319,31 @@ return result.insertedId;
       .toArray();
 
     return users.map((user) => {
-      const joinRecord = joins.find(
-        (j) => j.userId?.toString() === user._id.toString() || String(j.userId) === String(user.userId)
-      );
-      const userPayment = payments.find(
-        (p) => p.userId?.toString() === user._id.toString() || String(p.userId) === String(user.userId)
-      );
-      const userBooking = bookings.find(
-        (b) => b.userId?.toString() === user._id.toString() || String(b.userId) === String(user.userId)
-      );
+      const matchesUser = (item) =>
+        item.userId?.toString() === user._id.toString() || String(item.userId) === String(user.userId);
+
+      const joinRecord = joins.find(matchesUser);
+
+      let userPayment = null;
+      let userBooking = null;
+      if (normalizedOccurrenceStart !== null) {
+        userPayment = payments.find(
+          (p) => matchesUser(p) && this.normalizeOccurrence(p.occurrenceStart || p.occurrenceDate) === normalizedOccurrenceStart
+        );
+        userBooking = bookings.find(
+          (b) => matchesUser(b) && this.normalizeOccurrence(b.occurrenceStart || b.occurrenceDate) === normalizedOccurrenceStart
+        );
+      }
+      if (!userPayment) {
+        userPayment = payments.find(
+          (p) => matchesUser(p) && (!normalizedOccurrenceStart || (!p.occurrenceStart && !p.occurrenceDate))
+        );
+      }
+      if (!userBooking) {
+        userBooking = bookings.find(
+          (b) => matchesUser(b) && (!normalizedOccurrenceStart || (!b.occurrenceStart && !b.occurrenceDate))
+        );
+      }
 
       const resolvedPaidAmount =
         (userPayment && (userPayment.finalAmount ?? userPayment.amount)) ??

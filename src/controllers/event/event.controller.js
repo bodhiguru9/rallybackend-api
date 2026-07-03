@@ -357,13 +357,13 @@ const getEventDetails = async (req, res, next) => {
     const maxGuest = event.eventMaxGuest !== undefined ? event.eventMaxGuest : (event.gameSpots || 0);
 
     // Get actual booked participants count (more accurate than eventTotalAttendNumber)
-    // NOTE: Joins are always stored with occurrenceStart = event.eventDateTime (never null),
-    // so we must pass eventDateTime here to match stored records.
+    const isRecurringEvent = Array.isArray(event.eventFrequency) && event.eventFrequency.length > 0;
+    const occurrenceQuery = req.query.occurrenceStart || (isRecurringEvent ? event.eventDateTime : null);
     let participantsCount = 0;
     let participants = [];
     if (!isPrivate || (req.user && req.user.id === event.creatorId.toString())) {
-      participantsCount = await EventJoin.getParticipantCount(mongoEventId, event.eventDateTime || null);
-      participants = await EventJoin.getEventParticipants(mongoEventId, event.eventDateTime || null, 50, 0); // Get first 50 participants (increased from 10)
+      participantsCount = await EventJoin.getParticipantCount(mongoEventId, occurrenceQuery);
+      participants = await EventJoin.getEventParticipants(mongoEventId, occurrenceQuery, 50, 0); // Get first 50 participants
     }
 
     // Get waitlist count (for private or approval-required events when user is creator)
@@ -371,13 +371,15 @@ const getEventDetails = async (req, res, next) => {
     let waitlist = [];
     if ((isPrivate || approvalRequired) && req.user && req.user.id === event.creatorId.toString()) {
       waitlistCount = await Waitlist.getWaitlistCount(mongoEventId);
-      waitlist = await Waitlist.getEventWaitlist(mongoEventId, 50, 0); // Get first 50 waitlist items (increased from 10)
+      waitlist = await Waitlist.getEventWaitlist(mongoEventId, 50, 0); // Get first 50 waitlist items
     }
 
-    // Calculate spots information
-    const spotsFull = participantsCount >= maxGuest;
-    const availableSpots = Math.max(0, maxGuest - participantsCount);
-    const spotsBooked = participantsCount;
+    // Calculate exact spots information from actual participant list if available
+    const spotsBooked = participants.length > 0
+      ? participants.reduce((sum, p) => sum + (p.guestsCount || 1), 0)
+      : participantsCount;
+    const spotsFull = spotsBooked >= maxGuest;
+    const availableSpots = Math.max(0, maxGuest - spotsBooked);
     const spotsLeft = availableSpots;
 
     // Get user's join status if authenticated (also exposed as userStatus)

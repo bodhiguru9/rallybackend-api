@@ -119,7 +119,8 @@ if (new Date() > eventEndTimeForJoining) {
     }
 
     // Check actual booked spots (more accurate than eventTotalAttendNumber)
-    const currentJoinedCount = await EventJoin.getParticipantCount(event._id, occurrenceStart);
+    const queryOccurrence = isRecurring ? occurrenceStart : null;
+    const currentJoinedCount = await EventJoin.getParticipantCount(event._id, queryOccurrence);
     const spotsFull = currentJoinedCount >= maxGuest;
 
     // If event is full, redirect to waitlist
@@ -153,7 +154,7 @@ if (new Date() > eventEndTimeForJoining) {
     }
 
     // Check if already joined (use MongoDB ObjectId from found event)
-    const hasJoined = await EventJoin.hasJoined(userId, event._id, occurrenceStart);
+    const hasJoined = await EventJoin.hasJoined(userId, event._id, queryOccurrence);
     if (hasJoined) {
       return res.status(400).json({
         success: false,
@@ -284,7 +285,8 @@ if (!occurrenceStart) {
 }
 
     // Leave event (use MongoDB ObjectId from found event)
-    const left = await EventJoin.leave(userId, event._id, occurrenceStart);
+    const queryOccurrence = isRecurring ? occurrenceStart : null;
+    const left = await EventJoin.leave(userId, event._id, queryOccurrence);
 
     if (!left) {
       return res.status(400).json({
@@ -430,8 +432,9 @@ if (!occurrenceStart) {
     }
 
     // Use MongoDB ObjectId from found event
-    const participants = await EventJoin.getEventParticipants(event._id, occurrenceStart, perPage, skip);
-const totalCount = await EventJoin.getParticipantCount(event._id, occurrenceStart);
+    const queryOccurrence = isRecurring ? occurrenceStart : null;
+    const participants = await EventJoin.getEventParticipants(event._id, queryOccurrence, perPage, skip);
+    const totalCount = await EventJoin.getParticipantCount(event._id, queryOccurrence);
     const pagination = createPaginationResponse(totalCount, page, perPage);
 
     res.status(200).json({
@@ -522,7 +525,8 @@ if (!occurrenceStart) {
     }
 
     // Remove user from event (use MongoDB ObjectId from found event)
-    const removed = await EventJoin.removeUser(event._id, userToRemove._id, occurrenceStart);
+    const queryOccurrence = isRecurring ? occurrenceStart : null;
+    const removed = await EventJoin.removeUser(event._id, userToRemove._id, queryOccurrence);
     if (!removed) {
       return res.status(400).json({
         success: false,

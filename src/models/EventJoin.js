@@ -145,18 +145,18 @@ return result.insertedId;
     const userObjectId = typeof userId === 'string' ? new ObjectId(userId) : userId;
     const eventObjectId = typeof eventId === 'string' ? new ObjectId(eventId) : eventId;
 
-    // Read the join record first so we know how many seats to free
-    const joinRecord = await joinsCollection.findOne({
+    const query = {
       userId: userObjectId,
       eventId: eventObjectId,
-      occurrenceStart: normalizedOccurrenceStart,
-    });
+    };
+    if (normalizedOccurrenceStart !== null) {
+      query.occurrenceStart = normalizedOccurrenceStart;
+    }
 
-    const result = await joinsCollection.deleteOne({
-      userId: userObjectId,
-      eventId: eventObjectId,
-      occurrenceStart: normalizedOccurrenceStart,
-    });
+    // Read the join record first so we know how many seats to free
+    const joinRecord = await joinsCollection.findOne(query);
+
+    const result = await joinsCollection.deleteOne(query);
 
     if (result.deletedCount > 0) {
       // Decrement by the party size stored in the join record (default 1 for old records)
@@ -164,7 +164,8 @@ return result.insertedId;
       const Event = require('./Event');
       await Event.updateAttendeeCount(eventId, -seatsToFree);
       // Release the reserved seat(s) from the per-occurrence capacity counter (no-op if none).
-      await this._releaseSeats(eventObjectId, normalizedOccurrenceStart, seatsToFree);
+      const occToRelease = (joinRecord && joinRecord.occurrenceStart !== undefined) ? joinRecord.occurrenceStart : normalizedOccurrenceStart;
+      await this._releaseSeats(eventObjectId, occToRelease, seatsToFree);
     }
 
     return result.deletedCount > 0;
@@ -181,18 +182,18 @@ return result.insertedId;
     const userObjectId = typeof userIdToRemove === 'string' ? new ObjectId(userIdToRemove) : userIdToRemove;
     const eventObjectId = typeof eventId === 'string' ? new ObjectId(eventId) : eventId;
 
-    // Read the join record first so we know how many seats to free
-    const joinRecord = await joinsCollection.findOne({
+    const query = {
       userId: userObjectId,
       eventId: eventObjectId,
-      occurrenceStart: normalizedOccurrenceStart,
-    });
+    };
+    if (normalizedOccurrenceStart !== null) {
+      query.occurrenceStart = normalizedOccurrenceStart;
+    }
 
-    const result = await joinsCollection.deleteOne({
-      userId: userObjectId,
-      eventId: eventObjectId,
-      occurrenceStart: normalizedOccurrenceStart,
-    });
+    // Read the join record first so we know how many seats to free
+    const joinRecord = await joinsCollection.findOne(query);
+
+    const result = await joinsCollection.deleteOne(query);
 
     if (result.deletedCount > 0) {
       // Decrement by the party size stored in the join record (default 1 for old records)
@@ -200,7 +201,8 @@ return result.insertedId;
       const Event = require('./Event');
       await Event.updateAttendeeCount(eventId, -seatsToFree);
       // Release the reserved seat(s) from the per-occurrence capacity counter (no-op if none).
-      await this._releaseSeats(eventObjectId, normalizedOccurrenceStart, seatsToFree);
+      const occToRelease = (joinRecord && joinRecord.occurrenceStart !== undefined) ? joinRecord.occurrenceStart : normalizedOccurrenceStart;
+      await this._releaseSeats(eventObjectId, occToRelease, seatsToFree);
     }
 
     return result.deletedCount > 0;
@@ -233,11 +235,15 @@ return result.insertedId;
     eventObjectId = event._id;
   }
 
-  const join = await joinsCollection.findOne({
+  const query = {
     userId: typeof userId === 'string' ? new ObjectId(userId) : userId,
     eventId: eventObjectId,
-    occurrenceStart: normalizedOccurrenceStart,
-  });
+  };
+  if (normalizedOccurrenceStart !== null) {
+    query.occurrenceStart = normalizedOccurrenceStart;
+  }
+
+  const join = await joinsCollection.findOne(query);
 
   return !!join;
 }
@@ -259,11 +265,13 @@ return result.insertedId;
       return [];
     }
 
+    const query = { eventId: objectId };
+    if (normalizedOccurrenceStart !== null) {
+      query.occurrenceStart = normalizedOccurrenceStart;
+    }
+
     const joins = await joinsCollection
-      .find({
-  eventId: objectId,
-  occurrenceStart: normalizedOccurrenceStart,
-})
+      .find(query)
       .sort({ joinedAt: -1 })
       .limit(limit)
       .skip(skip)
@@ -277,19 +285,57 @@ return result.insertedId;
 
     const users = await usersCollection.find({ _id: { $in: userIds } }).toArray();
 
-    const paymentQuery = {
-      eventId: objectId,
-      userId: { $in: userIds },
-      status: 'success'
-    };
-    if (normalizedOccurrenceStart) {
-      paymentQuery.occurrenceStart = normalizedOccurrenceStart;
-    }
-    const payments = await paymentsCollection.find(paymentQuery).toArray();
+    const userObjectIds = users.map((u) => u._id);
+    const userObjectIdStrings = users.map((u) => u._id.toString());
+    const userSequentialIds = users.map((u) => u.userId).filter((id) => id !== undefined && id !== null);
+    const userSequentialStrings = userSequentialIds.map((id) => String(id));
+    const allUserIds = Array.from(new Set([
+      ...userObjectIds,
+      ...userObjectIdStrings,
+      ...userSequentialIds,
+      ...userSequentialStrings,
+    ]));
+
+    const eventIds = [objectId, objectId.toString()];
+
+    // Query payments flexibly without strict occurrenceStart filter to ensure no payment is missed
+    const payments = await paymentsCollection
+      .find({
+        eventId: { $in: eventIds },
+        userId: { $in: allUserIds },
+        status: { $in: ['success', 'succeeded', 'paid', 'booked'] },
+      })
+      .sort({ createdAt: -1 })
+      .toArray();
+
+    const bookingsCollection = db.collection('bookings');
+    const bookings = await bookingsCollection
+      .find({
+        eventId: { $in: eventIds },
+        userId: { $in: allUserIds },
+        status: { $in: ['booked', 'confirmed', 'success', 'paid'] },
+      })
+      .sort({ createdAt: -1 })
+      .toArray();
 
     return users.map((user) => {
-      const joinRecord = joins.find((j) => j.userId.toString() === user._id.toString());
-      const userPayment = payments.find((p) => p.userId.toString() === user._id.toString());
+      const joinRecord = joins.find(
+        (j) => j.userId?.toString() === user._id.toString() || String(j.userId) === String(user.userId)
+      );
+      const userPayment = payments.find(
+        (p) => p.userId?.toString() === user._id.toString() || String(p.userId) === String(user.userId)
+      );
+      const userBooking = bookings.find(
+        (b) => b.userId?.toString() === user._id.toString() || String(b.userId) === String(user.userId)
+      );
+
+      const resolvedPaidAmount =
+        (userPayment && (userPayment.finalAmount ?? userPayment.amount)) ??
+        (userBooking && (userBooking.finalAmount ?? userBooking.amount)) ??
+        joinRecord?.paidAmount ??
+        joinRecord?.amountPaid ??
+        null;
+
       return {
         userId: user.userId,
         userType: user.userType,
@@ -311,7 +357,7 @@ return result.insertedId;
         joinedAt: joinRecord?.joinedAt,
         // guestsCount: how many seats this participant occupies (1 = just themselves)
         guestsCount: (joinRecord && joinRecord.guestsCount >= 1) ? joinRecord.guestsCount : 1,
-        paidAmount: userPayment ? userPayment.finalAmount : null,
+        paidAmount: resolvedPaidAmount,
       };
     });
   }
@@ -333,8 +379,13 @@ return result.insertedId;
 
     // Sum guestsCount across all join records to get total occupied seats.
     // Old records without guestsCount are treated as 1 via $ifNull.
+    const match = { eventId: objectId };
+    if (normalizedOccurrenceStart !== null) {
+      match.occurrenceStart = normalizedOccurrenceStart;
+    }
+
     const agg = await joinsCollection.aggregate([
-      { $match: { eventId: objectId, occurrenceStart: normalizedOccurrenceStart } },
+      { $match: match },
       { $group: { _id: null, total: { $sum: { $ifNull: ['$guestsCount', 1] } } } },
     ]).toArray();
 
@@ -409,10 +460,12 @@ static async getAllParticipantUserIds(eventObjectId, occurrenceStart = null) {
     return [];
   }
 
-  const userIds = await joinsCollection.distinct('userId', {
-  eventId: objectId,
-  occurrenceStart: normalizedOccurrenceStart,
-});
+  const query = { eventId: objectId };
+  if (normalizedOccurrenceStart !== null) {
+    query.occurrenceStart = normalizedOccurrenceStart;
+  }
+
+  const userIds = await joinsCollection.distinct('userId', query);
   return userIds || [];
 }
 

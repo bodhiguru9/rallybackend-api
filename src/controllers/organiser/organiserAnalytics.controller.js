@@ -81,7 +81,13 @@ const getOrganiserAnalytics = async (req, res, next) => {
         error: 'Organiser not found',
       });
     }
-    const organizerMongoId = organizerUser._id;
+    const organizerMongoId = organizerUser._id || organizerUser.id;
+    if (!organizerMongoId) {
+      return res.status(404).json({
+        success: false,
+        error: 'Organiser ID not found in user object',
+      });
+    }
 
     const db = getDB();
     const eventsCollection = db.collection('events');
@@ -137,8 +143,9 @@ const getOrganiserAnalytics = async (req, res, next) => {
       }
     }
 
-    // Get all events created by Organiser
-    const allEvents = await eventsCollection.find(eventQuery).toArray();
+    // Get all events created by Organiser (excluding cancelled events from hosted counts & revenue)
+    const allEventsRaw = await eventsCollection.find(eventQuery).toArray();
+    const allEvents = allEventsRaw.filter(e => e.eventStatus !== 'cancelled');
 
     // Get all event MongoDB ObjectIds
     const eventObjectIds = allEvents.map(event => event._id);
@@ -194,7 +201,7 @@ const getOrganiserAnalytics = async (req, res, next) => {
         { eventId: { $in: allEventIds } },
         { parentEventId: { $in: allEventIds } }
       ],
-      status: 'success',
+      status: { $in: ['success', 'succeeded', 'paid', 'booked'] },
       ...revenueDateFilter,
     };
 
@@ -208,6 +215,7 @@ const getOrganiserAnalytics = async (req, res, next) => {
           { parentEventId: { $in: allEventIds } }
         ],
         status: 'booked',
+        ...revenueDateFilter,
       }).toArray(),
       batchParticipantCounts(eventObjectIds),
       batchEventParticipants(eventObjectIds, 10),
@@ -363,17 +371,22 @@ const getOrganiserAnalytics = async (req, res, next) => {
     const totalBookedCountComputed = bookedEvents.reduce((acc, e) => acc + (e.bookedCount || 0), 0);
     const totalBookedRevenueComputed = bookedEvents.reduce((acc, e) => acc + (e.bookedRevenue || 0), 0);
 
+    const nonCancelledEvents = allEvents.filter(e => e.eventStatus !== 'cancelled' && e.eventStatus !== 'draft');
+    const avgEventsCount = nonCancelledEvents.length > 0 ? nonCancelledEvents.length : allEvents.length;
+    const computedTotalRevenue = Math.max(totalRevenue, totalBookedRevenueComputed);
+
     // Calculate statistics
     const stats = {
       totalEvents: allEvents.length,
       upcomingEvents: upcoming.length,
       ongoingEvents: ongoing.length,
       pastEvents: past.length,
-      totalRevenue: Math.max(totalRevenue, totalBookedRevenueComputed),
+      totalRevenue: computedTotalRevenue,
+      periodRevenue: computedTotalRevenue,
       totalTransactions: payments.length,
-      totalBookedRevenue: Math.max(totalBookedRevenue, totalBookedRevenueComputed, totalRevenue),
+      totalBookedRevenue: Math.max(totalBookedRevenue, totalBookedRevenueComputed, computedTotalRevenue),
       totalBookings: Math.max(bookings.length, totalBookedCountComputed),
-      averageRevenuePerEvent: allEvents.length > 0 ? totalRevenue / allEvents.length : 0,
+      averageRevenuePerEvent: avgEventsCount > 0 ? Math.round(computedTotalRevenue / avgEventsCount) : 0,
       revenuePeriod: revenuePeriod,
     };
 
@@ -398,7 +411,7 @@ const getOrganiserAnalytics = async (req, res, next) => {
         organizerId: organizerUserId,
         stats: stats,
         revenue: {
-          total: totalRevenue,
+          total: computedTotalRevenue,
           period: revenuePeriod,
           bySport: revenueBySport,
         },

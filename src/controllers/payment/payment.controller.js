@@ -366,18 +366,40 @@ const verifyPayment = async (req, res, next) => {
       const paymentIntent = await stripeInstance.paymentIntents.retrieve(payment_intent_id);
 
       if (paymentIntent.status === 'succeeded') {
-        // Age restriction safety check before joining the event (players only).
-        // Age restriction safety check was here, removed because it's already checked during bookEvent.
-
-        // Update payment status to success
-        await Payment.updateStatus(
+        // Atomically claim this payment as 'success'. If the webhook already
+        // processed it, claimSuccess returns null and we skip all side effects
+        // (promo increment, EventJoin, notifications) to avoid duplicates.
+        const claimed = await Payment.claimSuccess(
           payment.paymentId || payment._id,
-          'success',
           paymentIntent.id,
           paymentIntent.payment_method
         );
 
-        // Increment promo code usage if used
+        if (!claimed) {
+          // Already processed by webhook — return the existing success state
+          console.log(`⚠️ [DUPLICATE IGNORED] Verify ignored for PI: ${payment_intent_id} (already claimed by webhook)`);
+          const existingBooking = await Booking.findByPaymentIntentId(payment_intent_id);
+          const updatedPayment = await Payment.findById(payment.paymentId || payment._id);
+          return res.status(200).json({
+            success: true,
+            verified: true,
+            message: 'Payment already verified',
+            data: {
+              payment: {
+                paymentId: updatedPayment?.paymentId,
+                status: updatedPayment?.status || 'success',
+              },
+              booking: existingBooking ? {
+                bookingId: existingBooking.bookingId,
+                status: existingBooking.status,
+              } : null,
+            },
+          });
+        }
+
+        console.log(`✅ [PAYMENT CLAIMED] By VERIFY — PI: ${payment_intent_id}, PaymentID: ${payment.paymentId || payment._id}`);
+
+        // Increment promo code usage if used (safe — only one caller reaches here)
         if (payment.promoCodeId) {
           await PromoCode.incrementUsage(payment.promoCodeId);
         }
@@ -392,27 +414,27 @@ const verifyPayment = async (req, res, next) => {
           const existingBooking = await Booking.findByPaymentIntentId(payment_intent_id);
           
           if (existingBooking) {
-            // Update booking status to booked
             if (existingBooking.status === 'pending') {
-              isNewlyBooked = true;
-              await Booking.updateStatus(existingBooking.bookingId, 'booked', {
-                bookedAt: new Date(),
-              });
-              
-              // Add user to event if not already joined
+              const eventDoc = await findEventById(existingBooking.eventId);
+              const maxGuest = eventDoc?.eventMaxGuest !== undefined ? eventDoc.eventMaxGuest : (eventDoc?.gameSpots || 0);
+
               try {
-                const eventDoc = await findEventById(existingBooking.eventId);
-                // Removed redundant age check and auto-refund
                 await EventJoin.join(
-  payment.userId,
-  existingBooking.eventId,
-  existingBooking.occurrenceStart,
-  {
-    occurrenceEnd: existingBooking.occurrenceEnd || null,
-    parentEventId: existingBooking.parentEventId || eventDoc?.eventId || null,
-    guestsCount: existingBooking.guestsCount || 1,
-  }
-);
+                  payment.userId,
+                  existingBooking.eventId,
+                  existingBooking.occurrenceStart,
+                  {
+                    occurrenceEnd: existingBooking.occurrenceEnd || null,
+                    parentEventId: existingBooking.parentEventId || eventDoc?.eventId || null,
+                    guestsCount: existingBooking.guestsCount || 1,
+                    capacityLimit: maxGuest,
+                  }
+                );
+
+                isNewlyBooked = true;
+                await Booking.updateStatus(existingBooking.bookingId, 'booked', {
+                  bookedAt: new Date(),
+                });
 
                 // Cleanup requests and waitlist records after successful join
                 try {
@@ -421,7 +443,6 @@ const verifyPayment = async (req, res, next) => {
                     await EventJoinRequest.deleteActiveByUserAndEvent(payment.userId, existingBooking.eventId);
                   }
                   
-                  // Cleanup waitlist for BOTH public and private events
                   const db = getDB();
                   const waitlistCollection = db.collection('waitlist');
                   await waitlistCollection.deleteMany({
@@ -433,9 +454,37 @@ const verifyPayment = async (req, res, next) => {
                   console.error('Error cleaning up private request after payment:', cleanupErr);
                 }
               } catch (joinError) {
-                // User might already be joined, that's okay
-                if (joinError.message !== 'Already joined this occurrence') {
-                  console.error('Error joining event:', joinError);
+                if (joinError.code === 'EVENT_FULL') {
+                  await Booking.updateStatus(existingBooking.bookingId, 'failed');
+                  try {
+                    const stripeClient = getStripeInstance();
+                    const refund = await stripeClient.refunds.create({
+                      payment_intent: payment_intent_id,
+                    });
+                    await Payment.markRefunded(payment.paymentId || payment._id, {
+                      refundId: refund.id,
+                      refundStatus: refund.status || 'succeeded',
+                      refundAmount: payment.finalAmount || payment.amount || 0,
+                      refundedAt: new Date(),
+                      refundReason: 'Event filled up before payment completed',
+                    });
+                    await Notification.create(
+                      payment.userId,
+                      'refund_initiated',
+                      'Refund Initiated (Event Full)',
+                      `Your payment was successful, but "${eventDoc?.eventName || 'the event'}" reached full capacity before completion. We have automatically refunded your payment.`,
+                      {
+                        eventId: existingBooking.eventId,
+                        bookingId: existingBooking.bookingId || existingBooking._id,
+                        refundAmount: payment.finalAmount || payment.amount || 0,
+                        eventName: eventDoc?.eventName,
+                      }
+                    );
+                  } catch (refundError) {
+                    console.error('verifyPayment: Failed to auto-refund overbooked payment:', refundError.message);
+                  }
+                } else if (joinError.message !== 'Already joined this occurrence') {
+                  console.error('verifyPayment: Error joining event:', joinError);
                 }
               }
             }
@@ -473,35 +522,73 @@ const verifyPayment = async (req, res, next) => {
 };
 
                 booking = await Booking.create(bookingData);
-                await EventJoin.join(
-  payment.userId,
-  event._id,
-  payment.occurrenceStart || null,
-  {
-    occurrenceEnd: payment.occurrenceEnd || null,
-    parentEventId: payment.parentEventId || event.eventId || null,
-    guestsCount: bookingData.guestsCount || 1,
-  }
-);
-
-                // Cleanup requests and waitlist records after successful join
+                const fallbackMaxGuest = event?.eventMaxGuest !== undefined ? event.eventMaxGuest : (event?.gameSpots || 0);
                 try {
-                  const isPrivate = event?.IsPrivateEvent !== undefined ? event.IsPrivateEvent : (event?.visibility === 'private');
-                  if (isPrivate) {
-                    await EventJoinRequest.deleteActiveByUserAndEvent(payment.userId, event._id);
+                  await EventJoin.join(
+                    payment.userId,
+                    event._id,
+                    payment.occurrenceStart || null,
+                    {
+                      occurrenceEnd: payment.occurrenceEnd || null,
+                      parentEventId: payment.parentEventId || event.eventId || null,
+                      guestsCount: bookingData.guestsCount || 1,
+                      capacityLimit: fallbackMaxGuest,
+                    }
+                  );
+
+                  isNewlyBooked = true;
+
+                  // Cleanup requests and waitlist records after successful join
+                  try {
+                    const isPrivate = event?.IsPrivateEvent !== undefined ? event.IsPrivateEvent : (event?.visibility === 'private');
+                    if (isPrivate) {
+                      await EventJoinRequest.deleteActiveByUserAndEvent(payment.userId, event._id);
+                    }
+                    
+                    const db = getDB();
+                    const waitlistCollection = db.collection('waitlist');
+                    await waitlistCollection.deleteMany({
+                      userId: typeof payment.userId === 'string' ? new ObjectId(payment.userId) : payment.userId,
+                      eventId: event._id,
+                      occurrenceStart: payment.occurrenceStart || null,
+                      status: { $in: ['pending', 'accepted'] },
+                    });
+                  } catch (cleanupErr) {
+                    console.error('Error cleaning up private request after payment:', cleanupErr);
                   }
-                  
-                  // Cleanup waitlist for BOTH public and private events
-                  const db = getDB();
-                  const waitlistCollection = db.collection('waitlist');
-                  await waitlistCollection.deleteMany({
-                    userId: typeof payment.userId === 'string' ? new ObjectId(payment.userId) : payment.userId,
-                    eventId: event._id,
-                    occurrenceStart: payment.occurrenceStart || null,
-                    status: { $in: ['pending', 'accepted'] },
-                  });
-                } catch (cleanupErr) {
-                  console.error('Error cleaning up private request after payment:', cleanupErr);
+                } catch (joinError) {
+                  if (joinError.code === 'EVENT_FULL') {
+                    await Booking.updateStatus(booking.bookingId || booking._id, 'failed');
+                    try {
+                      const stripeClient = getStripeInstance();
+                      const refund = await stripeClient.refunds.create({
+                        payment_intent: payment_intent_id,
+                      });
+                      await Payment.markRefunded(payment.paymentId || payment._id, {
+                        refundId: refund.id,
+                        refundStatus: refund.status || 'succeeded',
+                        refundAmount: payment.finalAmount || payment.amount || 0,
+                        refundedAt: new Date(),
+                        refundReason: 'Event filled up before payment completed',
+                      });
+                      await Notification.create(
+                        payment.userId,
+                        'refund_initiated',
+                        'Refund Initiated (Event Full)',
+                        `Your payment was successful, but "${event?.eventName || 'the event'}" reached full capacity before completion. We have automatically refunded your payment.`,
+                        {
+                          eventId: event._id,
+                          bookingId: booking.bookingId || booking._id,
+                          refundAmount: payment.finalAmount || payment.amount || 0,
+                          eventName: event?.eventName,
+                        }
+                      );
+                    } catch (refundError) {
+                      console.error('verifyPayment: Failed to auto-refund overbooked payment (fallback):', refundError.message);
+                    }
+                  } else if (joinError.message !== 'Already joined this occurrence') {
+                    console.error('verifyPayment: Error joining event (fallback):', joinError);
+                  }
                 }
               }
             }

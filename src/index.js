@@ -153,12 +153,25 @@ if (process.env.VERCEL || require.main !== module) {
 
 // Global API request timeout — prevents 499s from clients waiting indefinitely.
 // Returns a clean 503 JSON instead of the client closing the connection (which shows as 499 in logs).
+// NOTE: We check req.originalUrl within a single middleware to ensure route-specific timeouts
+// (30s for payment/booking due to external Stripe API calls) are never overwritten by a subsequent 15s timer.
 app.use('/api', (req, res, next) => {
-  res.setTimeout(15000, () => {
+  const isStripeRoute =
+    req.originalUrl.startsWith('/api/payments') ||
+    req.originalUrl.startsWith('/api/bookings');
+
+  const timeoutMs = isStripeRoute ? 30000 : 15000;
+
+  res.setTimeout(timeoutMs, () => {
     if (!res.headersSent) {
+      if (isStripeRoute) {
+        console.error(`⏱️ Payment/Booking route timed out (${timeoutMs}ms): ${req.method} ${req.originalUrl}`);
+      }
       res.status(503).json({
         success: false,
-        error: 'Request timed out. Please try again.',
+        error: isStripeRoute
+          ? 'Payment processing timed out. Please check your bookings.'
+          : 'Request timed out. Please try again.',
       });
     }
   });

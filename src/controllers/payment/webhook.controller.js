@@ -88,21 +88,23 @@ const handlePaymentIntentSucceeded = async (paymentIntent) => {
     return;
   }
 
-  // If already success, skip to avoid duplicate processing
-  if (payment.status === 'success') {
-    console.log(`Webhook: Payment ${payment_intent_id} already marked as success.`);
-    return;
-  }
-
-  // Update payment status to success
-  await Payment.updateStatus(
+  // Atomically claim this payment as 'success'. If verifyPayment already
+  // processed it, claimSuccess returns null and we skip all side effects
+  // (promo increment, EventJoin, notifications) to avoid duplicates.
+  const claimed = await Payment.claimSuccess(
     payment.paymentId || payment._id,
-    'success',
     paymentIntent.id,
     paymentIntent.payment_method
   );
 
-  // Increment promo code usage if used
+  if (!claimed) {
+    console.log(`⚠️ [DUPLICATE IGNORED] Webhook ignored for PI: ${payment_intent_id} (already claimed by verify)`);
+    return;
+  }
+
+  console.log(`✅ [PAYMENT CLAIMED] By WEBHOOK — PI: ${payment_intent_id}, PaymentID: ${payment.paymentId || payment._id}`);
+
+  // Increment promo code usage if used (safe — only one caller reaches here)
   if (payment.promoCodeId) {
     await PromoCode.incrementUsage(payment.promoCodeId);
   }

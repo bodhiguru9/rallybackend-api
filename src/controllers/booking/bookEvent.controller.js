@@ -224,6 +224,14 @@ const bookEvent = async (req, res, next) => {
         try {
           let paymentIntent = await stripeInstance.paymentIntents.retrieve(payment.stripePaymentIntentId);
 
+          // Don't reuse PaymentIntents in terminal or non-confirmable states.
+          // If the PI was previously canceled (e.g. user dismissed the sheet) or already
+          // succeeded, fall through to create a fresh booking + PI.
+          const reusableStatuses = ['requires_payment_method', 'requires_confirmation', 'requires_action'];
+          if (!reusableStatuses.includes(paymentIntent.status)) {
+            throw new Error(`PaymentIntent in non-reusable state: ${paymentIntent.status}`);
+          }
+
           // Ensure existing PaymentIntent is attached to the user's customer ID.
           // Reusing a PaymentIntent without Customer attachment throws Stripe error when confirming with saved card.
           if (paymentIntent.customer !== customerId) {

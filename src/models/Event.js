@@ -157,7 +157,7 @@ class Event {
     }
 
     const creatorQuery = objectId
-      ? { $in: [objectId, creatorId] }
+      ? { $in: [objectId, objectId.toString(), creatorId] }
       : creatorId;
 
     return await eventsCollection
@@ -407,7 +407,7 @@ class Event {
     }
 
     const creatorQuery = objectId
-      ? { $in: [objectId, creatorId] }
+      ? { $in: [objectId, objectId.toString(), creatorId] }
       : creatorId;
 
     return await eventsCollection.countDocuments({ creatorId: creatorQuery });

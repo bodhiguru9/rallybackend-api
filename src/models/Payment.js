@@ -129,6 +129,38 @@ class Payment {
     return result.modifiedCount > 0;
   }
 
+  /**
+   * Atomically claim a payment as 'success'. Returns the updated document if this
+   * caller won the race, or null if another caller (webhook or verify) already
+   * transitioned it. Uses findOneAndUpdate with a status precondition so exactly
+   * one concurrent caller proceeds to post-payment side effects (promo increment,
+   * EventJoin, notifications).
+   */
+  static async claimSuccess(paymentId, stripePaymentId = null, stripePaymentMethod = null) {
+    const db = getDB();
+    const paymentsCollection = db.collection('payments');
+
+    const query = this.buildQuery(paymentId);
+    if (!query) return null;
+
+    // Only transition from a non-success status → success
+    query.status = { $ne: 'success' };
+
+    const updateData = {
+      status: 'success',
+      updatedAt: new Date(),
+    };
+    if (stripePaymentId) updateData.stripePaymentId = stripePaymentId;
+    if (stripePaymentMethod) updateData.stripePaymentMethod = stripePaymentMethod;
+
+    const result = await paymentsCollection.findOneAndUpdate(
+      query,
+      { $set: updateData },
+      { returnDocument: 'after' }
+    );
+    return result; // null if already claimed by another caller
+  }
+
   static async markRefunded(paymentId, refundData = {}) {
     const db = getDB();
     const paymentsCollection = db.collection('payments');
@@ -184,6 +216,36 @@ class Payment {
     });
 
     return result.modifiedCount > 0;
+  }
+
+  static async findByUser(userId, limit = 50, skip = 0) {
+    const db = getDB();
+    const paymentsCollection = db.collection('payments');
+    const usersCollection = db.collection('users');
+
+    let query;
+    if (typeof userId === 'number' || !isNaN(Number(userId))) {
+      const numId = Number(userId);
+      const userDoc = await usersCollection.findOne({ userId: numId });
+      const userObjectId = userDoc ? userDoc._id : null;
+      query = {
+        $or: [
+          { userId: numId },
+          { userId: String(numId) },
+          ...(userObjectId ? [{ userId: userObjectId }, { userId: userObjectId.toString() }] : [])
+        ]
+      };
+    } else {
+      let objectId;
+      try {
+        objectId = typeof userId === 'string' ? new ObjectId(userId) : userId;
+      } catch (error) {
+        objectId = null;
+      }
+      query = objectId ? { $or: [{ userId: objectId }, { userId: objectId.toString() }, { userId }] } : { userId };
+    }
+
+    return await paymentsCollection.find(query).sort({ createdAt: -1 }).limit(limit).skip(skip).toArray();
   }
 }
 

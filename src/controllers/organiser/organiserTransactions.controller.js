@@ -93,7 +93,8 @@ const getOrganiserTransactions = async (req, res, next) => {
       $or: [
         { eventId: { $in: allEventIds } },
         { parentEventId: { $in: allEventIds } }
-      ]
+      ],
+      status: { $in: ['success', 'succeeded', 'paid', 'booked'] }
     };
 
     const totalCount = await paymentsCollection.countDocuments(paymentQuery);

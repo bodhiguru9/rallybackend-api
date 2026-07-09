@@ -4,11 +4,6 @@ const { sendWhatsAppOTP, generateOTP } = require('./twilio.service');
 const User = require('../models/User');
 const { getBookingStatsByUsers } = require('../utils/bookingStats');
 
-// Test-only OTP bypass identifiers
-const TEST_EMAIL = 'yadav.navin51@gmail.com';
-const TEST_MOBILE_RAW = '9569734648';
-const TEST_OTP = '359695';
-
 // Persistent OTP store (MongoDB-backed) — shared across PM2 cluster workers and
 // horizontally-scaled instances, and auto-expired via a TTL index. Replaces the
 // old in-memory Map (which broke when "send OTP" and "verify OTP" hit different
@@ -63,27 +58,6 @@ const normalizeIdentifier = (emailOrMobile) => {
     ? emailOrMobile.toLowerCase()
     : normalizeMobileNumber(emailOrMobile);
   return { normalizedIdentifier, isEmail };
-};
-
-const getTestIdentifiers = () => {
-  let normalizedMobile = null;
-  try {
-    normalizedMobile = normalizeMobileNumber(TEST_MOBILE_RAW);
-  } catch (error) {
-    normalizedMobile = null;
-  }
-  return {
-    email: TEST_EMAIL.toLowerCase(),
-    mobile: normalizedMobile,
-  };
-};
-
-const isTestIdentifier = (normalizedIdentifier, isEmail) => {
-  const testIds = getTestIdentifiers();
-  if (isEmail) {
-    return normalizedIdentifier === testIds.email;
-  }
-  return testIds.mobile && normalizedIdentifier === testIds.mobile;
 };
 
 /**
@@ -206,20 +180,8 @@ const sendForgotPasswordOTP = async (emailOrMobile) => {
     return { message: 'If account exists, OTP has been sent' };
   }
 
-  // Generate OTP (use fixed OTP for test identifiers)
-  let otp = null;
-  let hashedOTP = null;
-  let otpExpire = null;
-  if (isTestIdentifier(normalizedIdentifier, isEmail)) {
-    otp = TEST_OTP;
-    otpExpire = Date.now() + 10 * 60 * 1000;
-    hashedOTP = crypto.createHash('sha256').update(otp).digest('hex');
-  } else {
-    const generated = generateAndHashOTP();
-    otp = generated.otp;
-    hashedOTP = generated.hashedOTP;
-    otpExpire = generated.otpExpire;
-  }
+  // Generate OTP
+  const { otp, hashedOTP, otpExpire } = generateAndHashOTP();
 
   // Store OTP data
   const storeKey = getStoreKey(normalizedIdentifier, isEmail, 'forgot-password');
@@ -271,18 +233,16 @@ const sendSignupOTP = async (emailOrMobile, userType) => {
 
   const { normalizedIdentifier, isEmail } = normalizeIdentifier(emailOrMobile);
 
-  // Check if identifier already exists (skip for test identifiers)
-  if (!isTestIdentifier(normalizedIdentifier, isEmail)) {
-    if (isEmail) {
-      const emailExists = await User.emailExists(normalizedIdentifier);
-      if (emailExists) {
-        throw new Error('Email already registered');
-      }
-    } else {
-      const mobileExists = await User.mobileNumberExists(normalizedIdentifier);
-      if (mobileExists) {
-        throw new Error('Mobile number already registered');
-      }
+  // Check if identifier already exists
+  if (isEmail) {
+    const emailExists = await User.emailExists(normalizedIdentifier);
+    if (emailExists) {
+      throw new Error('Email already registered');
+    }
+  } else {
+    const mobileExists = await User.mobileNumberExists(normalizedIdentifier);
+    if (mobileExists) {
+      throw new Error('Mobile number already registered');
     }
   }
 
@@ -300,23 +260,21 @@ const sendSignupOTP = async (emailOrMobile, userType) => {
     expiresAt: otpExpire,
   });
 
-  // Send OTP (skip sending for test identifiers)
-  if (!isTestIdentifier(normalizedIdentifier, isEmail)) {
-    try {
-      await sendOTP(normalizedIdentifier, isEmail, otp, 'signup');
-    } catch (error) {
-      const emailOTPEnabled = process.env.EMAIL_OTP === 'true' ||
-                             process.env.EMAIL_OTP === '1' ||
-                             process.env.EMAIL_OTP === 'enabled' ||
-                             process.env.EMAIL_OTP === 'yes';
+  // Send OTP
+  try {
+    await sendOTP(normalizedIdentifier, isEmail, otp, 'signup');
+  } catch (error) {
+    const emailOTPEnabled = process.env.EMAIL_OTP === 'true' ||
+                           process.env.EMAIL_OTP === '1' ||
+                           process.env.EMAIL_OTP === 'enabled' ||
+                           process.env.EMAIL_OTP === 'yes';
 
-      // Only remove from store if it's a critical error
-      if (isEmail && !emailOTPEnabled) {
-        // Keep entry for verification even if email sending is disabled
-      } else {
-        await otpStore.delete(storeKey);
-        throw new Error(`Failed to send OTP. Please try again. Error: ${error.message}`);
-      }
+    // Only remove from store if it's a critical error
+    if (isEmail && !emailOTPEnabled) {
+      // Keep entry for verification even if email sending is disabled
+    } else {
+      await otpStore.delete(storeKey);
+      throw new Error(`Failed to send OTP. Please try again. Error: ${error.message}`);
     }
   }
 
@@ -336,25 +294,9 @@ const verifyOTP = async (emailOrMobile, otp, context = '') => {
   const { normalizedIdentifier, isEmail } = normalizeIdentifier(emailOrMobile);
 
   // Find stored data
-  let found = await findStoredData(normalizedIdentifier, isEmail, context);
+  const found = await findStoredData(normalizedIdentifier, isEmail, context);
   if (!found) {
-    // Allow test OTP without stored state
-    if (isTestIdentifier(normalizedIdentifier, isEmail) && otp === TEST_OTP) {
-      const storeKey = getStoreKey(normalizedIdentifier, isEmail, context);
-      const now = Date.now();
-      const storedData = {
-        otp: crypto.createHash('sha256').update(TEST_OTP).digest('hex'),
-        otpExpire: now + 10 * 60 * 1000,
-        userType: 'player',
-        identifier: normalizedIdentifier,
-        isEmail,
-        expiresAt: now + 10 * 60 * 1000,
-      };
-      await otpStore.set(storeKey, storedData);
-      found = { storedData, storeKey };
-    } else {
-      throw new Error('OTP not found or expired. Please request a new OTP.');
-    }
+    throw new Error('OTP not found or expired. Please request a new OTP.');
   }
 
   const { storedData, storeKey } = found;
@@ -365,22 +307,14 @@ const verifyOTP = async (emailOrMobile, otp, context = '') => {
     throw new Error('OTP has expired. Please request a new OTP.');
   }
 
-  // Verify OTP (test identifier allows fixed OTP)
-  if (isTestIdentifier(normalizedIdentifier, isEmail)) {
-    if (otp !== TEST_OTP) {
-      throw new Error('Invalid OTP');
-    }
-  } else {
-    const hashedOTP = crypto.createHash('sha256').update(otp).digest('hex');
-    if (storedData.otp !== hashedOTP) {
-      throw new Error('Invalid OTP');
-    }
+  // Verify OTP
+  const hashedOTP = crypto.createHash('sha256').update(otp).digest('hex');
+  if (storedData.otp !== hashedOTP) {
+    throw new Error('Invalid OTP');
   }
 
   // Generate verification token
-  const verificationToken = isTestIdentifier(normalizedIdentifier, isEmail)
-    ? 'TEST_SIGNUP_TOKEN'
-    : crypto.randomBytes(32).toString('hex');
+  const verificationToken = crypto.randomBytes(32).toString('hex');
   const verificationTokenHash = crypto.createHash('sha256').update(verificationToken).digest('hex');
   const verificationTokenExpire = Date.now() + 60 * 60 * 1000; // 1 hour
 

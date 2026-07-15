@@ -402,7 +402,13 @@ return result.insertedId;
 
     const agg = await joinsCollection.aggregate([
       { $match: match },
-      { $group: { _id: null, total: { $sum: { $ifNull: ['$guestsCount', 1] } } } },
+      {
+        $group: {
+          _id: { userId: '$userId' },
+          guestsCount: { $max: { $ifNull: ['$guestsCount', 1] } }
+        }
+      },
+      { $group: { _id: null, total: { $sum: '$guestsCount' } } },
     ]).toArray();
 
     return agg.length > 0 ? agg[0].total : 0;

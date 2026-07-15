@@ -374,10 +374,8 @@ const getEventDetails = async (req, res, next) => {
       waitlist = await Waitlist.getEventWaitlist(mongoEventId, 50, 0); // Get first 50 waitlist items
     }
 
-    // Calculate exact spots information from actual participant list if available
-    const spotsBooked = participants.length > 0
-      ? participants.reduce((sum, p) => sum + (p.guestsCount || 1), 0)
-      : participantsCount;
+    // Calculate exact spots information from true participant count
+    const spotsBooked = participantsCount;
     const spotsFull = spotsBooked >= maxGuest;
     const availableSpots = Math.max(0, maxGuest - spotsBooked);
     const spotsLeft = availableSpots;

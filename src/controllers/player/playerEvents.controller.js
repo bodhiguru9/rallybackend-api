@@ -151,9 +151,12 @@ const getPlayerEvents = async (req, res, next) => {
     const { getUsersByIds } = require('../../utils/batchLoad');
     const _creatorMap = await getUsersByIds(allEvents.map((e) => e.creatorId));
 
+    const { buildOccurrenceMap, batchParticipantCounts } = require('../../utils/batchEventData');
+    const _occurrenceMap = buildOccurrenceMap(allEvents);
+    const _participantCountMap = await batchParticipantCounts(allEvents.map(e => e._id), _occurrenceMap);
+
     // Process events with their relationships
-    const processedEvents = await Promise.all(
-      allEvents.map(async (event) => {
+    const processedEvents = allEvents.map((event) => {
         const eventIdStr = event._id.toString();
         const isJoined = joinedEventIds.includes(eventIdStr);
         const isInWaitlist = waitlistEventIds.includes(eventIdStr);
@@ -163,11 +166,20 @@ const getPlayerEvents = async (req, res, next) => {
         let waitlistInfo = null;
         if (isInWaitlist) {
           const waitlistItem = waitlistEventsData.find(w => w.event._id.toString() === eventIdStr);
-          waitlistInfo = {
-            waitlistId: waitlistItem?.waitlistId?.toString(),
-            requestedAt: waitlistItem?.waitlistCreatedAt,
-            status: 'pending',
-          };
+          if (waitlistItem?.waitlist) {
+            waitlistInfo = {
+              status: waitlistItem.waitlist.status || 'pending',
+              joinedAt: waitlistItem.waitlist.joinedAt,
+              message: waitlistItem.waitlist.message,
+            };
+          } else {
+            // Fallback for legacy structure
+            waitlistInfo = {
+                waitlistId: waitlistItem?.waitlistId?.toString(),
+                requestedAt: waitlistItem?.waitlistCreatedAt,
+                status: 'pending',
+            };
+          }
         }
 
         // Get reminder info if applicable
@@ -198,7 +210,7 @@ const getPlayerEvents = async (req, res, next) => {
         const maxGuest = event.eventMaxGuest !== undefined ? event.eventMaxGuest : (event.gameSpots || 0);
         let participantsCount = 0;
         if (!isPrivate) {
-          participantsCount = await EventJoin.getParticipantCount(event._id);
+          participantsCount = _participantCountMap.get(eventIdStr) || 0;
         }
         const spotsFull = participantsCount >= maxGuest;
 
@@ -227,8 +239,7 @@ const getPlayerEvents = async (req, res, next) => {
             reminderInfo: reminderInfo,
           },
         };
-      })
-    );
+      });
 
     // Separate events by category
     const joinedEvents = processedEvents.filter(e => e.playerStatus.hasJoined);

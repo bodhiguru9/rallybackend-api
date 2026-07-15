@@ -96,18 +96,19 @@ const getCommunityDetails = async (req, res, next) => {
       });
     }
 
-    // Batch-fetch participant counts and participants preview for the current page only
-    const { batchParticipantCounts, batchEventParticipants, batchUserEventStatus } = require('../../utils/batchEventData');
+    // Batch-fetch participant counts and participants preview for the current page only using occurrence-aware batch helpers
+    const { buildOccurrenceMap, batchParticipantCounts, batchEventParticipants, batchUserEventStatus } = require('../../utils/batchEventData');
     const pageEventIds = pageEvents.map((e) => e._id);
+    const occurrenceMap = buildOccurrenceMap(pageEvents);
     const [participantCountMap, participantsPreviewMap] = await Promise.all([
-      batchParticipantCounts(pageEventIds),
-      batchEventParticipants(pageEventIds, 10),
+      batchParticipantCounts(pageEventIds, occurrenceMap),
+      batchEventParticipants(pageEventIds, 10, occurrenceMap),
     ]);
 
     // Batch user status if authenticated
     let userStatusBatch = { joinedSet: new Set(), waitlistedSet: new Set(), requestedSet: new Set() };
     if (req.user && req.user.id) {
-      userStatusBatch = await batchUserEventStatus(req.user.id, pageEventIds);
+      userStatusBatch = await batchUserEventStatus(req.user.id, pageEventIds, occurrenceMap);
     }
 
     // Format events with full details — NO per-event DB calls

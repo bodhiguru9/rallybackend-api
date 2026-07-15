@@ -394,9 +394,23 @@ const searchEvents = async (req, res, next) => {
     const { getUsersByIds } = require('../../utils/batchLoad');
     const _creatorMap = await getUsersByIds(events.map((e) => e.creatorId));
 
-    // Get creator details and additional info for each event (matching getAllEvents format)
-    const eventsWithFullData = await Promise.all(
-      events.map(async (event) => {
+    // Pre-fetch participant counts, waitlist counts, previews, and user statuses in batch ($O(1)$ DB queries)
+    const _eventIds = events.map((e) => e._id);
+    const { buildOccurrenceMap, batchParticipantCounts, batchWaitlistCounts, batchEventParticipants, batchUserEventStatus } = require('../../utils/batchEventData');
+    const _occurrenceMap = buildOccurrenceMap(events);
+    const [_participantCountMap, _waitlistCountMap, _participantsPreviewMap] = await Promise.all([
+      batchParticipantCounts(_eventIds, _occurrenceMap),
+      batchWaitlistCounts(_eventIds, _occurrenceMap),
+      batchEventParticipants(_eventIds, 10, _occurrenceMap),
+    ]);
+
+    let userStatusBatch = { joinedSet: new Set(), waitlistedSet: new Set(), requestedSet: new Set() };
+    if (req.user && req.user.id) {
+      userStatusBatch = await batchUserEventStatus(req.user.id, _eventIds, _occurrenceMap);
+    }
+
+    // Get creator details and additional info for each event (matching getAllEvents format) — NO per-event DB calls
+    const eventsWithFullData = events.map((event) => {
         // Get creator/organiser details from the pre-fetched batch (no per-event query)
         const creator = _creatorMap.get(String(event.creatorId));
         let creatorData = null;
@@ -413,29 +427,26 @@ const searchEvents = async (req, res, next) => {
           };
         }
 
-        // Use MongoDB ObjectId for database operations
-        const mongoEventId = event._id;
+        // Use MongoDB ObjectId string for map lookups
+        const mongoIdStr = event._id.toString();
 
         // Support both old and new field names for backward compatibility
         const isPrivate = event.IsPrivateEvent !== undefined ? event.IsPrivateEvent : (event.visibility === 'private');
         const maxGuest = event.eventMaxGuest !== undefined ? event.eventMaxGuest : (event.gameSpots || 0);
 
-        // Get actual booked participants count (more accurate than eventTotalAttendNumber)
-        // NOTE: Joins are always stored with occurrenceStart = event.eventDateTime (never null),
-        // so we must pass eventDateTime here to match stored records.
+        // Get actual booked participants count from batch map
         let participantsCount = 0;
         let participants = [];
         if (!isPrivate || (req.user && req.user.id === event.creatorId.toString())) {
-          participantsCount = await EventJoin.getParticipantCount(mongoEventId, event.eventDateTime || null);
-          participants = await EventJoin.getEventParticipants(mongoEventId, event.eventDateTime || null, 10, 0); // Get first 10 participants
+          participantsCount = _participantCountMap.get(mongoIdStr) || 0;
+          participants = _participantsPreviewMap.get(mongoIdStr) || [];
         }
 
-        // Get waitlist count (only for private events and if user is creator)
+        // Get waitlist count from batch map
         let waitlistCount = 0;
         let waitlist = [];
         if (isPrivate && req.user && req.user.id === event.creatorId.toString()) {
-          waitlistCount = await Waitlist.getWaitlistCount(mongoEventId);
-          waitlist = await Waitlist.getEventWaitlist(mongoEventId, 10, 0); // Get first 10 waitlist items
+          waitlistCount = _waitlistCountMap.get(mongoIdStr) || 0;
         }
 
         // Calculate spots information
@@ -444,11 +455,11 @@ const searchEvents = async (req, res, next) => {
         const spotsBooked = participantsCount;
         const spotsLeft = availableSpots;
 
-        // Get user's join status if authenticated
+        // Get user's join status from batch map if authenticated
         let userJoinStatus = null;
         if (req.user) {
           if (!isPrivate) {
-            const hasJoined = await EventJoin.hasJoined(req.user.id, mongoEventId);
+            const hasJoined = userStatusBatch.joinedSet.has(mongoIdStr);
             userJoinStatus = {
               hasJoined,
               canJoin: !hasJoined && !spotsFull,
@@ -456,8 +467,8 @@ const searchEvents = async (req, res, next) => {
             };
           } else {
             // Private event
-            const inWaitlist = await Waitlist.isInWaitlist(req.user.id, mongoEventId);
-            const hasJoined = await EventJoin.hasJoined(req.user.id, mongoEventId);
+            const inWaitlist = userStatusBatch.waitlistedSet.has(mongoIdStr);
+            const hasJoined = userStatusBatch.joinedSet.has(mongoIdStr);
             userJoinStatus = {
               hasJoined,
               inWaitlist,
@@ -490,8 +501,7 @@ const searchEvents = async (req, res, next) => {
           availableSpots: availableSpots,
           isFull: spotsFull, // Keep for backward compatibility
         };
-      })
-    );
+      });
 
     // Get filter options (unique sports, eventTypes, locations, prices)
     const filterOptions = await getFilterOptionsData();

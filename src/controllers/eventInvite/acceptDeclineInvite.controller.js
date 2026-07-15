@@ -87,13 +87,24 @@ const acceptInvite = async (req, res, next) => {
 
     // Automatically join the event (if not already joined)
     try {
-      const hasJoined = await EventJoin.hasJoined(playerId, event._id);
+      const occurrenceStart = EventJoin.normalizeOccurrence(invite.occurrenceStart || event.eventDateTime || null);
+      const maxGuest = event.eventMaxGuest !== undefined ? event.eventMaxGuest : (event.gameSpots || 0);
+      const hasJoined = await EventJoin.hasJoined(playerId, event._id, occurrenceStart);
       if (!hasJoined) {
-        await EventJoin.join(playerId, event._id);
+        await EventJoin.join(playerId, event._id, occurrenceStart, {
+          capacityLimit: maxGuest,
+        });
       }
     } catch (error) {
+      if (error.code === 'EVENT_FULL' || error.message?.includes('Event is full')) {
+        return res.status(400).json({
+          success: false,
+          error: 'Event has reached full capacity. All spots have been booked.',
+          code: 'EVENT_FULL',
+        });
+      }
       // If already joined, that's fine
-      if (error.message !== 'Already joined this event') {
+      if (error.message !== 'Already joined this occurrence' && error.message !== 'Already joined this event') {
         console.error('Error joining event after accepting invitation:', error);
       }
     }

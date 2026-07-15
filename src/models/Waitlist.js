@@ -212,11 +212,14 @@ class Waitlist {
     }
 
     // Check if event has available spots using actual booked count
-    const currentJoinedCount = await EventJoin.getParticipantCount(event._id);
+    const occurrenceStart = EventJoin.normalizeOccurrence(waitlistItem.occurrenceStart || event.eventDateTime || null);
+    const currentJoinedCount = await EventJoin.getParticipantCount(event._id, occurrenceStart);
     const maxGuest = event.eventMaxGuest !== undefined ? event.eventMaxGuest : (event.gameSpots || 0);
     
     if (currentJoinedCount >= maxGuest) {
-      throw new Error('Event is full');
+      const err = new Error('Event is full. All spots have been booked.');
+      err.code = 'EVENT_FULL';
+      throw err;
     }
 
     // Check if event has a price
@@ -232,10 +235,14 @@ class Waitlist {
     } else {
       // Free event: Add user to event
       try {
-        // Use MongoDB ObjectId from found event
-        await EventJoin.join(waitlistItem.userId, event._id);
+        // Use MongoDB ObjectId from found event, passing capacityLimit to enforce atomic overbooking guard
+        await EventJoin.join(waitlistItem.userId, event._id, occurrenceStart, {
+          capacityLimit: maxGuest,
+        });
       } catch (error) {
-        if (error.message.includes('Already joined')) {
+        if (error.code === 'EVENT_FULL' || error.message.includes('Event is full')) {
+          throw error;
+        } else if (error.message.includes('Already joined')) {
           // User already in event, just remove from waitlist
         } else {
           throw error;

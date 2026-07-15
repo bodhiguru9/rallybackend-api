@@ -55,6 +55,17 @@ const requestedOccurrenceEnd = req.body.occurrenceEnd || req.query.occurrenceEnd
       });
     }
 
+    // Check if registration has started
+    if (event.eventRegistrationStartTime) {
+      const registrationStart = new Date(event.eventRegistrationStartTime);
+      if (new Date() < registrationStart) {
+        return res.status(400).json({
+          success: false,
+          error: 'Registration has not started yet',
+        });
+      }
+    }
+
     const isRecurring = Array.isArray(event.eventFrequency) && event.eventFrequency.length > 0;
 
 if (isRecurring && !requestedOccurrenceStart) {

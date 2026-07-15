@@ -41,6 +41,17 @@ const joinPrivateEventRequest = async (req, res, next) => {
       });
     }
 
+    // Check if registration has started
+    if (event.eventRegistrationStartTime) {
+      const registrationStart = new Date(event.eventRegistrationStartTime);
+      if (new Date() < registrationStart) {
+        return res.status(400).json({
+          success: false,
+          error: 'Registration has not started yet',
+        });
+      }
+    }
+
     // Support both old and new field names for backward compatibility
     const isPrivate = event.IsPrivateEvent !== undefined ? event.IsPrivateEvent : (event.visibility === 'private');
     const approvalRequired = event.eventApprovalRequired === true || event.eventApprovalReq === true;

@@ -259,6 +259,76 @@ const updateEvent = async (req, res, next) => {
       // Get updated event (use MongoDB ObjectId from found event)
       const updatedEvent = await Event.findById(event._id);
       const creator = await User.findById(updatedEvent.creatorId);
+
+      // Cascade event date/time changes to eventJoins and bookings collections
+      const oldStart = event.eventDateTime ? new Date(event.eventDateTime) : (event.gameStartDate ? new Date(event.gameStartDate) : null);
+      const newStart = updatedEvent.eventDateTime ? new Date(updatedEvent.eventDateTime) : null;
+      const newEnd = updatedEvent.eventEndDateTime ? new Date(updatedEvent.eventEndDateTime) : null;
+
+      if (newStart && oldStart && (oldStart.getTime() !== newStart.getTime() || (updateData.eventEndDateTime !== undefined && event.eventEndDateTime !== updateData.eventEndDateTime))) {
+        try {
+          const db = getDB();
+          const joinsCollection = db.collection('eventJoins');
+          const bookingsCollection = db.collection('bookings');
+          const isNonRecurring = !updatedEvent.eventFrequency || !Array.isArray(updatedEvent.eventFrequency) || updatedEvent.eventFrequency.length === 0;
+
+          const newStartIso = newStart.toISOString();
+          const newEndIso = newEnd ? newEnd.toISOString() : null;
+
+          if (isNonRecurring) {
+            // For non-recurring events, ALL joins and bookings should point directly to the updated eventDateTime / eventEndDateTime
+            await joinsCollection.updateMany(
+              { $or: [{ eventId: eventObjectId }, { eventId: event.eventId }] },
+              { $set: { occurrenceStart: newStartIso, occurrenceEnd: newEndIso } }
+            );
+            await bookingsCollection.updateMany(
+              { $or: [{ eventId: eventObjectId }, { eventId: event.eventId }] },
+              { $set: { occurrenceStart: newStartIso, occurrenceEnd: newEndIso } }
+            );
+          } else {
+            // For recurring events:
+            // 1. Update joins/bookings that matched exact old start
+            const oldStartIso = oldStart.toISOString();
+            await joinsCollection.updateMany(
+              { $or: [{ eventId: eventObjectId }, { eventId: event.eventId }], occurrenceStart: oldStartIso },
+              { $set: { occurrenceStart: newStartIso, occurrenceEnd: newEndIso } }
+            );
+            await bookingsCollection.updateMany(
+              { $or: [{ eventId: eventObjectId }, { eventId: event.eventId }], occurrenceStart: oldStartIso },
+              { $set: { occurrenceStart: newStartIso, occurrenceEnd: newEndIso } }
+            );
+
+            // 2. Adjust any other occurrence timestamps by the time delta so all sessions stay aligned
+            const deltaMs = newStart.getTime() - oldStart.getTime();
+            if (deltaMs !== 0) {
+              const allJoins = await joinsCollection.find({ $or: [{ eventId: eventObjectId }, { eventId: event.eventId }], occurrenceStart: { $ne: newStartIso } }).toArray();
+              for (const j of allJoins) {
+                if (j.occurrenceStart) {
+                  const adjStart = new Date(new Date(j.occurrenceStart).getTime() + deltaMs);
+                  const adjEnd = j.occurrenceEnd ? new Date(new Date(j.occurrenceEnd).getTime() + deltaMs) : (newEnd ? new Date(adjStart.getTime() + (newEnd.getTime() - newStart.getTime())) : null);
+                  await joinsCollection.updateOne(
+                    { _id: j._id },
+                    { $set: { occurrenceStart: adjStart.toISOString(), occurrenceEnd: adjEnd ? adjEnd.toISOString() : null } }
+                  );
+                }
+              }
+              const allBookings = await bookingsCollection.find({ $or: [{ eventId: eventObjectId }, { eventId: event.eventId }], occurrenceStart: { $ne: newStartIso } }).toArray();
+              for (const b of allBookings) {
+                if (b.occurrenceStart) {
+                  const adjStart = new Date(new Date(b.occurrenceStart).getTime() + deltaMs);
+                  const adjEnd = b.occurrenceEnd ? new Date(new Date(b.occurrenceEnd).getTime() + deltaMs) : (newEnd ? new Date(adjStart.getTime() + (newEnd.getTime() - newStart.getTime())) : null);
+                  await bookingsCollection.updateOne(
+                    { _id: b._id },
+                    { $set: { occurrenceStart: adjStart.toISOString(), occurrenceEnd: adjEnd ? adjEnd.toISOString() : null } }
+                  );
+                }
+              }
+            }
+          }
+        } catch (cascadeErr) {
+          console.error('⚠️ Failed to cascade event date/time update to joins and bookings:', cascadeErr);
+        }
+      }
       
       // If event was just cancelled, notify all participants
       if (updateData.eventStatus === 'cancelled' && event.eventStatus !== 'cancelled') {

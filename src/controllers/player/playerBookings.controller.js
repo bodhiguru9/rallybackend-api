@@ -155,6 +155,14 @@ const getPlayerBookings = async (req, res, next) => {
         const joinedOccurrences = event.joinedOccurrences || [];
         const joinOccurrence = joinedOccurrences.length > 0 ? joinedOccurrences[0] : null;
 
+        const isNonRecurring = !event.eventFrequency || !Array.isArray(event.eventFrequency) || event.eventFrequency.length === 0;
+        const finalOccStart = isNonRecurring
+          ? (formattedEvent.eventDateTime || joinOccurrence?.occurrenceStart || null)
+          : (joinOccurrence?.occurrenceStart || null);
+        const finalOccEnd = isNonRecurring
+          ? (formattedEvent.eventEndDateTime || joinOccurrence?.occurrenceEnd || null)
+          : (joinOccurrence?.occurrenceEnd || null);
+
         return {
           ...formattedEvent,
           creator: {
@@ -169,8 +177,8 @@ const getPlayerBookings = async (req, res, next) => {
             // Guest count from the booking record (player + guests)
             guestsCount: relatedBooking ? (relatedBooking.guestsCount || 1) : (joinOccurrence?.guestsCount || 1),
             // Occurrence timing — used by the frontend to match bookings to specific recurring sessions
-            occurrenceStart: joinOccurrence?.occurrenceStart || null,
-            occurrenceEnd: joinOccurrence?.occurrenceEnd || null,
+            occurrenceStart: finalOccStart,
+            occurrenceEnd: finalOccEnd,
             // Convenience boolean flags
             isPast,
             isOngoing,

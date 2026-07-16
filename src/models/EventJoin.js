@@ -451,19 +451,20 @@ return result.insertedId;
       .toArray();
 
     // Map events with join info
-   return events.map(event => {
-  const eventJoins = joins.filter(j => j.eventId.toString() === event._id.toString());
-  return {
-    ...event,
-    joinedOccurrences: eventJoins.map(j => ({
-      joinedAt: j.joinedAt,
-      occurrenceStart: j.occurrenceStart || null,
-      occurrenceEnd: j.occurrenceEnd || null,
-      parentEventId: j.parentEventId || null,
-      guestsCount: (j.guestsCount >= 1) ? j.guestsCount : 1,
-    })),
-  };
-});
+    return events.map(event => {
+      const isNonRecurring = !event.eventFrequency || !Array.isArray(event.eventFrequency) || event.eventFrequency.length === 0;
+      const eventJoins = joins.filter(j => j.eventId.toString() === event._id.toString());
+      return {
+        ...event,
+        joinedOccurrences: eventJoins.map(j => ({
+          joinedAt: j.joinedAt,
+          occurrenceStart: isNonRecurring ? (event.eventDateTime || j.occurrenceStart || null) : (j.occurrenceStart || null),
+          occurrenceEnd: isNonRecurring ? (event.eventEndDateTime || j.occurrenceEnd || null) : (j.occurrenceEnd || null),
+          parentEventId: j.parentEventId || null,
+          guestsCount: (j.guestsCount >= 1) ? j.guestsCount : 1,
+        })),
+      };
+    });
   }
 
   /**

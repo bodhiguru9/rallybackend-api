@@ -206,7 +206,8 @@ const getCommunityDetails = async (req, res, next) => {
  */
 const getAllCommunities = async (req, res, next) => {
   try {
-    const { page, perPage, skip } = getPaginationParams(req.query.page, 20);
+    const requestedPerPage = Math.min(parseInt(req.query.perPage) || 20, 200); // cap at 200 for safety
+    const { page, perPage, skip } = getPaginationParams(req.query.page, requestedPerPage);
 
     const db = getDB();
     const usersCollection = db.collection('users');

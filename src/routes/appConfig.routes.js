@@ -10,11 +10,15 @@ router.get('/version', (req, res) => {
   res.status(200).json({
     success: true,
     data: {
-      latestVersion: '1.0.31',
-      minRequiredVersion: '1.0.31', // Setting this higher than the app.json version (1.0.30) makes it a mandatory update
-      storeUrls: {
-        ios: 'itms-apps://apps.apple.com/in/app/rally-sports/id6526470249?platform=iphone',
-        android: 'https://play.google.com/store/apps/details?id=com.rallysports.app&pcampaignid=web_share',
+      ios: {
+        latestVersion: '1.6.0',
+        minRequiredVersion: '1.5.0',
+        storeUrl: 'itms-apps://apps.apple.com/in/app/rally-sports/id6526470249?platform=iphone',
+      },
+      android: {
+        latestVersion: '1.0.31',
+        minRequiredVersion: '1.0.30',
+        storeUrl: 'https://play.google.com/store/apps/details?id=com.rallysports.app&pcampaignid=web_share',
       },
       updateMessage: 'A new version of Rally is available! Please update to enjoy the latest features and improvements.',
     },

@@ -537,8 +537,6 @@ const bookEvent = async (req, res, next) => {
     }
 
     try {
-      let customerId = user.stripeCustomerId;
-
       // NOTE: Do NOT set setup_future_usage here.
       // Cards are saved independently via /api/cards endpoint.
       // Setting setup_future_usage: 'off_session' causes Stripe to strip

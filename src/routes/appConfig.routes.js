@@ -10,6 +10,14 @@ router.get('/version', (req, res) => {
   res.status(200).json({
     success: true,
     data: {
+      // Legacy structure for backwards compatibility with old live apps
+      latestVersion: '1.0.31',
+      minRequiredVersion: '1.0.30',
+      storeUrls: {
+        ios: 'itms-apps://apps.apple.com/in/app/rally-sports/id6526470249?platform=iphone',
+        android: 'https://play.google.com/store/apps/details?id=com.rallysports.app&pcampaignid=web_share',
+      },
+      // New structure for current and future apps
       ios: {
         latestVersion: '1.6.0',
         minRequiredVersion: '1.5.0',

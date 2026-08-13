@@ -8,7 +8,11 @@ const fs = require('fs');
 const path = require('path');
 const { getDB } = require('../../config/database');
 const { ObjectId } = require('mongodb');
-const { sendEventCancelledNotification } = require('../../services/eventNotification.service');
+const { 
+  sendEventCancelledNotification,
+  sendWaitlistSpotAvailableNotification 
+} = require('../../services/eventNotification.service');
+const Waitlist = require('../../models/Waitlist');
 
 /**
  * @desc    Update event (Public and Private events)
@@ -461,6 +465,32 @@ const updateEvent = async (req, res, next) => {
           }
         } catch (updateNotifError) {
           console.error('Error sending event update notifications:', updateNotifError);
+        }
+      }
+
+      // Check if capacity increased and notify waitlist
+      if (updateData.eventMaxGuest !== undefined && event.eventMaxGuest !== undefined && updateData.eventMaxGuest > event.eventMaxGuest) {
+        try {
+          const EventJoin = require('../../models/EventJoin');
+          const currentOccupied = await EventJoin.getParticipantCount(updatedEvent._id);
+          const availableSpots = updateData.eventMaxGuest - currentOccupied;
+          
+          if (availableSpots > 0) {
+            const waitlistUsers = await Waitlist.getEventWaitlist(updatedEvent._id);
+            if (waitlistUsers && waitlistUsers.length > 0) {
+              console.log(`📣 [UPDATE-EVENT] Capacity increased. Notifying ${waitlistUsers.length} waitlisted users for event: ${updatedEvent._id}`);
+              waitlistUsers.forEach(waitlistItem => {
+                if (waitlistItem.user) {
+                  sendWaitlistSpotAvailableNotification({
+                    user: waitlistItem.user,
+                    event: updatedEvent
+                  }).catch(err => console.error('Waitlist notification failed:', err.message));
+                }
+              });
+            }
+          }
+        } catch (capacityErr) {
+          console.error('Error processing capacity increase waitlist notifications:', capacityErr);
         }
       }
 

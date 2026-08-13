@@ -34,6 +34,10 @@ const TEMPLATES = {
     friendlyName: `${APP_NAME} Waitlist Spot Available`,
     body: `Hi {{1}}, a spot has opened up for {{2}} on {{3}}! Book now before it's gone.`,
   },
+  waitlistEventFull: {
+    friendlyName: `${APP_NAME} Waitlist Event Full`,
+    body: `Hi {{1}}, we're sorry but the last available spot for {{2}} has just been taken. You are still on the waitlist in case another spot opens.`,
+  },
   waitlistJoinHost: {
     friendlyName: `${APP_NAME} New Waitlist Request`,
     body: `Hi {{1}}, {{2}} has joined the waitlist for your full event {{3}} on {{4}}.`,
@@ -412,7 +416,7 @@ const sendWaitlistSpotAvailableNotification = async ({ user, event }) => {
       'Spot Available!',
       `A spot has opened up for "${eventName}". Book now!`,
       {
-        eventId: event._id ? event._id.toString() : null,
+        eventId: event.eventId || (event._id ? event._id.toString() : null),
         eventName: eventName,
       }
     );
@@ -421,6 +425,59 @@ const sendWaitlistSpotAvailableNotification = async ({ user, event }) => {
   }
 
   return await notifyUser({ user, subject, text, html, whatsappMessage, whatsappTemplate });
+};
+
+// ─── Waitlist Event Full → Remaining Waitlisted Players ────────────────────
+const sendWaitlistEventFullNotification = async ({ users, event }) => {
+  const eventName = event?.eventName || 'Event';
+  
+  if (!users || !Array.isArray(users) || users.length === 0) return true;
+
+  try {
+    for (const user of users) {
+      if (!user) continue;
+      const userName = user?.fullName || 'User';
+
+      const subject = `Event is now full: ${eventName}`;
+      const text = `Hi ${userName}, we're sorry but the last available spot for ${eventName} has just been taken. You are still on the waitlist in case another spot opens.`;
+      const html = `
+        <p>Hi ${userName},</p>
+        <p>We're sorry but the last available spot for <strong>${eventName}</strong> has just been taken.</p>
+        <p>You are still on the waitlist in case another spot opens up!</p>
+      `;
+      const whatsappMessage = text;
+
+      const contentSid = await resolveTemplateSid('WHATSAPP_WAITLIST_EVENT_FULL_SID', TEMPLATES.waitlistEventFull);
+      const whatsappTemplate = contentSid
+        ? {
+            contentSid,
+            contentVariables: { '1': userName, '2': eventName },
+          }
+        : null;
+
+      // In-app notification
+      try {
+        await Notification.create(
+          user._id || user.id,
+          'waitlist_event_full',
+          'Event is full',
+          `The last spot for "${eventName}" has been taken. You are still on the waitlist.`,
+          {
+            eventId: event.eventId || (event._id ? event._id.toString() : null),
+            eventName: eventName,
+          }
+        );
+      } catch (notifError) {
+        console.error('In-app waitlist event full notification failed:', notifError.message);
+      }
+
+      await notifyUser({ user, subject, text, html, whatsappMessage, whatsappTemplate });
+    }
+  } catch (err) {
+    console.error('Waitlist event full broadcast failed:', err.message);
+  }
+
+  return true;
 };
 
 // ─── Waitlist Join → Organiser ───────────────────────────────────────────
@@ -598,6 +655,7 @@ module.exports = {
   sendHostCancelledBookingNotification,
   sendEventCancelledNotification,
   sendWaitlistSpotAvailableNotification,
+  sendWaitlistEventFullNotification,
   sendWaitlistJoinNotificationToHost,
   sendOrganiserJoinRequestNotification,
   sendEventRequestAcceptedNotification,

@@ -12,7 +12,8 @@ const { getDB } = require('../../config/database');
 const { ObjectId } = require('mongodb');
 const { 
   sendBookingConfirmedNotification,
-  sendHostBookingNotification
+  sendHostBookingNotification,
+  sendWaitlistEventFullNotification
 } = require('../../services/eventNotification.service');
 
 // Initialize Stripe lazily
@@ -140,17 +141,28 @@ const handlePaymentIntentSucceeded = async (paymentIntent) => {
             bookedAt: new Date(),
           });
 
-          // Private events: remove request record after successful join
-          const isPrivate = eventDoc?.IsPrivateEvent !== undefined ? eventDoc.IsPrivateEvent : (eventDoc?.visibility === 'private');
-          if (isPrivate) {
-            await EventJoinRequest.deleteActiveByUserAndEvent(payment.userId, existingBooking.eventId);
-            const db = getDB();
-            const waitlistCollection = db.collection('waitlist');
-            await waitlistCollection.deleteMany({
-              userId: typeof payment.userId === 'string' ? new ObjectId(payment.userId) : payment.userId,
-              eventId: typeof existingBooking.eventId === 'string' ? new ObjectId(existingBooking.eventId) : existingBooking.eventId,
-              status: { $in: ['pending', 'accepted'] },
-            });
+          // Remove request record and waitlist entry after successful join
+          await EventJoinRequest.deleteActiveByUserAndEvent(payment.userId, existingBooking.eventId);
+          const db = getDB();
+          const waitlistCollection = db.collection('waitlist');
+          await waitlistCollection.deleteMany({
+            userId: typeof payment.userId === 'string' ? new ObjectId(payment.userId) : payment.userId,
+            eventId: typeof existingBooking.eventId === 'string' ? new ObjectId(existingBooking.eventId) : existingBooking.eventId,
+            status: { $in: ['pending', 'accepted'] },
+          });
+
+          // Check if event is now full, and notify remaining waitlisters
+          const currentOccupied = await EventJoin.getParticipantCount(existingBooking.eventId, existingBooking.occurrenceStart);
+          if (maxGuest - currentOccupied <= 0) {
+            const Waitlist = require('../../models/Waitlist');
+            const remainingWaitlist = await Waitlist.getEventWaitlist(existingBooking.eventId);
+            if (remainingWaitlist && remainingWaitlist.length > 0) {
+              const usersToNotify = remainingWaitlist.map(w => w.user).filter(Boolean);
+              sendWaitlistEventFullNotification({
+                users: usersToNotify,
+                event: eventDoc
+              }).catch(err => console.error('Webhook: Waitlist full notification failed:', err));
+            }
           }
         } catch (joinError) {
           if (joinError.code === 'EVENT_FULL') {
@@ -234,18 +246,29 @@ const handlePaymentIntentSucceeded = async (paymentIntent) => {
 
             isNewlyBooked = true;
 
-            // Private events cleanup
-            const isPrivate = event?.IsPrivateEvent !== undefined ? event.IsPrivateEvent : (event?.visibility === 'private');
-            if (isPrivate) {
-              await EventJoinRequest.deleteActiveByUserAndEvent(payment.userId, event._id);
-              const db = getDB();
-              const waitlistCollection = db.collection('waitlist');
-              await waitlistCollection.deleteMany({
-                userId: typeof payment.userId === 'string' ? new ObjectId(payment.userId) : payment.userId,
-                eventId: event._id,
-                occurrenceStart: payment.occurrenceStart || null,
-                status: { $in: ['pending', 'accepted'] },
-              });
+            // Cleanup request record and waitlist entry
+            await EventJoinRequest.deleteActiveByUserAndEvent(payment.userId, event._id);
+            const db = getDB();
+            const waitlistCollection = db.collection('waitlist');
+            await waitlistCollection.deleteMany({
+              userId: typeof payment.userId === 'string' ? new ObjectId(payment.userId) : payment.userId,
+              eventId: event._id,
+              occurrenceStart: payment.occurrenceStart || null,
+              status: { $in: ['pending', 'accepted'] },
+            });
+
+            // Check if event is now full, and notify remaining waitlisters
+            const currentOccupied = await EventJoin.getParticipantCount(event._id, payment.occurrenceStart || null);
+            if (maxGuest - currentOccupied <= 0) {
+              const Waitlist = require('../../models/Waitlist');
+              const remainingWaitlist = await Waitlist.getEventWaitlist(event._id);
+              if (remainingWaitlist && remainingWaitlist.length > 0) {
+                const usersToNotify = remainingWaitlist.map(w => w.user).filter(Boolean);
+                sendWaitlistEventFullNotification({
+                  users: usersToNotify,
+                  event: event
+                }).catch(err => console.error('Webhook: Waitlist full notification (fallback) failed:', err));
+              }
             }
           } catch (joinError) {
             if (joinError.code === 'EVENT_FULL') {

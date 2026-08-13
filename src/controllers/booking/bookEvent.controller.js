@@ -9,8 +9,12 @@ const { findEventById } = require('../../utils/eventHelper');
 const { validateAgeForEvent } = require('../../utils/ageRestriction');
 const { 
   sendBookingConfirmedNotification, 
-  sendHostBookingNotification 
+  sendHostBookingNotification,
+  sendWaitlistEventFullNotification
 } = require('../../services/eventNotification.service');
+const Waitlist = require('../../models/Waitlist');
+const { getDB } = require('../../config/database');
+const { ObjectId } = require('mongodb');
 
 // Initialize Stripe lazily
 let stripeInstance = null;
@@ -473,6 +477,31 @@ const bookEvent = async (req, res, next) => {
         }).catch(err => console.error('Host booking notification failed:', err));
       } catch (notificationError) {
         console.error('Notification dispatch failed:', notificationError);
+      }
+
+      // Cleanup waitlist and notify remaining if event is full
+      try {
+        const db = getDB();
+        const waitlistCollection = db.collection('waitlist');
+        await waitlistCollection.deleteMany({
+          userId: typeof userId === 'string' ? new ObjectId(userId) : userId,
+          eventId: event._id,
+          status: { $in: ['pending', 'accepted'] },
+        });
+
+        const newCurrentOccupied = await EventJoin.getParticipantCount(event._id, occurrenceStart);
+        if (maxGuest - newCurrentOccupied <= 0) {
+          const remainingWaitlist = await Waitlist.getEventWaitlist(event._id);
+          if (remainingWaitlist && remainingWaitlist.length > 0) {
+            const usersToNotify = remainingWaitlist.map(w => w.user).filter(Boolean);
+            sendWaitlistEventFullNotification({
+              users: usersToNotify,
+              event: event
+            }).catch(err => console.error('bookEvent: Waitlist full notification failed:', err));
+          }
+        }
+      } catch (cleanupError) {
+        console.error('Waitlist cleanup failed after free event join:', cleanupError);
       }
 
       return res.status(201).json({

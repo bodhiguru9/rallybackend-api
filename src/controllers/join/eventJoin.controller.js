@@ -9,6 +9,9 @@ const PackagePurchase = require('../../models/PackagePurchase');
 const { findEventById, validateEventId } = require('../../utils/eventHelper');
 const { getPaginationParams, createPaginationResponse } = require('../../utils/pagination');
 const { validateAgeForEvent } = require('../../utils/ageRestriction');
+const { getDB } = require('../../config/database');
+const { ObjectId } = require('mongodb');
+const EventJoinRequest = require('../../models/EventJoinRequest');
 const {
   sendWaitlistSpotAvailableNotification,
   sendPlayerCancelledBookingNotification,
@@ -297,12 +300,31 @@ if (!occurrenceStart) {
 
     // Leave event (use MongoDB ObjectId from found event)
     const queryOccurrence = isRecurring ? occurrenceStart : null;
-    const left = await EventJoin.leave(userId, event._id, queryOccurrence);
+    const leftJoin = await EventJoin.leave(userId, event._id, queryOccurrence);
+
+    // Also remove from waitlist collection if user is on waitlist
+    const db = getDB();
+    const waitlistCol = db.collection('waitlist');
+    const userObjectId = typeof userId === 'string' ? new ObjectId(userId) : userId;
+    const waitlistResult = await waitlistCol.deleteMany({
+      userId: userObjectId,
+      eventId: event._id,
+    });
+
+    // Also remove from eventJoinRequests collection if present
+    let requestDeleted = false;
+    try {
+      requestDeleted = await EventJoinRequest.deleteActiveByUserAndEvent(userId, event._id);
+    } catch (e) {
+      // Ignore
+    }
+
+    const left = leftJoin || waitlistResult.deletedCount > 0 || requestDeleted;
 
     if (!left) {
       return res.status(400).json({
         success: false,
-        error: 'Not joined to this event',
+        error: 'Not joined to this event and not in waitlist',
       });
     }
 

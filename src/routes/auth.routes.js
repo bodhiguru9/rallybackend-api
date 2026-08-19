@@ -13,6 +13,7 @@ const otpController = require('../controllers/auth/otp.controller');
 const oauthController = require('../controllers/auth/oauth.controller');
 const refreshTokenController = require('../controllers/auth/refresh-token.controller');
 const logoutController = require('../controllers/auth/logout.controller');
+const changePasswordController = require('../controllers/auth/change-password.controller');
 const { protect } = require('../middleware/auth');
 
 /**
@@ -307,6 +308,20 @@ router.post('/verify-forgot-password-otp', forgotPasswordController.verifyForgot
  * }
  */
 router.post('/set-new-password', forgotPasswordController.setNewPassword);
+
+/**
+ * CHANGE PASSWORD - Change password for authenticated users
+ * POST /api/auth/change-password
+ * Content-Type: application/json
+ * Authorization: Bearer <token>
+ * 
+ * Request Body:
+ * {
+ *   "currentPassword": "oldPassword123",
+ *   "newPassword": "newPassword123"
+ * }
+ */
+router.post('/change-password', protect, changePasswordController.changePassword);
 
 /**
  * VERIFY OTP - For Mobile Number Verification (After Signup)

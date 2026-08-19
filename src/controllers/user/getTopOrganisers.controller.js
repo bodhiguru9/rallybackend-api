@@ -57,12 +57,27 @@ const getTopOrganisers = async (req, res, next) => {
     // These fields are kept in sync atomically by Follow.updateFollowerCount,
     // Event.recalculateTotalAttendees, and Event.updateEventsCount on every write.
     const [paginatedOrganisers, totalCount] = await Promise.all([
-      usersCollection
-        .find(query)
-        .sort({ followersCount: -1, totalAttendees: -1, eventsCreated: -1 })
-        .skip(skip)
-        .limit(perPage)
-        .toArray(),
+      usersCollection.aggregate([
+        { $match: query },
+        { 
+          $addFields: {
+            prioritySort: {
+              $switch: {
+                branches: [
+                  { case: { $in: ["$communityName", ["Shuttle Shots", "Shuttleshots", "ShuttleShots"]] }, then: 1 },
+                  { case: { $in: ["$communityName", ["Rally Socials", "rally socials"]] }, then: 2 },
+                  { case: { $in: ["$communityName", ["Badminton For All - Dubai", "badminton 4 all", "Badminton for All"]] }, then: 3 },
+                  { case: { $in: ["$communityName", ["Berry Badminton", "berry badminton"]] }, then: 4 }
+                ],
+                default: 99
+              }
+            }
+          }
+        },
+        { $sort: { prioritySort: 1, followersCount: -1, totalAttendees: -1, eventsCreated: -1 } },
+        { $skip: skip },
+        { $limit: perPage }
+      ]).toArray(),
       usersCollection.countDocuments(query),
     ]);
 

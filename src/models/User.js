@@ -28,6 +28,9 @@ class User {
     this.createdAt = data.createdAt;
     this.updatedAt = data.updatedAt;
 
+    // FCM push notification device token (nullable — set by the client after login)
+    this.fcmToken = data.fcmToken || null;
+
     // Superadmin has only common fields + optional fullName
     if (data.userType === 'superadmin') {
       this.fullName = data.fullName || 'Super Admin';

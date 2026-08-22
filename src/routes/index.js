@@ -24,6 +24,7 @@ const packageRoutes = require('./package.routes');
 const bookingRoutes = require('./booking.routes');
 const cardRoutes = require('./card.routes');
 const appConfigRoutes = require('./appConfig.routes');
+const adminRoutes = require('./admin.routes');
 // const productRoutes = require('./product.routes');
 
 // Route definitions
@@ -49,6 +50,7 @@ router.use('/block', blockRoutes);
 router.use('/event-block', eventBlockRoutes);
 router.use('/notifications', notificationRoutes);
 router.use('/upload', uploadRoutes);
+router.use('/admin', adminRoutes);
 // router.use('/products', productRoutes);
 
 module.exports = router;

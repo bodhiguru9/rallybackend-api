@@ -1,5 +1,6 @@
 const { notifyUser } = require('./notification.service');
 const { createOrGetContentTemplate } = require('./twilio.service');
+const { sendPushNotification } = require('./push.service');
 const Notification = require('../models/Notification');
 const User = require('../models/User');
 
@@ -184,6 +185,21 @@ const sendBookingConfirmedNotification = async ({ user, event, booking }) => {
     console.error('In-app booking notification failed:', notifError.message);
   }
 
+  // Push notification to player
+  if (user.fcmToken) {
+    sendPushNotification({
+      token: user.fcmToken,
+      title: 'Booking Confirmed 🎉',
+      body: `Your booking for "${eventName}" is confirmed!`,
+      data: {
+        type: 'booking_confirmed',
+        eventId: event._id ? event._id.toString() : '',
+        eventSeqId: event.eventId ? String(event.eventId) : '',
+        bookingId: String(booking._id || booking.bookingId || ''),
+      },
+    }).catch(err => console.error('[PUSH] booking_confirmed failed:', err.message));
+  }
+
   return await notifyUser({ user, subject, text, html, whatsappMessage, whatsappTemplate });
 };
 
@@ -260,6 +276,21 @@ const sendHostBookingNotification = async ({ player, event, booking }) => {
         : null;
 
       await notifyUser({ user: host, subject, text, html, whatsappMessage, whatsappTemplate });
+
+      // Push notification to organiser
+      if (host.fcmToken) {
+        sendPushNotification({
+          token: host.fcmToken,
+          title: 'New Booking! 🎯',
+          body: `${playerName} just booked "${eventName}"${guestSuffix}.`,
+          data: {
+            type: 'new_booking',
+            eventId: event._id ? event._id.toString() : '',
+            eventSeqId: event.eventId ? String(event.eventId) : '',
+            playerId: String(player.userId || player.id || ''),
+          },
+        }).catch(err => console.error('[PUSH] new_booking (host) failed:', err.message));
+      }
     }
   } catch (hostNotifyError) {
     console.error('Host email/WhatsApp notification failed:', hostNotifyError.message);
@@ -299,6 +330,20 @@ const sendPlayerCancelledBookingNotification = async ({ user, event, booking, re
         contentVariables: { '1': userName, '2': eventName, '3': eventDate, '4': eventLocation },
       }
     : null;
+
+  // Push notification to player (cancellation)
+  if (user.fcmToken) {
+    sendPushNotification({
+      token: user.fcmToken,
+      title: 'Booking Cancelled',
+      body: `Your booking for "${eventName}" has been cancelled.`,
+      data: {
+        type: 'booking_cancelled',
+        eventId: event._id ? event._id.toString() : '',
+        eventSeqId: event.eventId ? String(event.eventId) : '',
+      },
+    }).catch(err => console.error('[PUSH] booking_cancelled (player) failed:', err.message));
+  }
 
   return await notifyUser({ user, subject, text, html, whatsappMessage, whatsappTemplate });
 };
@@ -341,6 +386,20 @@ const sendHostCancelledBookingNotification = async ({ player, event, booking }) 
         : null;
 
       await notifyUser({ user: host, subject, text, html, whatsappMessage, whatsappTemplate });
+
+      // Push notification to organiser
+      if (host.fcmToken) {
+        sendPushNotification({
+          token: host.fcmToken,
+          title: 'Booking Cancelled',
+          body: `${playerName} cancelled their booking for "${eventName}".`,
+          data: {
+            type: 'booking_cancelled',
+            eventId: event._id ? event._id.toString() : '',
+            eventSeqId: event.eventId ? String(event.eventId) : '',
+          },
+        }).catch(err => console.error('[PUSH] host_booking_cancelled failed:', err.message));
+      }
     }
   } catch (err) {
     console.error('Host cancellation email/WhatsApp failed:', err.message);
@@ -376,6 +435,20 @@ const sendEventCancelledNotification = async ({ user, event }) => {
         contentVariables: { '1': userName, '2': eventName, '3': eventDate, '4': eventLocation },
       }
     : null;
+
+  // Push notification to player (event cancelled by organiser)
+  if (user.fcmToken) {
+    sendPushNotification({
+      token: user.fcmToken,
+      title: 'Session Cancelled',
+      body: `"${eventName}" has been cancelled by the organiser.`,
+      data: {
+        type: 'event_cancelled',
+        eventId: event._id ? event._id.toString() : '',
+        eventSeqId: event.eventId ? String(event.eventId) : '',
+      },
+    }).catch(err => console.error('[PUSH] event_cancelled failed:', err.message));
+  }
 
   return await notifyUser({ user, subject, text, html, whatsappMessage, whatsappTemplate });
 };
@@ -422,6 +495,20 @@ const sendWaitlistSpotAvailableNotification = async ({ user, event }) => {
     );
   } catch (notifError) {
     console.error('In-app waitlist notification failed:', notifError.message);
+  }
+
+  // Push notification to player (waitlist spot available)
+  if (user.fcmToken) {
+    sendPushNotification({
+      token: user.fcmToken,
+      title: 'Spot Available! 🎉',
+      body: `A spot just opened up for "${eventName}". Book now before it's gone!`,
+      data: {
+        type: 'waitlist_spot_available',
+        eventId: event.eventId ? String(event.eventId) : (event._id ? event._id.toString() : ''),
+        eventName,
+      },
+    }).catch(err => console.error('[PUSH] waitlist_spot_available failed:', err.message));
   }
 
   return await notifyUser({ user, subject, text, html, whatsappMessage, whatsappTemplate });

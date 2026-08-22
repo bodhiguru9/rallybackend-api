@@ -13,10 +13,23 @@ const getCommunityDetailsController = require('../controllers/user/getCommunityD
 const getCommunityStatusController = require('../controllers/user/getCommunityStatus.controller');
 const getOrganiserEventsController = require('../controllers/user/getOrganiserEvents.controller');
 const getUserJoinedEventsController = require('../controllers/user/getUserJoinedEvents.controller');
+const { updatePushToken } = require('../controllers/user/updatePushToken.controller');
+
+/**
+ * REGISTER / CLEAR FCM PUSH TOKEN
+ * PATCH /api/users/me/push-token
+ * Authorization: Bearer <token> (required)
+ *
+ * Body: { fcmToken: string | null }
+ * Saves the device FCM token for push notifications.
+ * Send null to deregister (on logout).
+ */
+router.patch('/me/push-token', protect, updatePushToken);
 
 /**
  * GET ALL USERS LIST
  * GET /api/users?page=1&userType=player
+
  * Authorization: Bearer <token> (optional)
  * 
  * Returns list of all users (both players and organisers) with pagination

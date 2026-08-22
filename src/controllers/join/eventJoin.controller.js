@@ -16,6 +16,7 @@ const {
   sendWaitlistSpotAvailableNotification,
   sendPlayerCancelledBookingNotification,
 } = require('../../services/eventNotification.service');
+const { sendPushToMany } = require('../../services/push.service');
 
 /**
  * @desc    Join a public event (only for public events)
@@ -880,6 +881,7 @@ if (!occurrenceStart) {
     // Create notifications
     let sentCount = 0;
     let skippedSelf = 0;
+    const pushTokens = []; // collect FCM tokens for batch push
 
     for (const recipientObjectId of attendeeIds) {
       const recipientId = recipientObjectId.toString();
@@ -909,9 +911,32 @@ if (!occurrenceStart) {
           }
         );
         sentCount++;
+
+        // Collect FCM token for batch push
+        try {
+          const recipientUser = await User.findById(recipientId);
+          if (recipientUser && recipientUser.fcmToken) {
+            pushTokens.push(recipientUser.fcmToken);
+          }
+        } catch (_) { /* non-fatal */ }
+
       } catch (err) {
         console.error('notifyAttendees: failed for', recipientId, err);
       }
+    }
+
+    // Send batch push to all attendees with FCM tokens
+    if (pushTokens.length > 0) {
+      sendPushToMany({
+        tokens: pushTokens,
+        title,
+        body: message,
+        data: {
+          type: 'event_update',
+          eventId: event._id.toString(),
+          eventSeqId: event.eventId ? String(event.eventId) : '',
+        },
+      }).catch(err => console.error('[PUSH] buzz batch failed:', err.message));
     }
 
     return res.status(200).json({

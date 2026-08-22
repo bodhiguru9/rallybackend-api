@@ -6,6 +6,7 @@ const User = require('../../models/User');
 const Notification = require('../../models/Notification');
 const { findEventById, validateEventId } = require('../../utils/eventHelper');
 const { validateAgeForEvent } = require('../../utils/ageRestriction');
+const { sendPushNotification } = require('../../services/push.service');
 
 /**
  * @desc    Request to join a private event
@@ -172,6 +173,24 @@ const joinPrivateEventRequest = async (req, res, next) => {
         }
       );
       console.log('✅ Private event join request notification created:', notificationResult._id.toString());
+
+      // Push notification to organiser
+      if (creator && creator.fcmToken) {
+        const pushBody = requestType === 'waitlist'
+          ? `${user.fullName || 'A player'} joined the waitlist for "${event.eventName || 'your event'}"."`
+          : `${user.fullName || 'A player'} wants to join "${event.eventName || 'your event'}".`;
+        sendPushNotification({
+          token: creator.fcmToken,
+          title: 'New Join Request',
+          body: pushBody,
+          data: {
+            type: 'event_join_request',
+            eventId: event._id.toString(),
+            eventSeqId: event.eventId ? String(event.eventId) : '',
+            playerId: String(user.userId || userId),
+          },
+        }).catch(err => console.error('[PUSH] event_join_request failed:', err.message));
+      }
     } catch (error) {
       // Don't fail the request if notification creation fails
       console.error('❌ Error creating private event join request notification:', error.message, error.stack);

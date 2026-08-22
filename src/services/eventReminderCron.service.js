@@ -2,6 +2,7 @@ const EventReminder = require('../models/EventReminder');
 const Event = require('../models/Event');
 const User = require('../models/User');
 const { getTwilioClient, normalizeMobileNumberForWhatsApp } = require('./twilio.service');
+const { sendPushNotification, sendPushToMany } = require('./push.service');
 const { getDB } = require('../config/database');
 const { ObjectId } = require('mongodb');
 
@@ -217,6 +218,98 @@ const processReminders = async () => {
 };
 
 /**
+ * Process events starting in ~6 hours and send push reminders.
+ * Runs every 5 min. Uses a 'push_6h' field on eventReminders to avoid duplicate sends.
+ */
+const process6hPushReminders = async () => {
+  try {
+    const db = getDB();
+    const eventsCollection = db.collection('events');
+    const eventJoinsCollection = db.collection('eventJoins');
+    const sentCollection = db.collection('push6hReminders'); // dedup store
+
+    const now = new Date();
+    // Window: 6h from now ±5 min
+    const windowStart = new Date(now.getTime() + (6 * 60 - 5) * 60 * 1000);
+    const windowEnd   = new Date(now.getTime() + (6 * 60 + 5) * 60 * 1000);
+
+    const events = await eventsCollection.find({
+      $or: [
+        { eventDateTime: { $gte: windowStart, $lte: windowEnd } },
+        { gameStartDate: { $gte: windowStart, $lte: windowEnd } },
+      ],
+      eventStatus: { $nin: ['cancelled', 'draft'] },
+    }).toArray();
+
+    if (events.length === 0) return { processed: 0, sent: 0 };
+
+    let sentCount = 0;
+
+    for (const event of events) {
+      const eventKey = event._id.toString();
+
+      // Dedup: skip if already sent for this event
+      const alreadySent = await sentCollection.findOne({ eventId: eventKey });
+      if (alreadySent) continue;
+
+      const eventName = event.eventName || event.gameTitle || 'your event';
+      const pushTitle = '⏰ Event in 6 Hours!';
+      const pushBody  = `"${eventName}" starts in 6 hours. Get ready!`;
+      const pushData  = {
+        type: 'event_reminder',
+        eventId: eventKey,
+        eventSeqId: event.eventId ? String(event.eventId) : '',
+      };
+
+      // Fetch all participants
+      const joins = await eventJoinsCollection
+        .find({ eventId: event._id })
+        .project({ userId: 1 })
+        .toArray();
+
+      const participantIds = [...new Set(joins.map(j => j.userId?.toString()).filter(Boolean))];
+
+      // Collect tokens for participants
+      const participantTokens = [];
+      for (const uid of participantIds) {
+        try {
+          const u = await User.findById(uid);
+          if (u && u.fcmToken) participantTokens.push(u.fcmToken);
+        } catch (_) { /* non-fatal */ }
+      }
+
+      if (participantTokens.length > 0) {
+        await sendPushToMany({ tokens: participantTokens, title: pushTitle, body: pushBody, data: pushData });
+        sentCount += participantTokens.length;
+      }
+
+      // Also notify the organiser
+      try {
+        const organiser = await User.findById(event.creatorId?.toString());
+        if (organiser && organiser.fcmToken) {
+          await sendPushNotification({
+            token: organiser.fcmToken,
+            title: '⏰ Your Event in 6 Hours!',
+            body: `"${eventName}" starts in 6 hours. ${participantIds.length} player(s) are coming!`,
+            data: { ...pushData, role: 'organiser' },
+          });
+          sentCount++;
+        }
+      } catch (_) { /* non-fatal */ }
+
+      // Mark as sent for this event
+      await sentCollection.insertOne({ eventId: eventKey, sentAt: now });
+      console.log(`🔔 [6H-PUSH] Sent reminder for "${eventName}" to ${participantTokens.length} participants + organiser`);
+    }
+
+    return { processed: events.length, sent: sentCount };
+  } catch (err) {
+    console.error('❌ [6H-PUSH] Error in process6hPushReminders:', err.message);
+    return { processed: 0, sent: 0, error: err.message };
+  }
+};
+
+/**
  * Start the cron job for processing reminders
  * Runs every 5 minutes to check for reminders that need to be sent
  */
@@ -231,6 +324,10 @@ const startReminderCronJob = () => {
     console.log('Initial reminder check:', result);
   });
 
+  process6hPushReminders().then(result => {
+    if (result.sent > 0) console.log('Initial 6h push reminder check:', result);
+  });
+
   // Then run every 5 minutes
   setInterval(async () => {
     const result = await processReminders();
@@ -238,10 +335,19 @@ const startReminderCronJob = () => {
       console.log('Reminder cron job result:', result);
     }
   }, interval);
+
+  // 6h push reminder — also every 5 minutes
+  setInterval(async () => {
+    const result = await process6hPushReminders();
+    if (result.sent > 0) {
+      console.log('[6H-PUSH] cron result:', result);
+    }
+  }, interval);
 };
 
 module.exports = {
   processReminders,
+  process6hPushReminders,
   startReminderCronJob,
   sendWhatsAppReminder,
 };

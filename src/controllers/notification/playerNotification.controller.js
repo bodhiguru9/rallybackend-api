@@ -82,6 +82,36 @@ const getPlayerNotifications = async (req, res, next) => {
           }
         }
 
+        // Fallback: for booking / cancellation notifications that don't carry organiserId,
+        // look up the event creator so the player always sees the organiser's photo.
+        const needsOrganiserFallback = !enriched.organiser && [
+          'booking_confirmed', 'booking_cancelled', 'event_cancelled',
+          'event_participant_removed', 'event_leave',
+        ].includes(notification.type);
+
+        if (needsOrganiserFallback && notification.data && notification.data.eventId) {
+          try {
+            const event = _evtMap.get(String(notification.data.eventId));
+            if (event && event.creatorId) {
+              const { getUsersByIds: _getUsers } = require('../../utils/batchLoad');
+              const creatorMap = await _getUsers([event.creatorId.toString()]);
+              const creator = creatorMap.get(event.creatorId.toString());
+              if (creator) {
+                enriched.organiser = {
+                  userId: creator.userId,
+                  mongoId: creator._id.toString(),
+                  fullName: creator.fullName || null,
+                  email: creator.email || null,
+                  profilePic: creator.profilePic || null,
+                  communityName: creator.communityName || null,
+                };
+              }
+            }
+          } catch (_) {
+            // Non-fatal — just means no organiser image for this notification
+          }
+        }
+
         // Add event details if eventId is in data
         if (notification.data && notification.data.eventId) {
           try {

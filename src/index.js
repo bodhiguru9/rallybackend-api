@@ -18,6 +18,9 @@ const apiRoutes = require('./routes');
 const errorHandler = require('./middleware/errorHandler');
 const notFound = require('./middleware/notFound');
 
+// Import push notification service
+const { initializePushService } = require('./services/push.service');
+
 // Initialize Express app
 const app = express();
 
@@ -604,6 +607,9 @@ async function startServer({ runCron = false } = {}) {
     const { createAllIndexes } = require('../scripts/createIndexes');
     await createAllIndexes(getDB());
 
+    // Initialize FCM push notification service
+    initializePushService();
+
     // Start Express server
     app.listen(PORT, "0.0.0.0", () => {
       console.log(`🚀 Server is running on port ${PORT} (pid ${process.pid})`);
@@ -631,6 +637,7 @@ async function startServer({ runCron = false } = {}) {
 async function startReminderCronInPrimary() {
   try {
     await connectDB();
+    initializePushService();
     const { startReminderCronJob } = require('./services/eventReminderCron.service');
     startReminderCronJob();
     console.log(`🕒 Reminder cron started in primary (pid ${process.pid})`);

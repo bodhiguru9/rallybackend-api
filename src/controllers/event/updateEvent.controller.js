@@ -13,6 +13,7 @@ const {
   sendWaitlistSpotAvailableNotification 
 } = require('../../services/eventNotification.service');
 const Waitlist = require('../../models/Waitlist');
+const { sendPushToMany } = require('../../services/push.service');
 
 /**
  * @desc    Update event (Public and Private events)
@@ -462,6 +463,29 @@ const updateEvent = async (req, res, next) => {
             }));
 
             await notificationsCollection.insertMany(docs, { ordered: false });
+
+            // Push notification to attendees (session details updated)
+            const EventJoinModel = require('../../models/EventJoin');
+            const attendeeUserIds = await EventJoinModel.getAllParticipantUserIds(eventObjectId, null);
+            const pushTokens = [];
+            for (const uid of (attendeeUserIds || [])) {
+              try {
+                const attendee = await User.findById(uid.toString());
+                if (attendee && attendee.fcmToken) pushTokens.push(attendee.fcmToken);
+              } catch (_) { /* non-fatal */ }
+            }
+            if (pushTokens.length > 0) {
+              sendPushToMany({
+                tokens: pushTokens,
+                title,
+                body: message,
+                data: {
+                  type: 'event_update',
+                  eventId: eventObjectId.toString(),
+                  eventSeqId: event.eventId ? String(event.eventId) : '',
+                },
+              }).catch(err => console.error('[PUSH] event_update batch failed:', err.message));
+            }
           }
         } catch (updateNotifError) {
           console.error('Error sending event update notifications:', updateNotifError);

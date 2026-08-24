@@ -426,6 +426,239 @@ app.get('/event/:eventId', async (req, res) => {
   }
 });
 
+// ✅ Organiser Preview Endpoint
+app.get('/organiser/:organiserId', async (req, res) => {
+  const { organiserId } = req.params;
+  const User = require('./models/User');
+
+  try {
+    const organiser = await User.findByUserId(organiserId) || await User.findById(organiserId);
+
+    const name = organiser ? (organiser.communityName || organiser.fullName) : 'Organiser on Rally';
+    const description = organiser && organiser.bio ? organiser.bio : `Check out ${name} on Rally!`;
+    const image = (organiser && organiser.profilePic)
+      ? organiser.profilePic
+      : 'https://backend2.rallysports.ae/public/rally-logo-bg.png';
+
+    const html = `
+      <!DOCTYPE html>
+      <html lang="en">
+      <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        
+        <!-- Open Graph / Social Media Meta Tags -->
+        <title>${name} | Rally</title>
+        <meta name="title" content="${name} | Rally">
+        <meta name="description" content="${description}">
+        
+        <meta property="og:type" content="profile">
+        <meta property="og:url" content="https://backend2.rallysports.ae/organiser/${organiserId}">
+        <meta property="og:title" content="${name}">
+        <meta property="og:description" content="${description}">
+        <meta property="og:image" content="${image}">
+
+        <meta property="twitter:card" content="summary_large_image">
+        <meta property="twitter:url" content="https://backend2.rallysports.ae/organiser/${organiserId}">
+        <meta property="twitter:title" content="${name}">
+        <meta property="twitter:description" content="${description}">
+        <meta property="twitter:image" content="${image}">
+
+        <style>
+          :root {
+            --rally-blue: #3b82f6;
+            --rally-blue-dark: #2563eb;
+            --bg-color: #f1f5f9;
+            --card-bg: #ffffff;
+            --text-main: #0f172a;
+            --text-muted: #64748b;
+          }
+          body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background-color: var(--bg-color);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            margin: 0;
+            color: var(--text-main);
+            overflow-x: hidden;
+          }
+          .background-blobs {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: -1;
+            overflow: hidden;
+            background: #f8fafc;
+          }
+          .blob {
+            position: absolute;
+            filter: blur(80px);
+            opacity: 0.4;
+            border-radius: 50%;
+            z-index: -1;
+          }
+          .blob-1 {
+            width: 400px;
+            height: 400px;
+            background: #3b82f6;
+            top: -100px;
+            right: -100px;
+          }
+          .blob-2 {
+            width: 300px;
+            height: 300px;
+            background: #60a5fa;
+            bottom: -50px;
+            left: -50px;
+          }
+          .card {
+            background: var(--card-bg);
+            padding: 2.5rem 2rem;
+            border-radius: 2rem;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.1);
+            max-width: 420px;
+            width: 90%;
+            text-align: center;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+          }
+          .hero-image {
+            width: 120px;
+            height: 120px;
+            margin: 0 auto 1.5rem;
+            border-radius: 50%;
+            object-fit: cover;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+            background: #fff;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+          }
+          .hero-image svg {
+            width: 60%;
+            height: 60%;
+          }
+          h1 {
+            font-size: 1.75rem;
+            font-weight: 800;
+            margin-bottom: 0.75rem;
+            letter-spacing: -0.025em;
+          }
+          p {
+            color: var(--text-muted);
+            line-height: 1.6;
+            margin-bottom: 2.5rem;
+            font-size: 1.05rem;
+          }
+          .btn-primary {
+            display: inline-block;
+            background-color: var(--rally-blue);
+            color: white;
+            font-weight: 700;
+            padding: 1rem 2.5rem;
+            border-radius: 1rem;
+            text-decoration: none;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            box-shadow: 0 10px 15px -3px rgba(59, 130, 246, 0.4);
+            font-size: 1.1rem;
+          }
+          .btn-primary:hover {
+            background-color: var(--rally-blue-dark);
+            transform: translateY(-2px);
+            box-shadow: 0 20px 25px -5px rgba(59, 130, 246, 0.4);
+          }
+          .btn-primary:active {
+            transform: translateY(0);
+          }
+          .footer {
+            margin-top: 2.5rem;
+            padding-top: 1.5rem;
+            border-top: 1px solid #f1f5f9;
+            font-size: 0.95rem;
+            color: var(--text-muted);
+          }
+          .link {
+            color: var(--rally-blue);
+            text-decoration: none;
+            font-weight: 600;
+          }
+          .store-links {
+            display: flex;
+            justify-content: center;
+            gap: 0.75rem;
+            margin-top: 1.25rem;
+          }
+          .store-badge {
+            height: 40px;
+            transition: transform 0.2s ease;
+          }
+          .store-badge:hover {
+            transform: scale(1.05);
+          }
+        </style>
+      </head>
+      <body>
+        <div class="background-blobs">
+          <div class="blob blob-1"></div>
+          <div class="blob blob-2"></div>
+        </div>
+        <div class="card">
+          <div class="hero-image">
+            ${image !== 'https://backend2.rallysports.ae/public/rally-logo-bg.png'
+        ? `<img src="${image}" alt="${name}" style="width: 100%; height: 100%; object-fit: cover;">`
+        : `<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M12 2L2 7L12 12L22 7L12 2Z" stroke="#3b82f6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                  <path d="M2 17L12 22L22 17" stroke="#3b82f6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                  <path d="M2 12L12 17L22 12" stroke="#3b82f6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                 </svg>`
+      }
+          </div>
+          <h1>Check out ${name}</h1>
+          <p>Open the app to view their profile, events, and packages.</p>
+          
+          <a href="rally-app://organiser/${organiserId}" class="btn-primary" id="openBtn">
+            Open in Rally
+          </a>
+
+          <div class="footer">
+            Don't have the app yet? <br/>
+            <div class="store-links">
+              <a href="https://apps.apple.com/in/app/rally-sports/id6526470249?platform=ipad" target="_blank">
+                <img src="https://upload.wikimedia.org/wikipedia/commons/3/3c/Download_on_the_App_Store_Badge.svg" alt="Download on the App Store" class="store-badge">
+              </a>
+              <a href="https://play.google.com/store/apps/details?id=com.rallysports.app&pcampaignid=web_share" target="_blank">
+                <img src="https://upload.wikimedia.org/wikipedia/commons/7/78/Google_Play_Store_badge_EN.svg" alt="Get it on Google Play" class="store-badge">
+              </a>
+            </div>
+          </div>
+        </div>
+
+        <script>
+          window.onload = function() {
+            setTimeout(function() {
+              window.location.href = "rally-app://organiser/${organiserId}";
+            }, 500);
+          };
+
+          document.getElementById('openBtn').addEventListener('click', function(e) {
+            console.log('Manually opening deep link...');
+          });
+        </script>
+      </body>
+      </html>
+    `;
+
+    res.send(html);
+  } catch (error) {
+    console.error('Error serving organiser landing page:', error);
+    res.status(500).send('Internal Server Error');
+  }
+});
+
 // Account deletion page for Google Play compliance
 app.get('/account-deletion', (req, res) => {
   const html = `

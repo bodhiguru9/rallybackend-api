@@ -9,7 +9,6 @@
  * still starts in local dev without credentials.
  */
 
-let admin = null;
 let messagingInstance = null;
 let initialized = false;
 
@@ -33,22 +32,20 @@ const initializePushService = () => {
   }
 
   try {
-    // Lazy require so the module doesn't crash if firebase-admin isn't installed
-    admin = require('firebase-admin');
+    const { initializeApp, getApps, cert } = require('firebase-admin/app');
+    const { getMessaging } = require('firebase-admin/messaging');
 
-    // Only initialize once — firebase-admin throws if you call initializeApp twice
-    if (!admin.apps.length) {
-      admin.initializeApp({
-        credential: admin.credential.cert({
+    if (getApps().length === 0) {
+      initializeApp({
+        credential: cert({
           projectId,
           clientEmail,
-          // The private key env var may have literal \n chars — convert them
           privateKey: privateKey.replace(/\\n/g, '\n'),
         }),
       });
     }
 
-    messagingInstance = admin.messaging();
+    messagingInstance = getMessaging();
     initialized = true;
     console.log('✅ [PUSH] Firebase Admin SDK initialized for project:', projectId);
   } catch (err) {
@@ -167,7 +164,12 @@ const sendPushToMany = async ({ tokens, title, body, data = {}, imageUrl = null 
     data: stringData,
     android: {
       priority: 'high',
-      notification: { sound: 'default', ...(imageUrl ? { imageUrl } : {}) },
+      notification: { 
+        title,
+        body,
+        sound: 'default', 
+        ...(imageUrl ? { imageUrl } : {}) 
+      },
     },
     apns: {
       headers: { 'apns-priority': '10' },

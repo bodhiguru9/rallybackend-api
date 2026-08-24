@@ -89,8 +89,11 @@ const createSavedCard = async (req, res, next) => {
       let stripeCustomerId = user.stripeCustomerId || user.stripe_customer_id || null;
       if (stripeCustomerId) {
         try {
-          // Validate customer exists
-          await stripeInstance.customers.retrieve(stripeCustomerId);
+          // Validate customer exists and is not deleted
+          const customer = await stripeInstance.customers.retrieve(stripeCustomerId);
+          if (customer.deleted) {
+            stripeCustomerId = null;
+          }
         } catch (e) {
           stripeCustomerId = null;
         }
@@ -107,9 +110,11 @@ const createSavedCard = async (req, res, next) => {
         });
         stripeCustomerId = customer.id;
         await User.updateById(userId, { stripeCustomerId });
+        // Update the user object in memory too
+        user.stripeCustomerId = stripeCustomerId;
       }
 
-      // Attach PaymentMethod to Customer (Ignore if already attached)
+      // Attach PaymentMethod to Customer
       try {
         const pm = await stripeInstance.paymentMethods.retrieve(pmId);
         if (pm.customer !== stripeCustomerId) {
@@ -124,17 +129,12 @@ const createSavedCard = async (req, res, next) => {
         expMonth = pm.card?.exp_month || null;
         expYear = pm.card?.exp_year || null;
       } catch (attachError) {
-        // If it's already attached to another customer, we might have a problem
-        // but for now we just log it and proceed if we can retrieve it
         console.error('Stripe PM attach error:', attachError.message);
-        if (!stripePaymentMethodId) {
-          const pm = await stripeInstance.paymentMethods.retrieve(pmId);
-          stripePaymentMethodId = pm.id;
-          brand = pm.card?.brand || null;
-          last4 = pm.card?.last4 || null;
-          expMonth = pm.card?.exp_month || null;
-          expYear = pm.card?.exp_year || null;
-        }
+        return res.status(400).json({
+          success: false,
+          error: `Failed to attach card: ${attachError.message}`,
+          details: attachError.message
+        });
       }
 
       // Validate provided expiry (if provided) matches Stripe card expiry

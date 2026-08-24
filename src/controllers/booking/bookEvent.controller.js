@@ -206,7 +206,10 @@ const bookEvent = async (req, res, next) => {
     let customerId = user.stripeCustomerId || user.stripe_customer_id || null;
     if (customerId) {
       try {
-        await stripeInstance.customers.retrieve(customerId);
+        const customer = await stripeInstance.customers.retrieve(customerId);
+        if (customer.deleted) {
+          customerId = null;
+        }
       } catch (e) {
         customerId = null;
       }

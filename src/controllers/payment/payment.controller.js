@@ -186,7 +186,10 @@ const createPaymentOrder = async (req, res, next) => {
     let customerId = paymentUser?.stripeCustomerId || paymentUser?.stripe_customer_id || null;
     if (customerId) {
       try {
-        await stripeInstance.customers.retrieve(customerId);
+        const customer = await stripeInstance.customers.retrieve(customerId);
+        if (customer.deleted) {
+          customerId = null;
+        }
       } catch (e) {
         customerId = null;
       }
@@ -203,6 +206,7 @@ const createPaymentOrder = async (req, res, next) => {
       });
       customerId = customer.id;
       await User.updateById(userId, { stripeCustomerId: customerId });
+      paymentUser.stripeCustomerId = customerId;
     }
 
     const paymentIntent = await stripeInstance.paymentIntents.create({

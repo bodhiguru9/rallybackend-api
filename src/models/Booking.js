@@ -27,6 +27,7 @@ class Booking {
       ? data.guestsCount
       : 1;
     this.bookedAt = data.bookedAt || null;
+    this.guestInfo = Array.isArray(data.guestInfo) ? data.guestInfo : [];
     this.cancelledAt = data.cancelledAt || null;
     this.createdAt = data.createdAt || new Date();
     this.updatedAt = data.updatedAt || new Date();

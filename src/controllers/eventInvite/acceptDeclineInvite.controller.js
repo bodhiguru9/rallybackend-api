@@ -76,16 +76,10 @@ const acceptInvite = async (req, res, next) => {
       });
     }
 
-    // Accept invitation
-    const accepted = await EventInvite.acceptInvite(inviteId, playerId);
-    if (!accepted) {
-      return res.status(400).json({
-        success: false,
-        error: 'Failed to accept invitation',
-      });
-    }
-
-    // Automatically join the event (if not already joined)
+    // Attempt to join the event BEFORE marking the invite as accepted.
+    // This prevents the invite from being permanently corrupted (marked
+    // 'accepted' while the player never actually joined) when the event
+    // is full.
     try {
       const occurrenceStart = EventJoin.normalizeOccurrence(invite.occurrenceStart || event.eventDateTime || null);
       const maxGuest = event.eventMaxGuest !== undefined ? event.eventMaxGuest : (event.gameSpots || 0);
@@ -97,16 +91,26 @@ const acceptInvite = async (req, res, next) => {
       }
     } catch (error) {
       if (error.code === 'EVENT_FULL' || error.message?.includes('Event is full')) {
+        // Invite stays 'pending' — player can retry when a spot opens
         return res.status(400).json({
           success: false,
           error: 'Event has reached full capacity. All spots have been booked.',
           code: 'EVENT_FULL',
         });
       }
-      // If already joined, that's fine
+      // If already joined, that's fine — continue to accept the invite
       if (error.message !== 'Already joined this occurrence' && error.message !== 'Already joined this event') {
         console.error('Error joining event after accepting invitation:', error);
       }
+    }
+
+    // Now that the player is in the event (or was already), mark the invite
+    const accepted = await EventInvite.acceptInvite(inviteId, playerId);
+    if (!accepted) {
+      return res.status(400).json({
+        success: false,
+        error: 'Failed to accept invitation',
+      });
     }
 
     // Send notification to organiser

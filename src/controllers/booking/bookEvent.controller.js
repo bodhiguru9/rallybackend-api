@@ -179,6 +179,14 @@ const bookEvent = async (req, res, next) => {
     const guestsCount = parseInt(req.query.guestsCount || req.body.guestsCount || req.body.guests_count || 1, 10);
     const safeGuestsCount = isNaN(guestsCount) || guestsCount < 1 ? 1 : guestsCount;
 
+    const guestInfo = Array.isArray(req.body.guestInfo) ? req.body.guestInfo : [];
+    if (guestInfo.length > 0 && safeGuestsCount !== guestInfo.length + 1) {
+      return res.status(400).json({
+        success: false,
+        error: `Mismatched guest info. Expected ${safeGuestsCount - 1} guests, got ${guestInfo.length}`,
+      });
+    }
+
     // Enforce spot capacity: currentOccupied + safeGuestsCount must not exceed eventMaxGuest
     const maxGuest = event.eventMaxGuest !== undefined ? event.eventMaxGuest : (event.gameSpots || 0);
     const currentOccupied = await EventJoin.getParticipantCount(event._id, occurrenceStart);
@@ -408,6 +416,7 @@ const bookEvent = async (req, res, next) => {
       finalAmount: finalAmount,
       promoCode: promoCodeString,
       guestsCount: safeGuestsCount,
+      guestInfo: guestInfo,
       bookedAt: isFreeEvent ? new Date() : null,
     };
 
@@ -420,6 +429,7 @@ const bookEvent = async (req, res, next) => {
           occurrenceEnd,
           parentEventId: event.eventId,
           guestsCount: safeGuestsCount,
+          guestInfo: guestInfo,
           capacityLimit: maxGuest,
         });
       } catch (joinError) {
@@ -561,7 +571,7 @@ const bookEvent = async (req, res, next) => {
       organiserId: event.creatorId ? String(event.creatorId) : '',
       organiserName: organiserName,
       // Party size
-      partySize: String(safeGuestsCount),
+      GuestCount: String(safeGuestsCount),
     };
 
     if (promoCodeString) {

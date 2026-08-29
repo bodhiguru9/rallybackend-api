@@ -17,6 +17,7 @@ class EventJoin {
    * Join an event
    */
   static async join(userId, eventId, occurrenceStart = null, extraData = {}) {
+    console.log(`[EventJoin.join Debug] userId: ${userId}, eventId: ${eventId}, extraData keys: ${Object.keys(extraData)}, guestInfo present: ${!!extraData.guestInfo}, guestInfo length: ${Array.isArray(extraData.guestInfo) ? extraData.guestInfo.length : 'N/A'}`);
     const db = getDB();
 const joinsCollection = db.collection('eventJoins');
 
@@ -71,6 +72,7 @@ try {
     occurrenceStart: normalizedOccurrenceStart,
     occurrenceEnd: normalizedOccurrenceEnd,
     guestsCount: guestsCount,
+    guestInfo: Array.isArray(extraData.guestInfo) ? extraData.guestInfo : [],
     joinedAt: now,
   });
 } catch (insertErr) {
@@ -373,6 +375,7 @@ return result.insertedId;
         joinedAt: joinRecord?.joinedAt,
         // guestsCount: how many seats this participant occupies (1 = just themselves)
         guestsCount: (joinRecord && joinRecord.guestsCount >= 1) ? joinRecord.guestsCount : 1,
+        guestInfo: joinRecord?.guestInfo || [],
         paidAmount: resolvedPaidAmount,
       };
     });

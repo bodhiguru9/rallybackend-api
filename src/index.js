@@ -3,6 +3,11 @@ const cors = require('cors');
 const morgan = require('morgan');
 const helmet = require('helmet');
 require('dotenv').config();
+const validator = require('validator');
+
+// Escape user-sourced strings before injecting into HTML templates
+// to prevent stored XSS via malicious event names, organiser bios, etc.
+const escapeHtml = (str) => (typeof str === 'string' ? validator.escape(str) : '');
 
 // Import database connection
 const { connectDB, closeDB } = require('./config/database');
@@ -193,11 +198,13 @@ app.get('/event/:eventId', async (req, res) => {
     // Fetch event details for rich preview
     const event = await Event.findByEventId(eventId);
 
-    const eventName = event ? event.eventName : 'Join the Event on Rally';
-    const eventDescription = event ? `${event.eventCreatorName} invited you to join ${event.eventName}. Click to open in the Rally app.` : 'Open this invitation in the Rally app.';
-    const eventImage = (event && event.eventImages && event.eventImages.length > 0)
+    const eventName = escapeHtml(event ? event.eventName : 'Join the Event on Rally');
+    const eventCreatorName = escapeHtml(event ? event.eventCreatorName : '');
+    const eventDescription = event ? `${eventCreatorName} invited you to join ${eventName}. Click to open in the Rally app.` : 'Open this invitation in the Rally app.';
+    const eventImage = escapeHtml((event && event.eventImages && event.eventImages.length > 0)
       ? event.eventImages[0]
-      : 'https://backend2.rallysports.ae/public/rally-logo-bg.png'; // Fallback logo
+      : 'https://backend2.rallysports.ae/public/rally-logo-bg.png');
+    const safeEventId = escapeHtml(eventId);
 
     const html = `
       <!DOCTYPE html>
@@ -212,13 +219,13 @@ app.get('/event/:eventId', async (req, res) => {
         <meta name="description" content="${eventDescription}">
         
         <meta property="og:type" content="website">
-        <meta property="og:url" content="https://backend2.rallysports.ae/event/${eventId}">
+        <meta property="og:url" content="https://backend2.rallysports.ae/event/${safeEventId}">
         <meta property="og:title" content="${eventName}">
         <meta property="og:description" content="${eventDescription}">
         <meta property="og:image" content="${eventImage}">
 
         <meta property="twitter:card" content="summary_large_image">
-        <meta property="twitter:url" content="https://backend2.rallysports.ae/event/${eventId}">
+        <meta property="twitter:url" content="https://backend2.rallysports.ae/event/${safeEventId}">
         <meta property="twitter:title" content="${eventName}">
         <meta property="twitter:description" content="${eventDescription}">
         <meta property="twitter:image" content="${eventImage}">
@@ -368,7 +375,7 @@ app.get('/event/:eventId', async (req, res) => {
         <div class="card">
           <div class="hero-image">
             ${event && event.eventImages && event.eventImages.length > 0
-        ? `<img src="${event.eventImages[0]}" alt="${eventName}" style="width: 100%; height: 100%; object-fit: cover;">`
+        ? `<img src="${eventImage}" alt="${eventName}" style="width: 100%; height: 100%; object-fit: cover;">`
         : `<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                   <path d="M12 2L2 7L12 12L22 7L12 2Z" stroke="#3b82f6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
                   <path d="M2 17L12 22L22 17" stroke="#3b82f6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
@@ -379,7 +386,7 @@ app.get('/event/:eventId', async (req, res) => {
           <h1>Join the Game!</h1>
           <p>You've been invited to <strong>${eventName}</strong>. Open the app to view details and book your spot.</p>
           
-          <a href="rally-app://event/${eventId}" class="btn-primary" id="openBtn">
+          <a href="rally-app://event/${safeEventId}" class="btn-primary" id="openBtn">
             Open in Rally
           </a>
 
@@ -401,7 +408,7 @@ app.get('/event/:eventId', async (req, res) => {
           window.onload = function() {
             // Small delay to ensure browser handles the redirect properly
             setTimeout(function() {
-              window.location.href = "rally-app://event/${eventId}";
+              window.location.href = "rally-app://event/${safeEventId}";
             }, 500);
 
             // Optional: Detect if app didn't open and show a message
@@ -434,11 +441,12 @@ app.get('/organiser/:organiserId', async (req, res) => {
   try {
     const organiser = await User.findByUserId(organiserId) || await User.findById(organiserId);
 
-    const name = organiser ? (organiser.communityName || organiser.fullName) : 'Organiser on Rally';
-    const description = organiser && organiser.bio ? organiser.bio : `Check out ${name} on Rally!`;
-    const image = (organiser && organiser.profilePic)
+    const name = escapeHtml(organiser ? (organiser.communityName || organiser.fullName) : 'Organiser on Rally');
+    const description = escapeHtml(organiser && organiser.bio ? organiser.bio : `Check out ${name} on Rally!`);
+    const image = escapeHtml((organiser && organiser.profilePic)
       ? organiser.profilePic
-      : 'https://backend2.rallysports.ae/public/rally-logo-bg.png';
+      : 'https://backend2.rallysports.ae/public/rally-logo-bg.png');
+    const safeOrganiserId = escapeHtml(organiserId);
 
     const html = `
       <!DOCTYPE html>
@@ -453,13 +461,13 @@ app.get('/organiser/:organiserId', async (req, res) => {
         <meta name="description" content="${description}">
         
         <meta property="og:type" content="profile">
-        <meta property="og:url" content="https://backend2.rallysports.ae/organiser/${organiserId}">
+        <meta property="og:url" content="https://backend2.rallysports.ae/organiser/${safeOrganiserId}">
         <meta property="og:title" content="${name}">
         <meta property="og:description" content="${description}">
         <meta property="og:image" content="${image}">
 
         <meta property="twitter:card" content="summary_large_image">
-        <meta property="twitter:url" content="https://backend2.rallysports.ae/organiser/${organiserId}">
+        <meta property="twitter:url" content="https://backend2.rallysports.ae/organiser/${safeOrganiserId}">
         <meta property="twitter:title" content="${name}">
         <meta property="twitter:description" content="${description}">
         <meta property="twitter:image" content="${image}">
@@ -620,7 +628,7 @@ app.get('/organiser/:organiserId', async (req, res) => {
           <h1>Check out ${name}</h1>
           <p>Open the app to view their profile, events, and packages.</p>
           
-          <a href="rally-app://organiser/${organiserId}" class="btn-primary" id="openBtn">
+          <a href="rally-app://organiser/${safeOrganiserId}" class="btn-primary" id="openBtn">
             Open in Rally
           </a>
 
@@ -640,7 +648,7 @@ app.get('/organiser/:organiserId', async (req, res) => {
         <script>
           window.onload = function() {
             setTimeout(function() {
-              window.location.href = "rally-app://organiser/${organiserId}";
+              window.location.href = "rally-app://organiser/${safeOrganiserId}";
             }, 500);
           };
 

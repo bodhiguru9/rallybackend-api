@@ -155,7 +155,7 @@ class EventInvite {
       }
     );
 
-    return result.value !== null;
+    return result !== null;
   }
 
   /**
@@ -191,7 +191,7 @@ class EventInvite {
       }
     );
 
-    return result.value !== null;
+    return result !== null;
   }
 
   /**
@@ -227,7 +227,7 @@ class EventInvite {
       }
     );
 
-    return result.value !== null;
+    return result !== null;
   }
 
   /**

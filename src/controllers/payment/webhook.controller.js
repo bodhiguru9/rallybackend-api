@@ -132,6 +132,7 @@ const handlePaymentIntentSucceeded = async (paymentIntent) => {
               occurrenceEnd: existingBooking.occurrenceEnd || null,
               parentEventId: existingBooking.parentEventId || eventDoc?.eventId || null,
               guestsCount: existingBooking.guestsCount || 1,
+              guestInfo: existingBooking.guestInfo || [],
               capacityLimit: maxGuest,
             }
           );
@@ -240,6 +241,7 @@ const handlePaymentIntentSucceeded = async (paymentIntent) => {
                 occurrenceEnd: payment.occurrenceEnd || null,
                 parentEventId: payment.parentEventId || event.eventId || null,
                 guestsCount: bookingData.guestsCount || 1,
+                guestInfo: bookingData.guestInfo || [],
                 capacityLimit: maxGuest,
               }
             );

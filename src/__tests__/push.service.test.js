@@ -11,17 +11,18 @@
 const mockSend = jest.fn();
 const mockSendEach = jest.fn();
 
-jest.mock('firebase-admin', () => {
-  return {
-    apps: [],
-    initializeApp: jest.fn(),
-    credential: { cert: jest.fn(() => ({})) },
-    messaging: jest.fn(() => ({
-      send: mockSend,
-      sendEach: mockSendEach,
-    })),
-  };
-});
+jest.mock('firebase-admin/app', () => ({
+  getApps: jest.fn(() => []),
+  initializeApp: jest.fn(),
+  cert: jest.fn(() => ({})),
+}));
+
+jest.mock('firebase-admin/messaging', () => ({
+  getMessaging: jest.fn(() => ({
+    send: mockSend,
+    sendEach: mockSendEach,
+  })),
+}));
 
 // ── Now import the service ────────────────────────────────────────────────────
 const { initializePushService, sendPushNotification, sendPushToMany } = require('../../src/services/push.service');
@@ -55,10 +56,11 @@ describe('push.service — initializePushService', () => {
 
   test('initializes Firebase when credentials are present', () => {
     setCredentials();
-    const admin = require('firebase-admin');
+    const { initializeApp, getApps } = require('firebase-admin/app');
+    const { getMessaging } = require('firebase-admin/messaging');
     initializePushService();
-    expect(admin.initializeApp).toHaveBeenCalledTimes(1);
-    expect(admin.messaging).toHaveBeenCalledTimes(1);
+    expect(initializeApp).toHaveBeenCalledTimes(1);
+    expect(getMessaging).toHaveBeenCalledTimes(1);
   });
 });
 

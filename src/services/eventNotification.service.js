@@ -33,7 +33,7 @@ const TEMPLATES = {
   },
   waitlistSpotAvailable: {
     friendlyName: `${APP_NAME} Waitlist Spot Available`,
-    body: `Hi {{1}}, a spot has opened up for {{2}} on {{3}}! Book now before it's gone.`,
+    body: `Hi {{1}}, a spot has opened up for {{2}} on {{3}}! Book now before it's gone: {{4}}`,
   },
   waitlistEventFull: {
     friendlyName: `${APP_NAME} Waitlist Event Full`,
@@ -464,20 +464,31 @@ const sendWaitlistSpotAvailableNotification = async ({ user, event }) => {
   );
   const userName = user?.fullName || 'User';
 
+  const eventId = event?.eventId || (event?._id ? event._id.toString() : '');
+  const appBaseUrl = (process.env.APP_BASE_URL || process.env.RALLY_WEB_BASE_URL || 'https://backend2.rallysports.ae').replace(/\/+$/, '');
+  const eventLink = eventId ? `${appBaseUrl}/event/${eventId}` : '';
+
   const subject = `Spot available for ${eventName}!`;
-  const text = `Hi ${userName}, a spot has just opened up for ${eventName} on ${eventDate}. Book now before it's gone!`;
+  const text = eventLink
+    ? `Hi ${userName}, a spot has just opened up for ${eventName} on ${eventDate}! Book now before it's gone: ${eventLink}`
+    : `Hi ${userName}, a spot has just opened up for ${eventName} on ${eventDate}. Book now before it's gone!`;
   const html = `
     <p>Hi ${userName},</p>
     <p>Good news! A spot has just opened up for <strong>${eventName}</strong> on <strong>${eventDate}</strong>.</p>
     <p>Don't miss out - book your spot now!</p>
+    ${eventLink ? `<p><a href="${eventLink}">View Event & Book Now</a></p>` : ''}
   `;
   const whatsappMessage = text;
 
   const contentSid = await resolveTemplateSid('WHATSAPP_WAITLIST_AVAILABLE_SID', TEMPLATES.waitlistSpotAvailable);
+  const contentVariables = { '1': userName, '2': eventName, '3': eventDate };
+  if (eventLink) {
+    contentVariables['4'] = eventLink;
+  }
   const whatsappTemplate = contentSid
     ? {
         contentSid,
-        contentVariables: { '1': userName, '2': eventName, '3': eventDate },
+        contentVariables,
       }
     : null;
 

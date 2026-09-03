@@ -71,7 +71,22 @@ async function getFilterOptionsData() {
       .map(sport => sport.charAt(0).toUpperCase() + sport.slice(1)) // Capitalize first letter
       .sort(); // Sort alphabetically
 
-    const eventTypes = (otherData.eventTypes || [])
+    // Default event types that should always be available, even if not yet in the database
+    const defaultEventTypes = [
+      'Social',
+      'Class',
+      'Tournament',
+      'Training',
+    ];
+
+    const allEventTypes = [
+      ...defaultEventTypes,
+      ...(otherData.eventTypes || []).filter(type => 
+        type && typeof type === 'string' && type.trim().length > 0
+      )
+    ];
+
+    const eventTypes = allEventTypes
       .filter(type => type && typeof type === 'string' && type.trim().length > 0)
       .map(type => type.trim().toLowerCase())
       .filter((value, index, self) => self.indexOf(value) === index) // Remove duplicates (case-insensitive)

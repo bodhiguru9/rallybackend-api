@@ -152,7 +152,23 @@ const getFilterOptions = async (req, res, next) => {
       })
       .sort(); // Sort alphabetically
 
-    const eventTypes = (otherData.eventTypes || [])
+    // Default event types that should always be available, even if not yet in the database
+    const defaultEventTypes = [
+      'Social',
+      'Class',
+      'Tournament',
+      'Training',
+    ];
+
+    // Combine event types from defaults and events, then filter, deduplicate, format and sort
+    const allEventTypes = [
+      ...defaultEventTypes,
+      ...(otherData.eventTypes || []).filter(type => 
+        type && typeof type === 'string' && type.trim().length > 0
+      )
+    ];
+
+    const eventTypes = allEventTypes
       .filter(type => type && typeof type === 'string' && type.trim().length > 0)
       .map(type => type.trim().toLowerCase())
       .filter((value, index, self) => self.indexOf(value) === index) // Remove duplicates (case-insensitive)

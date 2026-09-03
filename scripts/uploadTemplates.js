@@ -75,11 +75,12 @@ const TEMPLATES = [
   {
     envKey: 'WHATSAPP_WAITLIST_AVAILABLE_SID',
     friendlyName: 'Rally Waitlist Spot Available',
-    body: 'Hi {{1}}, a spot has opened up for {{2}} on {{3}}! Book now before it\'s gone.',
+    body: 'Hi {{1}}, a spot has opened up for {{2}} on {{3}}! Book now before it\'s gone: {{4}}',
     variables: {
       '1': 'John Doe',
       '2': 'Weekend Tennis Match',
-      '3': 'May 30, 2026, 10:00 AM'
+      '3': 'May 30, 2026, 10:00 AM',
+      '4': 'https://backend2.rallysports.ae/event/E1'
     }
   },
   {

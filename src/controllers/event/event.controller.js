@@ -235,12 +235,25 @@ const createEvent = async (req, res, next) => {
         for (const occStart of occurrenceDates) {
           const { eventId } = await getNextUniqueEventId();
           const occEnd = new Date(occStart.getTime() + durationMs);
-          
+          const offsetMs = occStart.getTime() - baseStart.getTime();
+
+          let occRegStart = eventData.eventRegistrationStartTime;
+          if (occRegStart && !isNaN(new Date(occRegStart).getTime())) {
+            occRegStart = new Date(new Date(occRegStart).getTime() + offsetMs);
+          }
+
+          let occRegEnd = eventData.eventRegistrationEndTime;
+          if (occRegEnd && !isNaN(new Date(occRegEnd).getTime())) {
+            occRegEnd = new Date(new Date(occRegEnd).getTime() + offsetMs);
+          }
+
           const docData = {
             ...eventData,
             eventId,
             eventDateTime: occStart,
             eventEndDateTime: occEnd,
+            eventRegistrationStartTime: occRegStart,
+            eventRegistrationEndTime: occRegEnd,
             // Standalone event — no frequency marker, no occurrenceStart needed for joins
             eventFrequency: [],
             eventStatus: calculateEventStatus(occStart),

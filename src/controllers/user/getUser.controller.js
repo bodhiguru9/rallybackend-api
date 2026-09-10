@@ -108,15 +108,24 @@ const getUser = async (req, res, next) => {
 
       userResponse.followersCount = followerCount;
 
-      // Compute totalAttendees from eventsResult (synchronous after the parallel fetch)
+      // Compute totalAttendees and totalMembers from eventsResult (synchronous after the parallel fetch)
       if (eventsResult.length === 0) {
         userResponse.totalAttendees = 0;
+        userResponse.totalMembers = 0;
       } else {
         const eventIds = eventsResult.map((event) => event._id);
+        
+        // Total Members (distinct users)
         const distinctUserIds = await joinsCollection.distinct('userId', {
           eventId: { $in: eventIds },
         });
-        userResponse.totalAttendees = distinctUserIds.length;
+        userResponse.totalMembers = distinctUserIds.length;
+        
+        // Total Attendees (all joins)
+        const totalAttendees = await joinsCollection.countDocuments({
+          eventId: { $in: eventIds },
+        });
+        userResponse.totalAttendees = totalAttendees;
       }
 
       userResponse.isFollowing = isFollowing;

@@ -49,36 +49,45 @@ const getCommunityDetails = async (req, res, next) => {
       });
     }
 
-    // Get total event count and only the current page of events (DB-level pagination)
+    // Get total event count (excluding cancelled) and only the current page of events (DB-level pagination)
+    const eventsCollection = db.collection('events');
+    const totalEventsHosted = await eventsCollection.countDocuments({
+      creatorId: { $in: [organiser._id, organiser._id.toString()] },
+      eventStatus: { $ne: 'cancelled' }
+    });
+    
     const Event = require('../../models/Event');
-    const totalEventsHosted = await Event.getEventCount(organiser._id);
     const pageEvents = await Event.findByCreator(organiser._id, perPage, skip);
 
-    // Calculate total attendees across all events (single aggregation)
+    // Calculate total attendees and members across all events
     let totalAttendees = 0;
-    if (totalEventsHosted > 0) {
+    let totalMembers = 0;
+    
+    // Get all event IDs for this organiser (lightweight — only _id projection)
+    const allEventDocs = await eventsCollection
+      .find({ creatorId: { $in: [organiser._id, organiser._id.toString()] } })
+      .project({ _id: 1 })
+      .toArray();
+    const allEventIds = allEventDocs.map((e) => e._id);
+
+    if (allEventIds.length > 0) {
       const eventJoinsCollection = db.collection('eventJoins');
-      const eventsCollection = db.collection('events');
-
-      // Get all event IDs for this organiser (lightweight — only _id projection)
-      const allEventDocs = await eventsCollection
-        .find({ creatorId: { $in: [organiser._id, organiser._id.toString()] } })
-        .project({ _id: 1 })
+      
+      const attendeesByEvent = await eventJoinsCollection
+        .aggregate([
+          { $match: { eventId: { $in: allEventIds } } },
+          { $group: { _id: '$eventId', count: { $sum: 1 } } },
+        ])
         .toArray();
-      const allEventIds = allEventDocs.map((e) => e._id);
 
-      if (allEventIds.length > 0) {
-        const attendeesByEvent = await eventJoinsCollection
-          .aggregate([
-            { $match: { eventId: { $in: allEventIds } } },
-            { $group: { _id: '$eventId', count: { $sum: 1 } } },
-          ])
-          .toArray();
-
-        attendeesByEvent.forEach((ae) => {
-          totalAttendees += ae.count || 0;
-        });
-      }
+      attendeesByEvent.forEach((ae) => {
+        totalAttendees += ae.count || 0;
+      });
+      
+      const distinctUserIds = await eventJoinsCollection.distinct('userId', {
+        eventId: { $in: allEventIds }
+      });
+      totalMembers = distinctUserIds.length;
     }
 
     // Get follower count (total subscribers)
@@ -172,6 +181,7 @@ const getCommunityDetails = async (req, res, next) => {
           profileVisibility: organiser.profileVisibility || 'private',
           totalEventsHosted: totalEventsHosted,
           totalAttendees: totalAttendees,
+          totalMembers: totalMembers,
           totalSubscribers: totalSubscribers,
           bio: organiser.bio || null,
           sports: organiserSports,
@@ -266,18 +276,33 @@ const getAllCommunities = async (req, res, next) => {
       });
     }
 
+    // Get total members (distinct users) per organiser
+    const distinctUsersByCreator = new Map();
+    for (const [creatorId, eventIds] of eventIdsByCreator.entries()) {
+      if (eventIds.length > 0) {
+        const distinctUsers = await eventJoinsCollection.distinct('userId', {
+          eventId: { $in: eventIds }
+        });
+        distinctUsersByCreator.set(creatorId, distinctUsers.length);
+      } else {
+        distinctUsersByCreator.set(creatorId, 0);
+      }
+    }
+
     // Format paginated organisers with required fields and metrics
     const communitiesList = organisers.map((organiser) => {
       const organiserIdStr = organiser._id.toString();
       const events = eventsByCreator.get(organiserIdStr) || [];
       const eventIds = eventIdsByCreator.get(organiserIdStr) || [];
 
-      const totalEvents = events.length;
+      const totalEvents = events.filter(e => e.eventStatus !== 'cancelled').length;
 
       let totalAttendees = 0;
       eventIds.forEach((eventId) => {
         totalAttendees += attendeesByEventMap.get(eventId.toString()) || 0;
       });
+      
+      const totalMembers = distinctUsersByCreator.get(organiserIdStr) || 0;
 
       // Extract all sports from events (eventSports field)
       const sportsSet = new Set();
@@ -304,6 +329,7 @@ const getAllCommunities = async (req, res, next) => {
         communityName: organiser.communityName || null,
         totalEvents: totalEvents,
         totalAttendees: totalAttendees,
+        totalMembers: totalMembers,
         sports: sports,
       };
     });

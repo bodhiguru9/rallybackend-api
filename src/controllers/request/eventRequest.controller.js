@@ -163,9 +163,9 @@ const joinWaitlist = async (req, res, next) => {
       
       const notificationResult = await Notification.create(
         creatorIdObjectId,
-        'event_join_request',
-        'Event Full - Waitlist Request',
-        `${user.fullName || 'A player'} joined the waitlist for your full event: ${eventName}`,
+        'event_waitlist_join',
+        'Waitlist Join',
+        `${user.fullName || 'A player'} has joined the waitlist of your event ${eventName}`,
         {
           userId: userId,
           eventId: event._id.toString(),

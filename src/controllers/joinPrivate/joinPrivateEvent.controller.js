@@ -157,10 +157,10 @@ const joinPrivateEventRequest = async (req, res, next) => {
       
       const notificationResult = await Notification.create(
         creatorIdObjectId,
-        'event_join_request',
-        'New Join Request',
+        requestType === 'waitlist' ? 'event_waitlist_join' : 'event_join_request',
+        requestType === 'waitlist' ? 'Waitlist Join' : 'New Join Request',
         requestType === 'waitlist'
-          ? `${user.fullName || 'A player'} joined the waitlist for your private event: ${eventName}`
+          ? `${user.fullName || 'A player'} has joined the waitlist of your event ${eventName}`
           : `${user.fullName || 'A player'} requested to join your private event: ${eventName}`,
         {
           userId: userId,

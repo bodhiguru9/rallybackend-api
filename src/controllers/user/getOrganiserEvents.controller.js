@@ -49,6 +49,7 @@ const getOrganiserEventsWithParticipants = async (req, res, next) => {
         suggestion: 'Please provide a valid sequential userId',
       });
     }
+    const organiserIdStr = organiser._id.toString();
 
     if (organiser.userType !== 'organiser') {
       return res.status(400).json({
@@ -60,8 +61,19 @@ const getOrganiserEventsWithParticipants = async (req, res, next) => {
     const { page, perPage, skip } = getPaginationParams(req.query.page, req.query.perPage || 20);
 
     // DB-level pagination — only fetch the current page (was: fetch 1000, slice in JS)
-    const totalCount = await Event.getEventCount(organiser._id);
-    const pageEvents = await Event.findByCreator(organiser._id, perPage, skip);
+    const db = require('../../config/database').getDB();
+    const eventsCollection = db.collection('events');
+    const creatorQuery = { $in: [organiser._id, organiser._id.toString(), organiserIdStr] };
+
+    const query = { creatorId: creatorQuery, eventStatus: { $ne: 'cancelled' } };
+
+    const totalCount = await eventsCollection.countDocuments(query);
+    const pageEvents = await eventsCollection
+      .find(query)
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(perPage)
+      .toArray();
 
     // Batch-fetch participant counts and participants for the page in bulk
     const { batchParticipantCounts, batchEventParticipants } = require('../../utils/batchEventData');

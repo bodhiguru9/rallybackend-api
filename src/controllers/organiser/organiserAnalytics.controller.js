@@ -221,6 +221,20 @@ const getOrganiserAnalytics = async (req, res, next) => {
       batchEventParticipants(eventObjectIds, 10),
     ]);
 
+    const eventJoinsCollection = db.collection('eventJoins');
+    let totalMembers = 0;
+    if (allEventIds.length > 0) {
+      const distinctUsers = await eventJoinsCollection.distinct('userId', {
+        eventId: { $in: allEventIds }
+      });
+      totalMembers = distinctUsers.length;
+    }
+
+    let totalAttendees = 0;
+    for (const [eventId, count] of allCountMap.entries()) {
+      totalAttendees += count;
+    }
+
     // Pre-build paymentsByEvent Map using eventLookupMap to map back to ObjectId string
     const paymentsByEvent = new Map();
     for (const p of payments) {
@@ -388,6 +402,8 @@ const getOrganiserAnalytics = async (req, res, next) => {
       totalBookings: Math.max(bookings.length, totalBookedCountComputed),
       averageRevenuePerEvent: avgEventsCount > 0 ? Math.round(computedTotalRevenue / avgEventsCount) : 0,
       revenuePeriod: revenuePeriod,
+      totalMembers: totalMembers,
+      totalAttendees: totalAttendees,
     };
 
     // Group revenue by sport if sport filter not applied

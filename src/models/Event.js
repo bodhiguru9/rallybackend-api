@@ -375,20 +375,27 @@ class Event {
     if (events.length === 0) {
       await usersCollection.updateOne(
         { _id: objectId },
-        { $set: { totalAttendees: 0 } }
+        { $set: { totalAttendees: 0, totalMembers: 0 } }
       );
       return;
     }
 
     const eventIds = events.map((event) => event._id);
+    
+    // Total Attendees (all joins)
+    const totalAttendees = await joinsCollection.countDocuments({
+      eventId: { $in: eventIds },
+    });
+
+    // Total Members (distinct users)
     const distinctUserIds = await joinsCollection.distinct('userId', {
       eventId: { $in: eventIds },
     });
-    const newTotal = distinctUserIds.length;
+    const totalMembers = distinctUserIds.length;
 
     await usersCollection.updateOne(
       { _id: objectId },
-      { $set: { totalAttendees: newTotal } }
+      { $set: { totalAttendees, totalMembers } }
     );
   }
 

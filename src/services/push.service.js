@@ -94,6 +94,8 @@ const sendPushNotification = async ({ token, title, body, data = {}, imageUrl = 
     android: {
       priority: 'high',
       notification: {
+        title,
+        body,
         sound: 'default',
         ...(imageUrl ? { imageUrl } : {}),
       },

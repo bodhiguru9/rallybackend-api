@@ -208,7 +208,10 @@ const deleteEvent = async (req, res, next) => {
         status: { $in: ['booked', 'pending'] } 
       }).toArray();
 
-      if (activeBookings.length > 0) {
+      const eventDateTime = event.eventDateTime || event.gameStartDate;
+      const isEventInPast = eventDateTime && new Date(eventDateTime) <= new Date();
+
+      if (activeBookings.length > 0 && !isEventInPast) {
         const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
         const Payment = require('../../models/Payment');
 

@@ -154,7 +154,10 @@ const removePlayer = async (req, res, next) => {
 
         // Attempt Stripe refund if this was a paid booking
         let refundMessage = null;
-        if (removedBooking.paymentIntentId || removedBooking.paymentId) {
+        const targetDate = queryOccurrenceStart || event.eventDateTime || event.gameStartDate;
+        const isEventInPast = targetDate && new Date(targetDate) <= new Date();
+
+        if (!isEventInPast && (removedBooking.paymentIntentId || removedBooking.paymentId)) {
           try {
             const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
             let payment = null;

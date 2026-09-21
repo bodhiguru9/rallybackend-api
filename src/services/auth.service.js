@@ -14,7 +14,7 @@ const { getBookingStatsByUsers } = require('../utils/bookingStats');
  */
 const generateAccessToken = (userId) => {
   return jwt.sign({ userId }, process.env.JWT_SECRET, {
-    expiresIn: process.env.JWT_EXPIRE || '15m', // Default 15 minutes
+    expiresIn: process.env.JWT_EXPIRE || '365d', // Default 365 days
   });
 };
 

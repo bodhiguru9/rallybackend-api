@@ -132,6 +132,7 @@ class Waitlist {
         mobileNumber: user ? user.mobileNumber : null,
         profilePic: item.profilePic || (user ? user.profilePic : null),
         fullName: item.fullName || (user ? user.fullName : null),
+        fcmToken: user ? user.fcmToken : null,
       };
 
       // Add type-specific fields if user exists

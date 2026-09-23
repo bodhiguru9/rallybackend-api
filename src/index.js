@@ -78,6 +78,7 @@ app.use(express.urlencoded({ extended: true })); // Parse URL-encoded bodies
 // Serve static files
 app.use('/public', express.static('public'));
 app.use('/uploads', express.static('uploads'));
+app.use('/.well-known', express.static('public/.well-known'));
 
 
 

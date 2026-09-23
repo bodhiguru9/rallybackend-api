@@ -3,8 +3,11 @@
     "apps": [],
     "details": [
       {
-        "appID": "TODO_REPLACE_TEAM_ID.com.rallysports.app",
-        "paths": ["/event/*", "/organiser/*"]
+        "appID": "WU5Y3CPV8F.com.rallysports.app",
+        "paths": [
+          "/event/*",
+          "/organiser/*"
+        ]
       }
     ]
   }

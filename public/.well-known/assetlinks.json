@@ -1,12 +1,14 @@
 [
   {
-    "relation": ["delegate_permission/common.handle_all_urls"],
+    "relation": [
+      "delegate_permission/common.handle_all_urls"
+    ],
     "target": {
       "namespace": "android_app",
       "package_name": "com.rallysports.app",
       "sha256_cert_fingerprints": [
-        "TODO_REPLACE_WITH_UPLOAD_KEY_SHA256",
-        "TODO_REPLACE_WITH_GOOGLE_PLAY_APP_SIGNING_SHA256"
+        "D7:D8:3F:86:73:3E:22:DC:24:38:2F:9F:80:57:B9:3F:A5:FC:9D:BF:F0:F2:3E:89:77:A0:6C:40:71:6A:8A:77",
+        "D7:D8:3F:86:73:3E:22:DC:24:38:2F:9F:80:57:B9:3F:A5:FC:9D:BF:F0:F2:3E:89:77:A0:6C:40:71:6A:8A:77"
       ]
     }
   }

@@ -1,0 +1,13 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.rallysports.app",
+      "sha256_cert_fingerprints": [
+        "TODO_REPLACE_WITH_UPLOAD_KEY_SHA256",
+        "TODO_REPLACE_WITH_GOOGLE_PLAY_APP_SIGNING_SHA256"
+      ]
+    }
+  }
+]

@@ -28,7 +28,29 @@ async function batchParticipants(db, eventIds, limit = 10) {
     .aggregate([
       { $match: { eventId: { $in: eventIds } } },
       { $sort:  { joinedAt: 1 } },
-      { $group: { _id: '$eventId', participants: { $push: '$$ROOT' }, count: { $sum: 1 } } }
+      {
+        $lookup: {
+          from: 'users',
+          localField: 'userId',
+          foreignField: '_id',
+          as: 'user'
+        }
+      },
+      { $unwind: { path: '$user', preserveNullAndEmptyArrays: true } },
+      {
+        $addFields: {
+          fullName: '$user.fullName',
+          profilePic: '$user.profilePic'
+        }
+      },
+      { $project: { user: 0 } },
+      { 
+        $group: { 
+          _id: '$eventId', 
+          participants: { $push: '$$ROOT' }, 
+          count: { $sum: { $max: [{ $ifNull: ['$guestsCount', 1] }, 1] } } 
+        } 
+      }
     ]).toArray();
   const map = new Map();
   for (const d of docs) {

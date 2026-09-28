@@ -86,14 +86,14 @@ const createEvent = async (req, res, next) => {
       // Support both old field name (game_image) and new field name (eventImage)
       // Use S3 URLs from req.files
       let eventImages = [];
-      
+
       if (imageFiles) {
         if (Array.isArray(imageFiles)) {
           // Limit to maximum 5 images
           const imagesToProcess = imageFiles.slice(0, 5);
           // Use S3 location (public URL) instead of local path
           eventImages = imagesToProcess.map((file) => file.location);
-          
+
           // Warn if more than 5 images were provided
           if (imageFiles.length > 5) {
             console.warn(`More than 5 images provided. Only the first 5 images will be used.`);
@@ -112,16 +112,16 @@ const createEvent = async (req, res, next) => {
         email: organiserEmail,
         profilePic: organiserProfilePic,
       };
-      
+
       const processedData = processEventData(req.body, organiserData);
-      
+
       // Handle draft saving - if eventSavedraft is true, save as draft but don't make it live
       // The processEventData function already handles this, but we ensure it's set correctly
-      if (req.body.eventSavedraft === 'true' || req.body.eventSavedraft === true || 
-          req.body.eventSaveDraft === 'true' || req.body.eventSaveDraft === true) {
+      if (req.body.eventSavedraft === 'true' || req.body.eventSavedraft === true ||
+        req.body.eventSaveDraft === 'true' || req.body.eventSaveDraft === true) {
         processedData.eventStatus = 'draft';
       }
-      
+
       // Process event video (optional)
       // Support both old field name (game_video) and new field name (eventVideo)
       // Use S3 URL from req.files
@@ -132,10 +132,10 @@ const createEvent = async (req, res, next) => {
         // Use S3 location (public URL) instead of local path
         eventVideo = video.location;
       }
-      
+
       // Set timestamps for event creation
       const now = new Date();
-      
+
       const eventData = {
         creatorId: req.user.id,
         ...processedData,
@@ -163,7 +163,7 @@ const createEvent = async (req, res, next) => {
       const recurrenceWeeks = Math.min(Math.max(parseInt(req.body.recurrenceWeeks || 4, 10) || 4, 1), 4);
 
       const isWeekly = frequencyArray.includes('weekly');
-      const isDaily  = frequencyArray.includes('daily');
+      const isDaily = frequencyArray.includes('daily');
       const isRecurring = isWeekly || isDaily;
 
       if (isRecurring && eventData.eventDateTime) {
@@ -171,14 +171,14 @@ const createEvent = async (req, res, next) => {
         const DAY_ABBREVS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
         const selectedDays = isWeekly
           ? frequencyArray
-              .filter((f) => DAY_ABBREVS.includes(f.toLowerCase()))
-              .map((f) => DAY_ABBREVS.indexOf(f.toLowerCase()))
-              .sort((a, b) => a - b)
+            .filter((f) => DAY_ABBREVS.includes(f.toLowerCase()))
+            .map((f) => DAY_ABBREVS.indexOf(f.toLowerCase()))
+            .sort((a, b) => a - b)
           : []; // daily: no specific days needed
 
         // Compute the event duration in ms (for setting end time on each occurrence)
         const baseStart = new Date(eventData.eventDateTime);
-        const baseEnd   = eventData.eventEndDateTime ? new Date(eventData.eventEndDateTime) : null;
+        const baseEnd = eventData.eventEndDateTime ? new Date(eventData.eventEndDateTime) : null;
         const durationMs = baseEnd ? baseEnd.getTime() - baseStart.getTime() : 60 * 60 * 1000; // default 1h
 
         /**
@@ -258,11 +258,11 @@ const createEvent = async (req, res, next) => {
             eventFrequency: [],
             eventStatus: calculateEventStatus(occStart),
           };
-          
+
           const eventInstance = new Event(docData);
           eventInstance.createdAt = now;
           eventInstance.updatedAt = now;
-          
+
           batchDocs.push(eventInstance);
         }
 
@@ -348,7 +348,7 @@ const getEventDetails = async (req, res, next) => {
     // Get creator/organiser details (only required fields)
     const creator = await User.findById(event.creatorId);
     let creatorData = null;
-    
+
     if (creator && creator.userType === 'organiser') {
       creatorData = {
         userId: creator.userId,
@@ -358,6 +358,8 @@ const getEventDetails = async (req, res, next) => {
         communityName: creator.communityName,
         eventsCreated: creator.eventsCreated || 0,
         totalAttendees: creator.totalAttendees || 0,
+        instagramLink: creator.instagramLink || creator.instagram_link || null,
+        mobileNumber: creator.mobileNumber || creator.whatsappNumber || null,
       };
     }
 
@@ -401,7 +403,7 @@ const getEventDetails = async (req, res, next) => {
     if (req.user) {
       if (!isPrivate && !approvalRequired) {
         const hasJoined = await EventJoin.hasJoined(req.user.id, mongoEventId);
-        
+
         // Fetch waitlist item to check status
         const db = getDB();
         const waitlistCollection = db.collection('waitlist');
@@ -420,7 +422,7 @@ const getEventDetails = async (req, res, next) => {
           const bookingsCollection = db.collection('bookings');
           const booked = await bookingsCollection.findOne({ userId: userObjectId, eventId: mongoEventId, status: 'booked' });
           paymentDone = !!booked;
-        } catch (e) {}
+        } catch (e) { }
 
         const joinedAfterPayment = hasJoined && (event.gameJoinPrice ? paymentDone : true);
         const isAcceptedButUnpaid = isAcceptedWaitlist && !joinedAfterPayment;
@@ -462,13 +464,13 @@ const getEventDetails = async (req, res, next) => {
 
         // Check if user has fully joined (joined AND payment done if event has price)
         const joinedAfterPayment = hasJoined && (event.gameJoinPrice ? paymentDone : true);
-        
+
         // isPending should be true if:
         // - User has NOT fully joined (payment not done), AND
         // - User has an active request (pending or accepted) OR is in waitlist
         const hasActiveRequest = !!activeReq;
         const isAcceptedButUnpaid = activeReq?.status === 'accepted' && !joinedAfterPayment;
-        
+
         userJoinStatus = {
           hasJoined: joinedAfterPayment,
           inWaitlist,
@@ -483,14 +485,14 @@ const getEventDetails = async (req, res, next) => {
                 ? 'requested'
                 : 'request-join',
         };
-        
+
         // isJoined: true only if user has joined AND payment is done (if event has price)
         isJoined = joinedAfterPayment;
-        
+
         // isPending: true if user has NOT fully joined AND has pending request/waitlist
         // This includes: pending requests, accepted requests (payment pending), or waitlist
         isPending = !joinedAfterPayment && (inWaitlist || hasActiveRequest);
-        
+
         isLeave = !joinedAfterPayment && !inWaitlist && !hasActiveRequest;
       }
     } else {
@@ -508,7 +510,7 @@ const getEventDetails = async (req, res, next) => {
     let paymentStatus = 'not_required'; // Default for free events or events without payment
     let paymentDetails = null;
     let bookingDetails = null;
-    
+
     if (req.user) {
       try {
         // Find user's booking for this event
@@ -516,14 +518,14 @@ const getEventDetails = async (req, res, next) => {
         const relatedBooking = userBookings.find(
           (booking) => booking.eventId.toString() === mongoEventId.toString()
         );
-        
+
         if (relatedBooking) {
           bookingDetails = {
             bookingId: relatedBooking.bookingId,
             status: relatedBooking.status, // pending/booked/cancelled/failed
             joinedAt: null, // Will be set if we can get it from EventJoin
           };
-          
+
           // Try to get joinedAt from EventJoin
           if (isJoined) {
             try {
@@ -542,14 +544,14 @@ const getEventDetails = async (req, res, next) => {
               console.error('Error fetching join record:', joinError);
             }
           }
-          
+
           // Check if event is free (price is 0)
           const eventPrice = event.eventPricePerGuest || event.gameJoinPrice || 0;
-          
+
           if (eventPrice > 0 && relatedBooking.paymentId) {
             // Fetch payment details
             const payment = await Payment.findById(relatedBooking.paymentId);
-            
+
             if (payment) {
               // Map payment status to user-friendly values
               const paymentStatusMap = {
@@ -558,9 +560,9 @@ const getEventDetails = async (req, res, next) => {
                 'failed': 'cancelled',
                 'refunded': 'cancelled'
               };
-              
+
               paymentStatus = paymentStatusMap[payment.status] || payment.status;
-              
+
               paymentDetails = {
                 paymentId: payment.paymentId,
                 amount: payment.amount,
@@ -680,24 +682,24 @@ const getEvents = async (req, res, next) => {
     const events = await Event.findWithFilters(filters, limit, skip);
 
     // Get creator details for each event
-        const eventsWithCreators = await Promise.all(
-          events.map(async (event) => {
-            const creator = await User.findById(event.creatorId);
-            return {
-              ...formatEventResponse(event),
-              creator: creator
-                ? {
-                    userId: creator.userId,
-                    fullName: creator.fullName,
-                    profilePic: creator.profilePic,
-                    communityName: creator.communityName,
-                    eventsCreated: creator.eventsCreated || 0,
-                    totalAttendees: creator.totalAttendees || 0,
-                  }
-                : null,
-            };
-          })
-        );
+    const eventsWithCreators = await Promise.all(
+      events.map(async (event) => {
+        const creator = await User.findById(event.creatorId);
+        return {
+          ...formatEventResponse(event),
+          creator: creator
+            ? {
+              userId: creator.userId,
+              fullName: creator.fullName,
+              profilePic: creator.profilePic,
+              communityName: creator.communityName,
+              eventsCreated: creator.eventsCreated || 0,
+              totalAttendees: creator.totalAttendees || 0,
+            }
+            : null,
+        };
+      })
+    );
 
     res.status(200).json({
       success: true,
@@ -799,7 +801,7 @@ const getOrganiserCreatedEvents = async (req, res, next) => {
         // Get participants count
         let participantsCount = 0;
         const isPrivate = event.IsPrivateEvent !== undefined ? event.IsPrivateEvent : (event.visibility === 'private');
-        
+
         if (!isPrivate) {
           participantsCount = await EventJoin.getParticipantCount(event._id);
         }
@@ -935,11 +937,11 @@ const getEventCreatorProfile = async (req, res, next) => {
       creatorProfile.bio = creator.bio;
       creatorProfile.instagramLink = creator.instagramLink || null;
       creatorProfile.profileVisibility = creator.profileVisibility || 'private';
-      
+
       // Get actual follower count from follows collection
       const followerCount = await Follow.getFollowerCount(creator._id.toString());
       creatorProfile.followersCount = followerCount;
-      
+
       creatorProfile.eventsCreated = creator.eventsCreated || 0;
       creatorProfile.totalAttendees = creator.totalAttendees || 0;
       creatorProfile.followingCount = creator.followingCount || 0;

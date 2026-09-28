@@ -187,6 +187,8 @@ const getCommunityDetails = async (req, res, next) => {
           sports: organiserSports,
           isVerified: !!(organiser.isEmailVerified || organiser.isMobileVerified),
           instagramLink: organiser.instagramLink || organiser.instagram_link || null,
+          mobileNumber: organiser.mobileNumber || null,
+          whatsappNumber: organiser.whatsappNumber || null,
         },
         events: eventsWithDetails,
         pagination,

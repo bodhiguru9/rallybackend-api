@@ -34,8 +34,12 @@ function calculateAge(dob, referenceDate = new Date()) {
  * @returns {{ allowed: boolean, age: number|null, minAge: number|null, maxAge: number|null, message?: string, code?: string }}
  */
 function validateAgeForEvent(userDob, eventMinAge, eventMaxAge) {
-  const minAge = toIntOrNull(eventMinAge);
-  const maxAge = toIntOrNull(eventMaxAge);
+  let minAge = toIntOrNull(eventMinAge);
+  let maxAge = toIntOrNull(eventMaxAge);
+
+  // Align with frontend: treat min age 0 and max age 100 (or 0) as "No Restrictions"
+  if (minAge === 0) minAge = null;
+  if (maxAge === 0 || maxAge === 100) maxAge = null;
 
   // No restrictions
   if (minAge === null && maxAge === null) {

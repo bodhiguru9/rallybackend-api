@@ -70,7 +70,7 @@ const getOrganiserEventsWithParticipants = async (req, res, next) => {
     const totalCount = await eventsCollection.countDocuments(query);
     const pageEvents = await eventsCollection
       .find(query)
-      .sort({ createdAt: -1 })
+      .sort({ eventDateTime: -1 })
       .skip(skip)
       .limit(perPage)
       .toArray();

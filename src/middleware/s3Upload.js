@@ -76,6 +76,7 @@ const createS3Storage = ({ folder = 'uploads', prefix = '', keyGenerator = null 
         uploadedAt: new Date().toISOString(),
       });
     },
+    cacheControl: options.cacheControl || undefined,
   });
 };
 
@@ -142,6 +143,8 @@ const createS3Upload = (options = {}) => {
     fileType = 'image', // 'image', 'video', or 'media'
     fieldName = 'file',
     maxCount = 1,
+    keyGenerator = null,
+    cacheControl = null,
   } = options;
 
   // Select appropriate file filter
@@ -161,7 +164,7 @@ const createS3Upload = (options = {}) => {
   }
 
   // Create S3 storage
-  const storage = createS3Storage({ folder, prefix });
+  const storage = createS3Storage({ folder, prefix, keyGenerator, cacheControl });
 
   // Configure multer
   const upload = multer({

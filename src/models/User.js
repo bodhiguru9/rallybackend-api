@@ -47,6 +47,8 @@ class User {
 
     // Organiser specific fields
     if (data.userType === 'organiser') {
+      // Array of { id, url, createdAt }, newest first, max MAX_SNAPS
+      this.snaps = data.snaps || [];
       this.fullName = data.fullName;
       this.yourBest = data.yourBest; // 'Organiser', 'coach', 'club'
       this.communityName = data.communityName;
@@ -138,6 +140,7 @@ class User {
       returnData.sports = user.sports;
     } else if (user.userType === 'organiser') {
       returnData.fullName = user.fullName;
+      returnData.snaps = user.snaps || [];
       returnData.yourBest = user.yourBest;
       returnData.communityName = user.communityName;
       returnData.yourCity = user.yourCity;

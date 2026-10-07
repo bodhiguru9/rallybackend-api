@@ -185,6 +185,7 @@ const getCommunityDetails = async (req, res, next) => {
           totalSubscribers: totalSubscribers,
           bio: organiser.bio || null,
           sports: organiserSports,
+          snaps: organiser.snaps || [],
           isVerified: !!(organiser.isEmailVerified || organiser.isMobileVerified),
           instagramLink: organiser.instagramLink || organiser.instagram_link || null,
         },

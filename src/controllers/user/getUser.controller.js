@@ -75,6 +75,7 @@ const getUser = async (req, res, next) => {
       userResponse.bio = user.bio;
       userResponse.instagramLink = user.instagramLink || null;
       userResponse.profileVisibility = user.profileVisibility || 'private';
+      userResponse.snaps = user.snaps || [];
       
       // Run ALL independent queries in parallel (was: 7 sequential awaits)
       const db = getDB();

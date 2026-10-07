@@ -13,6 +13,9 @@ const getCommunityDetailsController = require('../controllers/user/getCommunityD
 const getCommunityStatusController = require('../controllers/user/getCommunityStatus.controller');
 const getOrganiserEventsController = require('../controllers/user/getOrganiserEvents.controller');
 const getUserJoinedEventsController = require('../controllers/user/getUserJoinedEvents.controller');
+const getSnapsController = require('../controllers/user/getSnaps.controller');
+const addSnapController = require('../controllers/user/addSnap.controller');
+const deleteSnapController = require('../controllers/user/deleteSnap.controller');
 const { updatePushToken } = require('../controllers/user/updatePushToken.controller');
 
 /**
@@ -377,6 +380,16 @@ router.get('/player/:userId/events', getUserJoinedEventsController.getUserJoined
  * - canFollow: Whether organiser can be followed (if public)
  * 
  * Response:
+ * }
+ */
+router.get('/:id/snaps', optionalAuth, getSnapsController.getSnaps);
+router.post('/:id/snaps', protect, addSnapController.addSnap);
+router.delete('/:id/snaps/:snapId', protect, deleteSnapController.deleteSnap);
+
+/**
+ * GET USER PROFILE BY ID
+ * GET /api/users/:id
+ * ...
  * {
  *   "success": true,
  *   "data": {

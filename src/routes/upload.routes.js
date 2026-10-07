@@ -5,6 +5,11 @@ const {
   getPublicUrl,
 } = require('../middleware/s3Upload');
 const { protect } = require('../middleware/auth');
+const crypto = require('crypto');
+const path = require('path');
+const { MAX_SNAP_BYTES, MAX_SNAPS, SNAP_ALLOWED_MIME } = require('../constants/snaps');
+const { s3Client, S3_CONFIG } = require('../config/s3');
+const { DeleteObjectCommand } = require('@aws-sdk/client-s3');
 
 /**
  * UPLOAD ROUTES - Examples for S3 Upload
@@ -272,6 +277,93 @@ router.post('/media', protect, createS3Upload({
     res.status(500).json({
       success: false,
       error: error.message || 'Failed to upload media',
+    });
+  }
+});
+
+/**
+ * Upload snaps (images only, max 10)
+ * POST /api/upload/snaps
+ */
+router.post('/snaps', protect, createS3Upload({
+  folder: 'snaps', // overwritten by keyGenerator anyway
+  maxSize: MAX_SNAP_BYTES,
+  fileType: 'image', // basic image filter
+  fieldName: 'images',
+  keyGenerator: (req, file, cb) => {
+    const userId = req.user.id;
+    const ext = path.extname(file.originalname);
+    const uuid = crypto.randomUUID();
+    cb(null, `snaps/${userId}/${uuid}${ext}`);
+  },
+  cacheControl: 'public, max-age=31536000, immutable'
+}).array('images', MAX_SNAPS), async (req, res) => {
+  try {
+    if (!req.files || req.files.length === 0) {
+      return res.status(400).json({ success: false, error: 'No image files provided' });
+    }
+
+    const validUrls = [];
+    const invalidKeys = [];
+
+    // Verify magic bytes
+    for (const file of req.files) {
+      if (!SNAP_ALLOWED_MIME.includes(file.mimetype)) {
+        invalidKeys.push(file.key);
+        continue;
+      }
+      
+      try {
+        const response = await fetch(file.location, { headers: { Range: 'bytes=0-15' } });
+        if (!response.ok) throw new Error('Fetch failed');
+        const buffer = await response.arrayBuffer();
+        const bytes = new Uint8Array(buffer);
+        const hex = Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('').toUpperCase();
+        
+        let isValid = false;
+        if (hex.startsWith('FFD8FF')) isValid = true; // JPEG
+        else if (hex.startsWith('89504E47')) isValid = true; // PNG
+        else if (hex.startsWith('52494646') && hex.substring(16, 24) === '57454250') isValid = true; // RIFF....WEBP
+        
+        if (isValid) {
+          validUrls.push(file.location);
+        } else {
+          invalidKeys.push(file.key);
+        }
+      } catch (err) {
+        console.error('Magic byte validation error', err);
+        invalidKeys.push(file.key);
+      }
+    }
+
+    // Delete invalid files
+    if (invalidKeys.length > 0) {
+      const bucket = process.env.AWS_S3_BUCKET_NAME || S3_CONFIG.bucket;
+      for (const key of invalidKeys) {
+        try {
+          await s3Client.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
+        } catch (e) {
+          console.error('Failed to delete invalid snap:', key);
+        }
+      }
+    }
+
+    if (validUrls.length === 0) {
+      return res.status(400).json({ success: false, error: 'No valid images provided or validation failed' });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'Snaps uploaded successfully',
+      data: {
+        urls: validUrls,
+        failedCount: req.files.length - validUrls.length
+      },
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to upload snaps',
     });
   }
 });

@@ -1,14 +1,15 @@
 [
-    {
-        "relation": [
-            "delegate_permission/common.handle_all_urls"
-        ],
-        "target": {
-            "namespace": "android_app",
-            "package_name": "com.rallysports.app",
-            "sha256_cert_fingerprints": [
-                "F7:77:90:4C:BA:84:20:1F:C8:57:67:51:28:07:4D:50:72:66:78:95:7C:0E:E6:30:A8:DD:FC:9C:2A:3B:A7:C7"
-            ]
-        }
+  {
+    "relation": [
+      "delegate_permission/common.handle_all_urls"
+    ],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.rallysports.app",
+      "sha256_cert_fingerprints": [
+        "F7:77:90:4C:BA:84:20:1F:C8:57:67:51:28:07:4D:50:72:66:78:95:7C:0E:E6:30:A8:DD:FC:9C:2A:3B:A7:C7",
+        "D7:D8:3F:86:73:3E:22:DC:24:38:2F:9F:80:57:B9:3F:A5:FC:9D:BF:F0:F2:3E:89:77:A0:6C:40:71:6A:8A:77"
+      ]
     }
+  }
 ]

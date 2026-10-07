@@ -1,0 +1,14 @@
+{
+  "applinks": {
+    "apps": [],
+    "details": [
+      {
+        "appID": "WU5Y3CPV8F.com.rallysports.app",
+        "paths": [
+          "/event/*",
+          "/organiser/*"
+        ]
+      }
+    ]
+  }
+}

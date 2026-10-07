@@ -44,9 +44,10 @@ const generateUniqueFilename = (originalname, prefix = '') => {
  * @param {string} options.folder - Folder path in S3 (e.g., 'uploads/profiles', 'uploads/events')
  * @param {string} options.prefix - Filename prefix (e.g., 'profile', 'event-image')
  * @param {Function} options.keyGenerator - Custom key generator function (optional)
+ * @param {string} options.cacheControl - Cache-Control header value (optional)
  * @returns {Object} Multer S3 storage configuration
  */
-const createS3Storage = ({ folder = 'uploads', prefix = '', keyGenerator = null }) => {
+const createS3Storage = ({ folder = 'uploads', prefix = '', keyGenerator = null, cacheControl = null }) => {
   // Check if bucket is configured - read from env directly to ensure it's current
   const bucket = process.env.AWS_S3_BUCKET_NAME || S3_CONFIG.bucket;
   
@@ -76,7 +77,7 @@ const createS3Storage = ({ folder = 'uploads', prefix = '', keyGenerator = null 
         uploadedAt: new Date().toISOString(),
       });
     },
-    cacheControl: options.cacheControl || undefined,
+    cacheControl: cacheControl || undefined,
   });
 };
 

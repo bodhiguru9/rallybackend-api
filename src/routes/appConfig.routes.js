@@ -11,7 +11,7 @@ router.get('/version', (req, res) => {
     success: true,
     data: {
       // Legacy structure for backwards compatibility with old live apps
-      latestVersion: '1.8.0',
+      latestVersion: '1.8.1',
       minRequiredVersion: '1.6.0',
       storeUrls: {
         ios: 'itms-apps://apps.apple.com/in/app/rally-sports/id6526470249?platform=iphone',
@@ -24,7 +24,7 @@ router.get('/version', (req, res) => {
         storeUrl: 'itms-apps://apps.apple.com/in/app/rally-sports/id6526470249?platform=iphone',
       },
       android: {
-        latestVersion: '1.8.0',
+        latestVersion: '1.8.1',
         minRequiredVersion: '1.6.0',
         storeUrl: 'https://play.google.com/store/apps/details?id=com.rallysports.app&pcampaignid=web_share',
       },

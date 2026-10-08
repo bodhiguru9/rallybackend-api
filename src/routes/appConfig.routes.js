@@ -19,7 +19,7 @@ router.get('/version', (req, res) => {
       },
       // New structure for current and future apps
       ios: {
-        latestVersion: '1.8.0',
+        latestVersion: '1.8.1',
         minRequiredVersion: '1.6.0',
         storeUrl: 'itms-apps://apps.apple.com/in/app/rally-sports/id6526470249?platform=iphone',
       },

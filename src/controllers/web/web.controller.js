@@ -254,20 +254,61 @@ exports.renderOrganiserProfile = async (req, res) => {
     // Follower count
     const followersCount = await db.collection('follows').countDocuments({ followingId: organiser._id });
 
-    // Events by this organiser
+    // Total events hosted by this organiser (for profile Hosted stat)
+    const totalEventsHosted = organiser.eventsCreated !== undefined && organiser.eventsCreated !== null && organiser.eventsCreated > 0
+      ? organiser.eventsCreated
+      : await db.collection('events').countDocuments({
+          creatorId: { $in: [organiser._id, organiser._id.toString()] },
+          eventStatus: { $nin: ['cancelled', 'draft'] },
+        });
+
+    // Upcoming events by this organiser (only upcoming/active events where eventEndDateTime >= currentTime)
+    const now = new Date();
+    const nowIso = now.toISOString();
+    const fallbackStart = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+    const fallbackStartIso = fallbackStart.toISOString();
+
     const eventsRaw = await db.collection('events')
       .find({
         creatorId: { $in: [organiser._id, organiser._id.toString()] },
         eventStatus: { $nin: ['cancelled', 'draft'] },
+        $or: [
+          { eventEndDateTime: { $gte: now } },
+          { eventEndDateTime: { $gte: nowIso } },
+          {
+            $and: [
+              { $or: [{ eventEndDateTime: null }, { eventEndDateTime: { $exists: false } }, { eventEndDateTime: '' }] },
+              {
+                $or: [
+                  { eventDateTime: { $gte: fallbackStart } },
+                  { eventDateTime: { $gte: fallbackStartIso } },
+                ]
+              }
+            ]
+          }
+        ]
       })
       .sort({ eventDateTime: 1 })
       .limit(50)
       .toArray();
 
-    const eventIds = eventsRaw.map(e => e._id);
+    // Additional safeguard: exclude any events whose end date has passed (< currentTime)
+    const upcomingEvents = eventsRaw.filter(ev => {
+      const end = ev.eventEndDateTime ? new Date(ev.eventEndDateTime) : null;
+      if (end && !isNaN(end.getTime())) {
+        return end >= now;
+      }
+      const start = ev.eventDateTime ? new Date(ev.eventDateTime) : null;
+      if (start && !isNaN(start.getTime())) {
+        return start >= fallbackStart;
+      }
+      return true;
+    });
+
+    const eventIds = upcomingEvents.map(e => e._id);
     const participantMap = await batchParticipants(db, eventIds, 5);
 
-    const events = eventsRaw.map(ev => {
+    const events = upcomingEvents.map(ev => {
       const pData = participantMap.get(ev._id.toString()) || { count: 0, participants: [] };
       return {
         ...formatEventResponse(ev),
@@ -294,7 +335,7 @@ exports.renderOrganiserProfile = async (req, res) => {
       organiserSports: organiserSports,
       isVerified: !!(organiser.isEmailVerified || organiser.isMobileVerified),
       followersCount,
-      eventsCreated: organiser.eventsCreated || eventsRaw.length,
+      eventsCreated: totalEventsHosted,
       totalAttendees: organiser.totalAttendees || 0,
       instagramHandle: organiser.instagramLink || organiser.instagram_link || organiser.instagramHandle || null,
       whatsappNumber: organiser.whatsappNumber || organiser.mobileNumber || null,

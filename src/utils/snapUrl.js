@@ -6,24 +6,17 @@ const { S3_CONFIG } = require('../config/s3');
  * @param {string|number} userId - The ID of the user who should own this snap
  * @returns {boolean} True if the URL is valid and owned by the user
  */
-const isOwnedSnapUrl = (url, userId) => {
+const isOwnedSnapUrl = (url, userId, altUserId) => {
   try {
     const parsedUrl = new URL(url);
     if (parsedUrl.protocol !== 'https:') return false;
 
-    // The bucket host is typically something like 'bucket-name.s3.region.amazonaws.com'
-    // Depending on exactly how S3_CONFIG is set up, this might need tweaking
-    // But we know it must end with amazonaws.com or a known CDN if configured
-    
-    // Check if the path starts with /snaps/<userId>/
-    // S3 URLs typically have the key as the pathname (minus the leading slash)
     const pathname = parsedUrl.pathname.startsWith('/') ? parsedUrl.pathname.substring(1) : parsedUrl.pathname;
     
-    if (!pathname.startsWith(`snaps/${userId}/`)) {
-      return false;
-    }
+    const validUserIds = [userId, altUserId].filter(Boolean).map(String);
+    if (validUserIds.length === 0) return false;
 
-    return true;
+    return validUserIds.some((id) => pathname.startsWith(`snaps/${id}/`));
   } catch (error) {
     // URL parsing failed
     return false;

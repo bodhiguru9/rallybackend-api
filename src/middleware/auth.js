@@ -49,7 +49,6 @@ const protect = async (req, res, next) => {
         mobileNumber: user.mobileNumber,
         profilePic: user.profilePic,
       };
-
       // Add type-specific fields
       if (user.userType === 'player') {
         req.user.fullName = user.fullName;

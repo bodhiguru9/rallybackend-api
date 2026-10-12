@@ -16,9 +16,11 @@ const addSnap = async (req, res, next) => {
     const { id } = req.params;
     const { urls } = req.body;
     
-    // Auth check
-    if (req.user.id !== parseInt(id) && req.user.mongoId !== id) {
-      return res.status(403).json({ success: false, error: 'Unauthorized to add snaps for this user' });
+    // Auth check: allow if route id matches authenticated user's sequential userId or MongoDB ObjectId
+    const isOwner = (req.user?.userId != null && String(req.user.userId) === String(id)) ||
+                    (req.user?.id && String(req.user.id) === String(id));
+    if (!isOwner) {
+      return res.status(403).json({ success: false, message: 'Request failed', error: 'Unauthorized to add snaps for this user' });
     }
 
     if (req.user.userType !== 'organiser') {
@@ -35,9 +37,9 @@ const addSnap = async (req, res, next) => {
 
     const uniqueUrls = [...new Set(urls)];
 
-    // Validate URLs
+    // Validate URLs (sequential userId first to match S3 key format, ObjectId as fallback)
     for (const url of uniqueUrls) {
-      if (!isOwnedSnapUrl(url, req.user.id)) {
+      if (!isOwnedSnapUrl(url, req.user.userId, req.user.id)) {
         return res.status(400).json({ success: false, error: 'One or more URLs are invalid or not owned by this user' });
       }
     }
@@ -51,8 +53,9 @@ const addSnap = async (req, res, next) => {
     const db = getDB();
     const usersCollection = db.collection('users');
 
-    const objectId = req.user.mongoId ? new ObjectId(req.user.mongoId) : null;
-    const filter = objectId ? { _id: objectId } : { userId: req.user.id };
+    const filter = req.user.id && ObjectId.isValid(req.user.id)
+      ? { _id: new ObjectId(req.user.id) }
+      : { userId: req.user.userId };
 
     // Atomic check and push
     const result = await usersCollection.findOneAndUpdate(
@@ -71,7 +74,9 @@ const addSnap = async (req, res, next) => {
       { returnDocument: 'after' }
     );
 
-    if (!result || !result.value) {
+    const updatedUser = result && (result.value !== undefined ? result.value : result);
+
+    if (!updatedUser) {
       // Best-effort delete of the just-submitted objects from S3
       for (const url of uniqueUrls) {
         const key = extractS3Key(url);
@@ -89,7 +94,7 @@ const addSnap = async (req, res, next) => {
 
     return res.status(200).json({
       success: true,
-      data: { snaps: result.value.snaps || [] }
+      data: { snaps: updatedUser.snaps || [] }
     });
   } catch (error) {
     next(error);

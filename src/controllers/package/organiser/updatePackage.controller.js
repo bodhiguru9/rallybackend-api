@@ -35,6 +35,14 @@ const updatePackage = async (req, res, next) => {
       'validityMonths',
       'maxEvents',
       'eventIds',
+      'validityPeriod',
+      'location',
+      'eventLocation',
+      'restrictions',
+      'imageUri',
+      'packageImages',
+      'registrationStartTime',
+      'faqs',
       'isActive',
     ];
 

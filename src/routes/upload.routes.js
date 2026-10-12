@@ -291,7 +291,7 @@ router.post('/snaps', protect, createS3Upload({
   fileType: 'image', // basic image filter
   fieldName: 'images',
   keyGenerator: (req, file, cb) => {
-    const userId = req.user.id;
+    const userId = req.user?.userId || req.user?.id;
     const ext = path.extname(file.originalname);
     const uuid = crypto.randomUUID();
     cb(null, `snaps/${userId}/${uuid}${ext}`);

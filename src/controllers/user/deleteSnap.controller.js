@@ -13,8 +13,10 @@ const deleteSnap = async (req, res, next) => {
   try {
     const { id, snapId } = req.params;
 
-    // Auth check
-    if (req.user.id !== parseInt(id) && req.user.mongoId !== id) {
+    // Auth check: allow if route id matches authenticated user's sequential userId or MongoDB ObjectId
+    const isOwner = (req.user?.userId && String(req.user.userId) === String(id)) ||
+                    (req.user?.id && String(req.user.id) === String(id));
+    if (!isOwner) {
       return res.status(403).json({ success: false, error: 'Unauthorized to delete snaps for this user' });
     }
 
@@ -25,11 +27,11 @@ const deleteSnap = async (req, res, next) => {
     const db = getDB();
     const usersCollection = db.collection('users');
 
-    const objectId = req.user.mongoId ? new ObjectId(req.user.mongoId) : null;
-    const filter = objectId ? { _id: objectId } : { userId: req.user.id };
+    const filter = req.user.id && ObjectId.isValid(req.user.id)
+      ? { _id: new ObjectId(req.user.id) }
+      : { userId: req.user.userId };
 
     // Pull the snap from the array and return the original document to get the URL
-    // Actually, findOneAndUpdate with returnDocument: 'before' gets the document before modification
     const result = await usersCollection.findOneAndUpdate(
       filter,
       {
@@ -38,11 +40,13 @@ const deleteSnap = async (req, res, next) => {
       { returnDocument: 'before' }
     );
 
-    if (!result || !result.value) {
+    const beforeUser = result && (result.value !== undefined ? result.value : result);
+
+    if (!beforeUser) {
       return res.status(404).json({ success: false, error: 'User not found' });
     }
 
-    const removedSnap = (result.value.snaps || []).find(s => s.id === snapId);
+    const removedSnap = (beforeUser.snaps || []).find(s => s.id === snapId);
     if (!removedSnap) {
       return res.status(404).json({ success: false, error: 'Snap not found' });
     }
@@ -63,7 +67,7 @@ const deleteSnap = async (req, res, next) => {
 
     return res.status(200).json({
       success: true,
-      data: { snaps: updatedUser.snaps || [] }
+      data: { snaps: updatedUser?.snaps || [] }
     });
   } catch (error) {
     next(error);

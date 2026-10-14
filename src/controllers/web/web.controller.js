@@ -11,6 +11,7 @@ const homeTemplate           = require('../../templates/home');
 const eventDetailTemplate    = require('../../templates/event-detail');
 const privateEventWallTemplate = require('../../templates/private-event-wall');
 const organiserProfileTemplate = require('../../templates/organiser-profile');
+const packageDetailTemplate  = require('../../templates/package-detail');
 
 /* ------------------------------------------------------------------ */
 /* Helpers                                                              */
@@ -59,6 +60,69 @@ async function batchParticipants(db, eventIds, limit = 10) {
   return map;
 }
 
+/** Fetch joined users for packages from packagePurchases and users collections */
+async function batchPackageParticipants(db, packages) {
+  if (!packages || !packages.length) return new Map();
+  const pkgKeys = [];
+  packages.forEach(p => {
+    if (p._id) {
+      pkgKeys.push(p._id);
+      pkgKeys.push(p._id.toString());
+      const oid = toObjectId(p._id);
+      if (oid) pkgKeys.push(oid);
+    }
+    if (p.packageId) pkgKeys.push(p.packageId);
+  });
+
+  const purchases = await db.collection('packagePurchases')
+    .find({ packageId: { $in: pkgKeys } })
+    .sort({ purchaseDate: 1 })
+    .toArray();
+
+  const buyerIds = purchases.map(p => {
+    try {
+      return typeof p.userId === 'string' ? new ObjectId(p.userId) : p.userId;
+    } catch {
+      return p.userId;
+    }
+  }).filter(Boolean);
+
+  const buyers = buyerIds.length > 0
+    ? await db.collection('users').find({
+        $or: [
+          { _id: { $in: buyerIds } },
+          { _id: { $in: buyerIds.map(id => id.toString()) } }
+        ]
+      }).project({ _id: 1, userId: 1, fullName: 1, profilePic: 1, email: 1, mobileNumber: 1 }).toArray()
+    : [];
+
+  const buyerMap = new Map();
+  buyers.forEach(b => {
+    buyerMap.set(b._id.toString(), b);
+    if (b.userId) buyerMap.set(String(b.userId), b);
+  });
+
+  const pkgMap = new Map();
+  purchases.forEach(p => {
+    const buyer = buyerMap.get(p.userId?.toString());
+    const k1 = p.packageId?.toString();
+    if (!pkgMap.has(k1)) pkgMap.set(k1, []);
+    pkgMap.get(k1).push({
+      purchaseId: p.purchaseId || p._id.toString(),
+      purchaseDate: p.purchaseDate,
+      user: buyer ? {
+        userId: buyer.userId,
+        fullName: buyer.fullName || 'Player',
+        profilePic: buyer.profilePic || null,
+        email: buyer.email || null,
+        mobileNumber: buyer.mobileNumber || null,
+      } : null,
+    });
+  });
+
+  return pkgMap;
+}
+
 /* ------------------------------------------------------------------ */
 /* GET /  —  Homepage                                                   */
 /* ------------------------------------------------------------------ */
@@ -105,7 +169,7 @@ exports.renderHome = async (req, res) => {
 
     // Batch participant counts
     const eventIds = eventsRaw.map(e => e._id);
-    const participantMap = await batchParticipants(db, eventIds, 5);
+    const participantMap = await batchParticipants(db, eventIds, 50);
 
     // Batch-fetch creators in one query
     const creatorIds = [...new Set(eventsRaw.map(e => e.creatorId).filter(Boolean))];
@@ -140,7 +204,7 @@ exports.renderHome = async (req, res) => {
       title: 'Find Sports Events Near You',
       bodyClass: 'org-bg',
       bodyContent,
-      pageData: { pickedEvents },
+      pageData: { pickedEvents, featuredEvents },
     });
 
     res.status(200).send(html);
@@ -208,7 +272,7 @@ exports.renderEventDetail = async (req, res) => {
       ogImage: (event.eventImages && event.eventImages[0]) || '',
       bodyClass: 'org-bg',
       bodyContent,
-      pageData: { participants, participantsCount },
+      pageData: { event, participants, participantsCount },
     });
 
     res.status(200).send(html);
@@ -306,7 +370,7 @@ exports.renderOrganiserProfile = async (req, res) => {
     });
 
     const eventIds = upcomingEvents.map(e => e._id);
-    const participantMap = await batchParticipants(db, eventIds, 5);
+    const participantMap = await batchParticipants(db, eventIds, 50);
 
     const events = upcomingEvents.map(ev => {
       const pData = participantMap.get(ev._id.toString()) || { count: 0, participants: [] };
@@ -319,11 +383,18 @@ exports.renderOrganiserProfile = async (req, res) => {
     });
 
     // Packages
-    const packages = await db.collection('packages')
-      .find({ organiserId: organiser._id, isActive: true })
+    const orgMatches = [organiser._id, organiser._id.toString()];
+    if (organiser.userId) orgMatches.push(organiser.userId, String(organiser.userId));
+    const packagesRaw = await db.collection('packages')
+      .find({
+        organiserId: { $in: orgMatches },
+        isActive: { $ne: false }
+      })
       .sort({ createdAt: -1 })
       .limit(50)
       .toArray();
+
+    const pkgPurchasesMap = await batchPackageParticipants(db, packagesRaw);
 
     // Build enriched organiser object for the template
     const organiserData = {
@@ -341,6 +412,30 @@ exports.renderOrganiserProfile = async (req, res) => {
       whatsappNumber: organiser.whatsappNumber || organiser.mobileNumber || null,
     };
 
+    const packages = packagesRaw.map(pkg => {
+      const pIdStr = pkg._id.toString();
+      const pCode = pkg.packageId;
+      const joinedUsers = (pkgPurchasesMap.get(pIdStr) || []).concat(pkgPurchasesMap.get(pCode) || []);
+      const uniqueJoined = [];
+      const seenUsers = new Set();
+      joinedUsers.forEach(j => {
+        const uKey = j.user?.userId || j.user?.fullName;
+        if (uKey && !seenUsers.has(uKey)) {
+          seenUsers.add(uKey);
+          uniqueJoined.push(j);
+        } else if (!uKey) {
+          uniqueJoined.push(j);
+        }
+      });
+
+      return {
+        ...pkg,
+        joinedUsers: uniqueJoined,
+        joinedUsersCount: uniqueJoined.length,
+        creator: organiserData,
+      };
+    });
+
     const bodyContent = organiserProfileTemplate({ organiser: organiserData, events, packages });
 
     const html = shellTemplate({
@@ -349,12 +444,125 @@ exports.renderOrganiserProfile = async (req, res) => {
       ogImage: organiserData.profilePic || '',
       bodyClass: 'org-bg',
       bodyContent,
-      pageData: {},
+      pageData: { events, packages },
     });
 
     res.status(200).send(html);
   } catch (err) {
     console.error('[WebOrganiser] Error:', err);
+    res.status(500).send('Server error');
+  }
+};
+
+/* ------------------------------------------------------------------ */
+/* GET /package/:id  —  Package Detail                                  */
+/* ------------------------------------------------------------------ */
+exports.renderPackageDetail = async (req, res) => {
+  try {
+    const db = getDB();
+    const idParam = req.params.id;
+
+    // Support sequential packageId (e.g. "PKG1", "PKG3") and MongoDB ObjectId
+    let pkgDoc = null;
+    const oid = toObjectId(idParam);
+    if (oid) {
+      pkgDoc = await db.collection('packages').findOne({ _id: oid });
+    }
+    if (!pkgDoc) {
+      pkgDoc = await db.collection('packages').findOne({ packageId: idParam });
+    }
+    if (!pkgDoc && typeof idParam === 'string') {
+      pkgDoc = await db.collection('packages').findOne({
+        packageId: { $regex: new RegExp(`^${idParam}$`, 'i') }
+      });
+    }
+
+    if (!pkgDoc) {
+      return res.status(404).send('Package not found');
+    }
+
+    // Fetch creator organiser
+    let creator = null;
+    if (pkgDoc.organiserId) {
+      const cOid = toObjectId(pkgDoc.organiserId);
+      if (cOid) {
+        creator = await db.collection('users').findOne({ _id: cOid });
+      }
+      if (!creator) {
+        creator = await db.collection('users').findOne({ _id: pkgDoc.organiserId });
+      }
+      if (!creator && !isNaN(Number(pkgDoc.organiserId))) {
+        creator = await db.collection('users').findOne({ userId: Number(pkgDoc.organiserId) });
+      }
+    }
+
+    let totalAttendees = creator?.totalAttendees || 0;
+    let eventsCreated = creator?.eventsCreated || 0;
+    if (creator) {
+      try {
+        const events = await db.collection('events').find({
+          creatorId: { $in: [creator._id, creator._id.toString()] }
+        }).project({ _id: 1 }).toArray();
+        if (eventsCreated === 0) eventsCreated = events.length;
+        if (totalAttendees === 0 && events.length > 0) {
+          const eventIds = events.map(e => e._id);
+          const distinctUserIds = await db.collection('eventJoins').distinct('userId', { eventId: { $in: eventIds } });
+          totalAttendees = distinctUserIds.length;
+        }
+      } catch (err) {}
+    }
+
+    const creatorData = creator ? {
+      userId: creator.userId,
+      fullName: creator.fullName || null,
+      communityName: creator.communityName || null,
+      profilePic: creator.profilePic || null,
+      eventsCreated,
+      totalAttendees,
+      instagramLink: creator.instagramLink || creator.instagram_link || null,
+      whatsappNumber: creator.whatsappNumber || creator.mobileNumber || null,
+    } : null;
+
+    // Fetch joined users / purchases
+    const pkgPurchasesMap = await batchPackageParticipants(db, [pkgDoc]);
+    const pIdStr = pkgDoc._id.toString();
+    const pCode = pkgDoc.packageId;
+    const joinedUsers = (pkgPurchasesMap.get(pIdStr) || []).concat(pkgPurchasesMap.get(pCode) || []);
+    const uniqueJoined = [];
+    const seenUsers = new Set();
+    joinedUsers.forEach(j => {
+      const uKey = j.user?.userId || j.user?.fullName;
+      if (uKey && !seenUsers.has(uKey)) {
+        seenUsers.add(uKey);
+        uniqueJoined.push(j);
+      } else if (!uKey) {
+        uniqueJoined.push(j);
+      }
+    });
+
+    const pkg = {
+      ...pkgDoc,
+      _id: pkgDoc._id,
+      joinedUsers: uniqueJoined,
+      purchasedBy: uniqueJoined,
+      joinedUsersCount: uniqueJoined.length,
+      creator: creatorData,
+    };
+
+    const bodyContent = packageDetailTemplate({ package: pkg, organiser: creatorData });
+
+    const html = shellTemplate({
+      title: pkg.packageName || 'Package Details',
+      description: pkg.packageDescription || 'Check out this package on Rally!',
+      ogImage: pkg.imageUri || (pkg.packageImages && pkg.packageImages[0]) || creatorData?.profilePic || '',
+      bodyClass: 'org-bg',
+      bodyContent,
+      pageData: { package: pkg, participants: uniqueJoined },
+    });
+
+    res.status(200).send(html);
+  } catch (err) {
+    console.error('[WebPackage] Error:', err);
     res.status(500).send('Server error');
   }
 };

@@ -76,39 +76,66 @@ const getMyPackages = async (req, res, next) => {
         userId: buyer.userId,
         fullName: buyer.fullName || null,
         profilePic: buyer.profilePic || null,
+        mobileNumber: buyer.mobileNumber || buyer.phone || null,
+        email: buyer.email || null,
+        gender: buyer.gender || null,
       });
     });
 
     const purchasesByPackage = new Map();
+    let totalRevenue = 0;
+    const packagePriceMap = new Map();
+    packages.forEach((pkg) => {
+      packagePriceMap.set(pkg._id.toString(), pkg.packagePrice || 0);
+    });
+
     purchases.forEach((purchase) => {
       const key = purchase.packageId.toString();
       if (!purchasesByPackage.has(key)) {
         purchasesByPackage.set(key, []);
       }
       purchasesByPackage.get(key).push(purchase);
+      const purchasePrice = typeof purchase.amountPaid === 'number'
+        ? purchase.amountPaid
+        : (packagePriceMap.get(key) || 0);
+      totalRevenue += purchasePrice;
     });
+
+    const metrics = {
+      totalRevenue,
+      totalPlans: totalCount,
+      totalMembers: buyerIds.length,
+    };
 
     res.status(200).json({
       success: true,
       message: 'Packages retrieved successfully',
       data: {
+        metrics,
         packages: packages.map(pkg => ({
           packageId: pkg.packageId,
           packageName: pkg.packageName,
           packageDescription: pkg.packageDescription,
           sports: pkg.sports || [],
           eventType: pkg.eventType || null,
-          credits: pkg.credits || 0,
           packagePrice: pkg.packagePrice,
           validityMonths: pkg.validityMonths,
           maxEvents: pkg.maxEvents,
-          eventIds: pkg.eventIds.map(id => id.toString()),
+          eventIds: (pkg.eventIds || []).map(id => id.toString()),
+          validityPeriod: pkg.validityPeriod || null,
+          location: pkg.location || null,
+          eventLocation: pkg.eventLocation || null,
+          restrictions: pkg.restrictions || null,
+          imageUri: pkg.imageUri || null,
+          packageImages: pkg.packageImages || [],
+          registrationStartTime: pkg.registrationStartTime || null,
+          faqs: pkg.faqs || [],
           isActive: pkg.isActive,
           createdAt: pkg.createdAt,
           updatedAt: pkg.updatedAt,
           joinedUsersCount: (purchasesByPackage.get(pkg._id.toString()) || []).length,
           joinedUsers: (purchasesByPackage.get(pkg._id.toString()) || []).map((purchase) => ({
-            user: buyerMap.get(purchase.userId.toString()) || null,
+            user: (purchase.userId && buyerMap.get(purchase.userId.toString())) || null,
             purchaseDate: purchase.purchaseDate || null,
             expiryDate: purchase.expiryDate || null,
             eventsJoined: purchase.eventsJoined || 0,

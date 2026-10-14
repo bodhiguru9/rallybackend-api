@@ -11,12 +11,12 @@
 const { ObjectId } = require('mongodb');
 
 // ── Shared test data ──────────────────────────────────────────────────────────
-const ORGANISER_ID = new ObjectId().toString();
-const EVENT_ID     = new ObjectId().toString();
-const USER_ID      = new ObjectId().toString();
+const mockOrganiserId = new ObjectId().toString();
+const mockEventId     = new ObjectId().toString();
+const mockUserId      = new ObjectId().toString();
 
 const mockOrganiser = {
-  _id: new ObjectId(ORGANISER_ID),
+  _id: new ObjectId(mockOrganiserId),
   userId: 99,
   fullName: 'Test Organiser',
   communityName: 'Test FC',
@@ -25,10 +25,10 @@ const mockOrganiser = {
 };
 
 const mockEvent = {
-  _id: new ObjectId(EVENT_ID),
+  _id: new ObjectId(mockEventId),
   eventId: 'E99',
   eventName: 'Test Event',
-  creatorId: new ObjectId(ORGANISER_ID),
+  creatorId: new ObjectId(mockOrganiserId),
 };
 
 // ── Mocks ─────────────────────────────────────────────────────────────────────
@@ -51,15 +51,15 @@ jest.mock('../../src/models/Notification', () => ({
 jest.mock('../../src/utils/batchLoad', () => ({
   getUsersByIds: jest.fn().mockImplementation(async (ids) => {
     const map = new Map();
-    if (ids.includes(ORGANISER_ID)) {
-      map.set(ORGANISER_ID, mockOrganiser);
+    if (ids.includes(mockOrganiserId)) {
+      map.set(mockOrganiserId, mockOrganiser);
     }
     return map;
   }),
   getEventsByAnyId: jest.fn().mockImplementation(async (ids) => {
     const map = new Map();
-    if (ids.includes(EVENT_ID)) {
-      map.set(EVENT_ID, mockEvent);
+    if (ids.includes(mockEventId)) {
+      map.set(mockEventId, mockEvent);
     }
     return map;
   }),
@@ -78,7 +78,7 @@ const Notification = require('../../src/models/Notification');
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 const makeReq = () => ({
-  user: { id: USER_ID, userType: 'player' },
+  user: { id: mockUserId, userType: 'player' },
   query: { page: '1' },
 });
 
@@ -104,7 +104,7 @@ describe('playerNotification controller — organiser image enrichment', () => {
       message: 'Your booking is confirmed!',
       isRead: false,
       createdAt: new Date(),
-      data: { organiserId: ORGANISER_ID, eventId: EVENT_ID },
+      data: { organiserId: mockOrganiserId, eventId: mockEventId },
     }]);
 
     const req = makeReq();
@@ -125,7 +125,7 @@ describe('playerNotification controller — organiser image enrichment', () => {
       message: 'Your booking is confirmed!',
       isRead: false,
       createdAt: new Date(),
-      data: { eventId: EVENT_ID }, // no organiserId
+      data: { eventId: mockEventId }, // no organiserId
     }]);
 
     const req = makeReq();
@@ -146,7 +146,7 @@ describe('playerNotification controller — organiser image enrichment', () => {
       message: '"Test Event" has been cancelled.',
       isRead: false,
       createdAt: new Date(),
-      data: { eventId: EVENT_ID },
+      data: { eventId: mockEventId },
     }]);
 
     const req = makeReq();
@@ -165,7 +165,7 @@ describe('playerNotification controller — organiser image enrichment', () => {
       message: 'Your event was updated.',
       isRead: false,
       createdAt: new Date(),
-      data: { eventId: EVENT_ID }, // no organiserId, type not in fallback list
+      data: { eventId: mockEventId }, // no organiserId, type not in fallback list
     }]);
 
     const req = makeReq();
@@ -182,7 +182,7 @@ describe('playerNotification controller — organiser image enrichment', () => {
     getUsersByIds.mockImplementationOnce(async () => {
       const map = new Map();
       // organiser exists but no profilePic
-      map.set(ORGANISER_ID, { ...mockOrganiser, profilePic: null });
+      map.set(mockOrganiserId, { ...mockOrganiser, profilePic: null });
       return map;
     });
 
@@ -193,7 +193,7 @@ describe('playerNotification controller — organiser image enrichment', () => {
       message: 'Your booking is confirmed!',
       isRead: false,
       createdAt: new Date(),
-      data: { organiserId: ORGANISER_ID, eventId: EVENT_ID },
+      data: { organiserId: mockOrganiserId, eventId: mockEventId },
     }]);
 
     const req = makeReq();

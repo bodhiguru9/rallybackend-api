@@ -85,7 +85,6 @@ const getPackageDetails = async (req, res, next) => {
             remaining: Math.max(0, purchase.maxEvents - purchase.eventsJoined),
             joinedEvents: joinedEvents.filter(e => e !== null),
           },
-          creditsAdded: purchase.creditsAdded || 0,
           isActive,
           isExpired,
           cancelledAt: purchase.cancelledAt || null,

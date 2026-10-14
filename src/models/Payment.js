@@ -6,9 +6,13 @@ class Payment {
   constructor(data) {
     this.paymentId = data.paymentId;
     this.userId = data.userId;
-    this.eventId = data.eventId; // Parent event Mongo _id
+    this.eventId = data.eventId || null; // Parent event Mongo _id
     this.parentEventId = data.parentEventId || null; // Sequential eventId like E95
+    this.packageId = data.packageId || null;
+    this.organiserId = data.organiserId || null;
+    this.type = data.type || (data.packageId ? 'package' : 'event');
     this.bookingId = data.bookingId || null;
+    this.purchaseId = data.purchaseId || null;
     this.occurrenceStart = data.occurrenceStart || null;
     this.occurrenceEnd = data.occurrenceEnd || null;
 
@@ -41,10 +45,12 @@ class Payment {
     const { getNextUniquePaymentId } = require('../utils/idManager');
     const paymentId = await getNextUniquePaymentId();
 
-    let userId, eventId, promoCodeId;
+    let userId, eventId, packageId, organiserId, promoCodeId;
     try {
       userId = typeof paymentData.userId === 'string' ? new ObjectId(paymentData.userId) : paymentData.userId;
-      eventId = typeof paymentData.eventId === 'string' ? new ObjectId(paymentData.eventId) : paymentData.eventId;
+      eventId = paymentData.eventId ? (typeof paymentData.eventId === 'string' ? new ObjectId(paymentData.eventId) : paymentData.eventId) : null;
+      packageId = paymentData.packageId ? (typeof paymentData.packageId === 'string' ? new ObjectId(paymentData.packageId) : paymentData.packageId) : null;
+      organiserId = paymentData.organiserId ? (typeof paymentData.organiserId === 'string' ? new ObjectId(paymentData.organiserId) : paymentData.organiserId) : null;
       if (paymentData.promoCodeId) {
         promoCodeId = typeof paymentData.promoCodeId === 'string' ? new ObjectId(paymentData.promoCodeId) : paymentData.promoCodeId;
       }
@@ -57,6 +63,8 @@ class Payment {
       paymentId,
       userId,
       eventId,
+      packageId,
+      organiserId,
       promoCodeId,
       occurrenceStart: paymentData.occurrenceStart ? new Date(paymentData.occurrenceStart).toISOString() : null,
       occurrenceEnd: paymentData.occurrenceEnd ? new Date(paymentData.occurrenceEnd).toISOString() : null,

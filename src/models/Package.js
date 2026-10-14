@@ -14,11 +14,18 @@ class Package {
     this.packageDescription = data.packageDescription || null; // Package description
     this.sports = Array.isArray(data.sports) ? data.sports : []; // Sports list
     this.eventType = data.eventType || null; // Event type
-    this.credits = typeof data.credits === 'number' ? data.credits : (data.credits ? parseInt(data.credits) : 0); // Credits granted on purchase
     this.packagePrice = data.packagePrice; // Package price
     this.validityMonths = data.validityMonths; // How many months the package is valid
-    this.maxEvents = data.maxEvents; // Maximum number of events that can be joined
-    this.eventIds = data.eventIds || []; // Array of event IDs included in this package
+    this.maxEvents = data.maxEvents !== undefined ? data.maxEvents : null; // Maximum number of events that can be joined
+    this.eventIds = Array.isArray(data.eventIds) ? data.eventIds : []; // Array of event IDs included in this package
+    this.validityPeriod = data.validityPeriod || null; // { duration: [start, end], validDays: [...] }
+    this.location = data.location || null;
+    this.eventLocation = data.eventLocation || null;
+    this.restrictions = data.restrictions || null;
+    this.imageUri = data.imageUri || null;
+    this.packageImages = data.packageImages || (data.imageUri ? [data.imageUri] : []);
+    this.registrationStartTime = data.registrationStartTime || null;
+    this.faqs = data.faqs || [];
     this.isActive = data.isActive !== undefined ? data.isActive : true; // Whether package is active
     this.createdAt = data.createdAt || new Date();
     this.updatedAt = data.updatedAt || new Date();

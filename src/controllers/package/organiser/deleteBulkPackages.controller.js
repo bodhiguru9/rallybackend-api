@@ -1,4 +1,5 @@
 const Package = require('../../../models/Package');
+const PackagePurchase = require('../../../models/PackagePurchase');
 
 /**
  * @desc    Delete packages in bulk (Organiser only)
@@ -42,6 +43,14 @@ const deleteBulkPackages = async (req, res, next) => {
           error: `Failed to delete package: ${packageId}`,
         });
       }
+
+      // Cascade delete any purchases of this package so they are completely removed
+      try {
+        await PackagePurchase.deleteByPackage(packageId, pkg);
+      } catch (cleanErr) {
+        console.error('Failed to clean up purchases for bulk deleted package:', cleanErr.message);
+      }
+
       deleted.push(packageId);
     }
 

@@ -195,28 +195,30 @@ const getOrganiserAnalytics = async (req, res, next) => {
       if (e.eventId) eventLookupMap.set(e.eventId.toString(), e);
     }
 
-    // Get all successful payments for Organiser's events
-    const paymentQuery = {
+    // Get all successful payments for Organiser's events (strictly events, packages are tracked separately)
+    const paymentQuery = allEventIds.length > 0 ? {
       $or: [
         { eventId: { $in: allEventIds } },
         { parentEventId: { $in: allEventIds } }
       ],
       status: { $in: ['success', 'succeeded', 'paid', 'booked'] },
       ...revenueDateFilter,
-    };
+    } : null;
 
     // Fetch payments, bookings, and participant data in parallel
     const { batchParticipantCounts, batchEventParticipants } = require('../../utils/batchEventData');
     const [payments, bookings, allCountMap, allParticipantsMap] = await Promise.all([
-      paymentsCollection.find(paymentQuery).toArray(),
-      bookingsCollection.find({
-        $or: [
-          { eventId: { $in: allEventIds } },
-          { parentEventId: { $in: allEventIds } }
-        ],
-        status: 'booked',
-        ...revenueDateFilter,
-      }).toArray(),
+      paymentQuery ? paymentsCollection.find(paymentQuery).toArray() : Promise.resolve([]),
+      allEventIds.length > 0
+        ? bookingsCollection.find({
+            $or: [
+              { eventId: { $in: allEventIds } },
+              { parentEventId: { $in: allEventIds } }
+            ],
+            status: 'booked',
+            ...revenueDateFilter,
+          }).toArray()
+        : Promise.resolve([]),
       batchParticipantCounts(eventObjectIds),
       batchEventParticipants(eventObjectIds, 10),
     ]);
@@ -389,7 +391,7 @@ const getOrganiserAnalytics = async (req, res, next) => {
     const avgEventsCount = nonCancelledEvents.length > 0 ? nonCancelledEvents.length : allEvents.length;
     const computedTotalRevenue = Math.max(totalRevenue, totalBookedRevenueComputed);
 
-    // Calculate statistics
+    // Calculate statistics (strictly for events)
     const stats = {
       totalEvents: allEvents.length,
       upcomingEvents: upcoming.length,
@@ -397,6 +399,7 @@ const getOrganiserAnalytics = async (req, res, next) => {
       pastEvents: past.length,
       totalRevenue: computedTotalRevenue,
       periodRevenue: computedTotalRevenue,
+      eventRevenue: computedTotalRevenue,
       totalTransactions: payments.length,
       totalBookedRevenue: Math.max(totalBookedRevenue, totalBookedRevenueComputed, computedTotalRevenue),
       totalBookings: Math.max(bookings.length, totalBookedCountComputed),
@@ -428,6 +431,7 @@ const getOrganiserAnalytics = async (req, res, next) => {
         stats: stats,
         revenue: {
           total: computedTotalRevenue,
+          eventRevenue: computedTotalRevenue,
           period: revenuePeriod,
           bySport: revenueBySport,
         },

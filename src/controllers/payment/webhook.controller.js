@@ -105,6 +105,70 @@ const handlePaymentIntentSucceeded = async (paymentIntent) => {
 
   console.log(`✅ [PAYMENT CLAIMED] By WEBHOOK — PI: ${payment_intent_id}, PaymentID: ${payment.paymentId || payment._id}`);
 
+  // If payment is for a package, activate package purchase
+  if (payment.type === 'package' || payment.packageId) {
+    try {
+      const PackagePurchase = require('../../models/PackagePurchase');
+      const Package = require('../../models/Package');
+      const { getDB } = require('../../config/database');
+      const db = getDB();
+      const pkg = await Package.findById(payment.packageId);
+
+      let purchase = payment.purchaseId ? await PackagePurchase.findById(payment.purchaseId) : null;
+      if (!purchase && pkg) {
+        purchase = await PackagePurchase.create({
+          userId: payment.userId,
+          packageId: pkg._id,
+          organiserId: pkg.organiserId,
+          validityMonths: pkg.validityMonths || 1,
+          maxEvents: (pkg.maxEvents !== undefined && pkg.maxEvents !== null) ? pkg.maxEvents : 0,
+        });
+
+        const query = payment._id ? { _id: payment._id } : { paymentId: payment.paymentId };
+        await db.collection('payments').updateOne(
+          query,
+          { $set: { purchaseId: purchase._id, status: 'success', updatedAt: new Date() } }
+        );
+
+        // Send notifications
+        try {
+          const User = require('../../models/User');
+          const Notification = require('../../models/Notification');
+          const buyer = await User.findById(payment.userId);
+          await Notification.create(
+            pkg.organiserId,
+            'package_purchase',
+            'Package Purchased',
+            `${buyer?.fullName || 'A player'} has purchased your package: ${pkg.packageName}`,
+            {
+              packageId: pkg.packageId,
+              purchaseId: purchase._id.toString(),
+              userId: payment.userId.toString(),
+              organiserId: pkg.organiserId ? pkg.organiserId.toString() : '',
+            }
+          );
+          await Notification.create(
+            payment.userId,
+            'package_purchase_confirmed',
+            'Package Purchase Confirmed',
+            `You have successfully purchased ${pkg.packageName}!`,
+            {
+              packageId: pkg.packageId,
+              packageName: pkg.packageName,
+              purchaseId: purchase._id.toString(),
+              organiserId: pkg.organiserId ? pkg.organiserId.toString() : '',
+            }
+          );
+        } catch (notifErr) {
+          console.error('Webhook: Failed to send package notifications:', notifErr.message);
+        }
+      }
+    } catch (packageErr) {
+      console.error('Webhook: Error processing package purchase:', packageErr);
+    }
+    return;
+  }
+
   // Increment promo code usage if used (safe — only one caller reaches here)
   if (payment.promoCodeId) {
     await PromoCode.incrementUsage(payment.promoCodeId);

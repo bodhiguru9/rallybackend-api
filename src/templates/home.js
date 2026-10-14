@@ -8,6 +8,7 @@ module.exports = function homepageTemplate({ topOrganisers = [], featuredEvents 
   
   // Inject data for client-side interactivity (filters & date strip)
   const safePickedEvents = JSON.stringify(pickedEvents).replace(/<\/script>/gi, '<\\/script>');
+  const safeFeaturedEvents = JSON.stringify(featuredEvents).replace(/<\/script>/gi, '<\\/script>');
 
   return `
 <!-- TOP BAR -->
@@ -30,7 +31,6 @@ module.exports = function homepageTemplate({ topOrganisers = [], featuredEvents 
   ${topOrganisers.length > 0 ? `
   <div class="section-header">
     <div class="section-title">Top Organisers</div>
-    <div class="section-arrow"><svg viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg></div>
   </div>
   <div class="organisers-scroll">
     ${topOrganisers.map(org => {
@@ -75,8 +75,8 @@ module.exports = function homepageTemplate({ topOrganisers = [], featuredEvents 
           <div class="featured-card-name">${e(ev.eventName || 'Event')}</div>
           <div class="featured-card-by">by ${e(creatorName)}</div>
           <div class="featured-card-date">
-            <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
-            ${e(formatDateTime(ev.eventDateTime))}
+            <img src="/public/webapp/assets/time.png" width="12" height="12" alt="Time" style="vertical-align:middle;margin-right:4px;" />
+            ${e(formatDateTime(ev.eventDateTime, ev.eventEndDateTime))}
           </div>
         </div>
       </div>
@@ -204,6 +204,7 @@ module.exports = function homepageTemplate({ topOrganisers = [], featuredEvents 
 <script>
 (function() {
   window.__RALLY_PICKED_EVENTS__ = ${safePickedEvents};
+  window.__RALLY_FEATURED_EVENTS__ = ${safeFeaturedEvents};
   
   // Quick date strip generator (next 14 days)
   var ds = document.getElementById('home-date-strip');

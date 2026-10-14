@@ -17,7 +17,6 @@ class PackagePurchase {
     this.maxEvents = data.maxEvents; // Maximum events allowed in package
     this.isActive = data.isActive !== undefined ? data.isActive : true; // Whether package is still valid
     this.joinedEventIds = data.joinedEventIds || []; // Array of event IDs that were joined using this package
-    this.creditsAdded = data.creditsAdded || 0; // Credits added on purchase
     this.cancelledAt = data.cancelledAt || null; // When purchase was cancelled
     this.createdAt = data.createdAt || new Date();
     this.updatedAt = data.updatedAt || new Date();
@@ -85,7 +84,12 @@ class PackagePurchase {
         isActive: true,
         $or: [
           { expiryDate: { $lte: now } },
-          { $expr: { $gte: ['$eventsJoined', '$maxEvents'] } },
+          {
+            $and: [
+              { maxEvents: { $gt: 0 } },
+              { $expr: { $gte: ['$eventsJoined', '$maxEvents'] } },
+            ],
+          },
         ],
       },
       { $set: { isActive: false, updatedAt: now } }
@@ -314,6 +318,37 @@ class PackagePurchase {
     return await purchasesCollection
       .find({ joinedEventIds: eventObjectId })
       .toArray();
+  }
+
+  /**
+   * Delete all purchases associated with a package
+   */
+  static async deleteByPackage(packageId, dbPkg = null) {
+    const db = getDB();
+    const purchasesCollection = db.collection('packagePurchases');
+
+    const idFilters = [];
+    if (packageId) {
+      idFilters.push({ packageId: packageId });
+      try {
+        idFilters.push({ packageId: new ObjectId(packageId) });
+      } catch (e) {}
+    }
+    if (dbPkg) {
+      if (dbPkg._id) {
+        idFilters.push({ packageId: dbPkg._id });
+        idFilters.push({ packageId: dbPkg._id.toString() });
+      }
+      if (dbPkg.packageId) {
+        idFilters.push({ packageId: dbPkg.packageId });
+      }
+    }
+
+    if (idFilters.length > 0) {
+      const result = await purchasesCollection.deleteMany({ $or: idFilters });
+      return result.deletedCount;
+    }
+    return 0;
   }
 }
 

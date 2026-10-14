@@ -45,6 +45,22 @@ window.handleShareEvent = function(id, name, creator, date, loc, priceStr) {
     copyToClipboard(url);
   }
 };
+window.handleSharePackage = function(id, name, creator, validity, loc, sports, priceStr) {
+  var url = window.location.origin + '/package/' + id;
+  var title = name || 'Package';
+  var text = (creator ? 'Check out this package! ' + title + ' by ' + creator + '.' : 'Check out this package! ' + title);
+  if (validity) text += '\n\n📅 Validity: ' + validity;
+  if (loc) text += '\n📍 ' + loc;
+  if (sports) text += '\n🥎 Sports: ' + sports;
+  if (priceStr) text += '\n💰 AED ' + priceStr;
+  text += '\n\n🔗 View Package: ' + url;
+
+  if (navigator.share) {
+    navigator.share({ title: title, text: text, url: url }).catch(function(){});
+  } else {
+    copyToClipboard(url);
+  }
+};
 window.handleShare = function() {
   if (navigator.share) {
     navigator.share({ title: document.title, url: window.location.href }).catch(function(){});
@@ -77,7 +93,7 @@ var activeDateISO = null; // null = show all dates
 
 // Close filter panels when clicking outside
 document.addEventListener('click', function(evt) {
-  if (!evt.target.closest('.filter-chip-wrapper')) {
+  if (!evt.target.closest('.filter-chip-wrapper') && !evt.target.closest('.filter-panel')) {
     document.querySelectorAll('.filter-panel').forEach(function(p) { p.classList.remove('open'); });
   }
 });
@@ -89,16 +105,28 @@ window.toggleFilter = function(type) {
   var wasOpen = panel.classList.contains('open');
   document.querySelectorAll('.filter-panel').forEach(function(p) { p.classList.remove('open'); });
   if (!wasOpen) {
+    if (panel.parentNode !== document.body) {
+      document.body.appendChild(panel);
+    }
     var rect = wrapper.getBoundingClientRect();
     panel.style.position = 'fixed';
-    panel.style.top = (rect.bottom + 4) + 'px';
-    panel.style.left = rect.left + 'px';
+    panel.style.zIndex = '99999';
+    panel.style.top = (rect.bottom + 6) + 'px';
+    var left = rect.left;
+    var panelWidth = panel.offsetWidth || 180;
+    if (left + panelWidth > window.innerWidth - 12) {
+      left = Math.max(12, window.innerWidth - panelWidth - 12);
+    }
+    panel.style.left = left + 'px';
     panel.classList.add('open');
   }
 };
 
-document.addEventListener('scroll', function() {
-  document.querySelectorAll('.filter-panel').forEach(function(p) { p.classList.remove('open'); });
+window.addEventListener('scroll', function(e) {
+  if (e.target && ((e.target.classList && e.target.classList.contains('filter-panel')) || (e.target.closest && e.target.closest('.filter-panel')))) {
+    return;
+  }
+  document.querySelectorAll('.filter-panel.open').forEach(function(p) { p.classList.remove('open'); });
 }, true);
 
 window.selectFilter = function(type, value, el) {
@@ -111,6 +139,9 @@ window.selectFilter = function(type, value, el) {
 
   if (wrapper) {
     wrapper.querySelectorAll('.filter-option').forEach(function(o) { o.classList.remove('selected'); });
+  }
+  if (panel) {
+    panel.querySelectorAll('.filter-option').forEach(function(o) { o.classList.remove('selected'); });
   }
   if (el) el.classList.add('selected');
 
@@ -159,6 +190,126 @@ function isSameDay(dateA, isoB) {
   return a.getFullYear() === b.getFullYear() &&
          a.getMonth()    === b.getMonth()    &&
          a.getDate()     === b.getDate();
+}
+
+var SPORT_ICONS = {
+  padel: 'padel-yellow.png',
+  padeltennis: 'padel-yellow.png',
+  football: 'footballYellow.png',
+  tennis: 'tennis-yellow.png',
+  badminton: 'badminton-yellow.png',
+  basketball: 'basketball-yellow.png',
+  cricket: 'cricket-yellow.png',
+  indoorcricket: 'indoorCricketYellow.png',
+  pickleball: 'pickleball-yellow.png',
+  pilates: 'pilates-yellow.png',
+  tabletennis: 'table-tennis-yellow.png',
+  running: 'runningYellow.png',
+  dance: 'dance-yellow.png',
+  other: 'other-yellow.png',
+};
+
+var TYPE_ICONS = {
+  social: 'social.png',
+  competitivesocial: 'social.png',
+  tournament: 'tournament.png',
+  competitive: 'tournament.png',
+  tournamentcompetitive: 'tournament.png',
+  class: 'class.png',
+  training: 'training.png',
+  private: 'private.png',
+};
+
+function getClientTag(value, isType) {
+  if (!value) return null;
+  var clean = String(value).replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+  if (isType || TYPE_ICONS[clean]) {
+    var icon = TYPE_ICONS[clean] || 'social.png';
+    var variant = 'teal';
+    if (clean.indexOf('tournament') !== -1 || clean.indexOf('competitive') !== -1) variant = 'purple';
+    else if (clean.indexOf('class') !== -1) variant = 'indigo';
+    else if (clean.indexOf('training') !== -1) variant = 'green';
+    else if (clean.indexOf('private') !== -1) variant = 'gray';
+    return { icon: '/public/webapp/assets/' + icon, variant: 'tag-' + variant, label: capitalize(value) };
+  }
+  var icon = SPORT_ICONS[clean] || 'other-yellow.png';
+  return { icon: '/public/webapp/assets/' + icon, variant: 'tag-orange', label: capitalize(value) };
+}
+
+function renderClientTags(sports, type) {
+  var items = [];
+  var sportsArr = Array.isArray(sports) ? sports : (sports ? [sports] : []);
+  if (sportsArr[0]) {
+    var c = getClientTag(sportsArr[0], false);
+    if (c) items.push(c);
+  }
+  if (type && String(type).toLowerCase() !== 'other') {
+    var c = getClientTag(type, true);
+    if (c) items.push(c);
+  } else if (sportsArr[1]) {
+    var c = getClientTag(sportsArr[1], false);
+    if (c) items.push(c);
+  }
+  return items.map(function(t) {
+    return '<span class="tag ' + t.variant + '"><img src="' + t.icon + '" class="tag-icon" width="12" height="12" alt="" />' + escHtml(t.label) + '</span>';
+  }).join('');
+}
+
+function formatDateTimeRange(start, end) {
+  if (!start) return '';
+  var s = new Date(start);
+  if (isNaN(s.getTime())) return '';
+  var days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  var months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  var day = days[s.getDay()];
+  var date = s.getDate();
+  var month = months[s.getMonth()];
+
+  var parseTime = function(d) {
+    var h = d.getHours();
+    var m = d.getMinutes().toString().padStart(2, '0');
+    var ampm = h >= 12 ? 'PM' : 'AM';
+    var h12 = h % 12 || 12;
+    return { h12: h12, m: m, ampm: ampm, hm: h12 + ':' + m, full: h12 + ':' + m + ' ' + ampm };
+  };
+
+  var sTime = parseTime(s);
+  if (end) {
+    var en = new Date(end);
+    if (!isNaN(en.getTime())) {
+      var eTime = parseTime(en);
+      if (sTime.ampm === eTime.ampm) {
+        return day + ' ' + date + ' ' + month + ', ' + sTime.hm + ' - ' + eTime.full;
+      }
+      return day + ' ' + date + ' ' + month + ', ' + sTime.full + ' - ' + eTime.full;
+    }
+  }
+  return day + ' ' + date + ' ' + month + ', ' + sTime.full;
+}
+
+function renderClientAvatars(participants, maxShow, eventId) {
+  if (!participants || participants.length === 0) return '';
+  maxShow = maxShow || 4;
+  var shown = participants.slice(0, maxShow);
+  var extra = participants.length - maxShow;
+  var html = '<div class="avatars-row">';
+  shown.forEach(function(p) {
+    var initials = (p.fullName || '?').split(/\s+/).slice(0, 2).map(function(w){return w[0];}).join('').toUpperCase();
+    if (p.profilePic) {
+      html += '<img class="av" src="' + escHtml(p.profilePic) + '" alt="' + escHtml(p.fullName || '') + '" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'flex\';">' +
+              '<div class="av-fallback" style="display:none;">' + escHtml(initials) + '</div>';
+    } else {
+      html += '<div class="av-fallback">' + escHtml(initials) + '</div>';
+    }
+  });
+  if (extra > 0) {
+    var clickAttr = eventId
+      ? 'event.stopPropagation();openMembersModalForEvent(\'' + escHtml(eventId) + '\')'
+      : 'openMembersModal()';
+    html += '<div class="av-more" onclick="' + clickAttr + '" role="button" tabindex="0" title="View all members" style="cursor:pointer;">+' + extra + '</div>';
+  }
+  html += '</div>';
+  return html;
 }
 
 function renderPickedEvents() {
@@ -236,63 +387,69 @@ function renderPickedEvents() {
     var creator = ev.creator || {};
     var creatorName = creator.communityName || creator.fullName || ev.eventCreatorName || 'Organiser';
     var totalSpots  = ev.eventMaxGuest || ev.gameSpots || 0;
-    var booked      = ev.participantsCount || 0;
+    var booked      = ev.participantsCount || (ev.participants || []).length || 0;
     var spotsLeft   = Math.max(0, totalSpots - booked);
-    var tagsArr = [];
-    if (ev.eventType && ev.eventType.toLowerCase() !== 'other') {
-      var tc = 'tag-sport';
-      var ls = ev.eventType.toLowerCase().replace(/[\s_-]+/g, '');
-      if (ls.includes('social')) tc = 'tag-social';
-      else if (ls.includes('class')) tc = 'tag-class';
-      else if (ls.includes('training')) tc = 'tag-training';
-      else if (ls.includes('tournament')) tc = 'tag-tournament';
-      tagsArr.push('<span class="tag ' + tc + '">' + escHtml(capitalize(ev.eventType)) + '</span>');
+    var isFull      = totalSpots > 0 && spotsLeft === 0;
+
+    var spotsText = '';
+    var spotsColorClass = 'spots-avail';
+    if (isFull) {
+      spotsText = 'Waitlist Open';
+      spotsColorClass = 'spots-full';
+    } else if (spotsLeft > 0 && spotsLeft < 10) {
+      spotsText = '🔥' + spotsLeft + ' spots left';
+      spotsColorClass = 'spots-avail';
+    } else {
+      spotsText = 'Spots Available';
+      spotsColorClass = 'spots-avail';
     }
-    (ev.eventSports || []).forEach(function(s) {
-      if (!s) return;
-      var tc = 'tag-sport';
-      var ls = s.toLowerCase().replace(/[\s_-]+/g, '');
-      if (ls.includes('tabletennis') || ls === 'tt') tc = 'tag-tt';
-      else if (ls.includes('tennis')) tc = 'tag-tennis';
-      else if (ls.includes('padel') || ls.includes('football')) tc = 'tag-padel';
-      tagsArr.push('<span class="tag ' + tc + '">' + escHtml(capitalize(s)) + '</span>');
-    });
-    var tagsHtml = tagsArr.slice(0, 3).join('');
+
+    var tagsHtml = renderClientTags(ev.eventSports, ev.eventType);
     var id = ev.eventId || ev.mongoId || (ev._id ? String(ev._id) : '');
-    var timeStr = d ? formatTime(d) : '';
-    var location = ev.eventLocation || ev.gameLocationArena || 'Dubai';
+    var dateFormatted = formatDateTimeRange(ev.eventDateTime || ev.gameStartDate, ev.eventEndDateTime);
+    var location = ev.eventLocation || ev.gameLocationArena || 'Location TBD';
 
     html += '<div class="event-card fade-in" onclick="location.href=\'/event/' + escHtml(id) + '\'" role="button" tabindex="0">' +
-      (thumb
-        ? '<img class="event-card-thumb" src="' + escHtml(thumb) + '" alt="' + escHtml(ev.eventName || '') + '" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'flex\'">' +
-          '<div class="event-card-thumb-fallback" style="display:none"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/></svg></div>'
-        : '<div class="event-card-thumb-fallback"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/></svg></div>') +
-      '<div class="event-card-body">' +
-        '<div class="event-card-name">' + escHtml(ev.eventName || 'Event') + '</div>' +
-        '<div class="event-card-by">by ' + escHtml(creatorName) + '</div>' +
-        '<div class="event-card-tags" style="margin-bottom:5px;">' + tagsHtml + '</div>' +
-        '<div class="event-card-meta">' +
-          '<div class="event-card-meta-row">' +
-            '<svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>' +
-            escHtml(timeStr) +
+      '<div class="event-card-top">' +
+        '<div class="event-card-thumb-wrap">' +
+          (thumb
+            ? '<img class="event-card-thumb" src="' + escHtml(thumb) + '" alt="' + escHtml(ev.eventName || '') + '" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'flex\'">' +
+              '<div class="event-card-thumb-fallback" style="display:none"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/></svg></div>'
+            : '<div class="event-card-thumb-fallback"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/></svg></div>') +
+        '</div>' +
+        '<div class="event-card-body">' +
+          '<div class="event-card-header-row">' +
+            '<div class="event-card-title-wrap">' +
+              '<div class="event-card-name">' + escHtml(ev.eventName || 'Event') + '</div>' +
+              (creatorName ? '<div class="event-card-by">by ' + escHtml(creatorName) + '</div>' : '') +
+            '</div>' +
+            '<button class="event-card-share-btn" onclick="event.stopPropagation();handleShareEvent(\'' + escHtml(id) + '\', \'' + escHtml(ev.eventName) + '\', \'' + escHtml(creatorName) + '\', \'' + escHtml(dateFormatted) + '\', \'' + escHtml(location) + '\', \'' + (isFree ? 'Free' : 'AED ' + price) + '\')" aria-label="Share">' +
+              '<img src="/public/webapp/assets/paper-plane.png" width="18" height="18" alt="Share" />' +
+            '</button>' +
           '</div>' +
-          '<div class="event-card-meta-row" style="margin-top:2px;">' +
-            '<svg viewBox="0 0 24 24"><path d="M21 10c0 7-9 13-9 13S3 17 3 10a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>' +
-            '<span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:160px;">' + escHtml(location) + '</span>' +
+          '<div class="event-card-tags">' + tagsHtml + '</div>' +
+          '<div class="event-card-meta">' +
+            '<div class="event-card-meta-row">' +
+              '<img src="/public/webapp/assets/time.png" width="14" height="14" alt="Time" class="meta-icon" />' +
+              '<span class="event-card-meta-text">' + escHtml(dateFormatted) + '</span>' +
+            '</div>' +
+            '<div class="event-card-meta-row">' +
+              '<img src="/public/webapp/assets/location-pin.png" width="14" height="14" alt="Location" class="meta-icon" />' +
+              '<span class="event-card-meta-text">' + escHtml(location) + '</span>' +
+            '</div>' +
           '</div>' +
         '</div>' +
       '</div>' +
-      '<div class="event-card-right">' +
-        '<button class="share-btn" onclick="event.stopPropagation();handleShareEvent(\'' + escHtml(id) + '\', \'' + escHtml(ev.eventName) + '\', \'' + escHtml(creatorName) + '\', \'' + escHtml(dateStr + ' ' + timeStr) + '\', \'' + escHtml(location) + '\', \'' + (isFree ? 'Free' : 'AED ' + price) + '\')" aria-label="Share">' +
-          '<svg viewBox="0 0 24 24"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>' +
-        '</button>' +
-        '<div style="text-align:right;">' +
-          '<div class="spots-badge" style="margin-bottom:3px;">' +
-            (totalSpots > 0 ? (spotsLeft > 0 ? spotsLeft + ' spots left' : 'Full') : 'Open') +
+      '<div class="event-card-bottom">' +
+        '<div class="event-card-bottom-left">' +
+          renderClientAvatars(ev.participants || [], 4, id) +
+          '<span class="spots-badge ' + spotsColorClass + '">' + spotsText + '</span>' +
+        '</div>' +
+        '<div class="event-card-bottom-right">' +
+          '<div class="price-badge">' +
+            '<img src="/public/webapp/assets/dhiram.png" width="14" height="14" alt="AED" />' +
+            '<span class="price-val">' + price + '</span>' +
           '</div>' +
-          (isFree
-            ? '<div class="free-badge">Free</div>'
-            : '<div class="price-badge"><img src="/public/webapp/assets/dhiram.png" width="14" height="14" style="margin-right:2px;opacity:0.8;" alt="AED"/>' + price + '</div>') +
         '</div>' +
       '</div>' +
     '</div>';
@@ -408,4 +565,242 @@ window.selectCalendarDate = function(iso) {
   document.getElementById('calendar-modal').style.display = 'none';
   renderPickedEvents();
 };
+
+// ============================================================
+// MEMBERS MODAL CONTROLLER (Shared across all pages & cards)
+// ============================================================
+window.openMembersModal = function(eventData) {
+  var modal = document.getElementById('members-modal');
+  if (!modal) return;
+
+  var ev = eventData;
+  if (!ev && window.__RALLY__) {
+    ev = window.__RALLY__.event || window.__RALLY__;
+  }
+  if (!ev) return;
+
+  var titleEl = document.getElementById('modal-title');
+  var subEl = document.getElementById('modal-subtitle');
+  var spotsTextEl = document.getElementById('modal-spots-text');
+  var spotsLabelEl = document.getElementById('modal-spots-label');
+  var progressEl = document.getElementById('modal-progress');
+  var gridEl = document.getElementById('modal-grid');
+
+  var eventName = ev.eventName || 'Members';
+  var creatorName = (ev.creator && (ev.creator.communityName || ev.creator.fullName)) || ev.eventCreatorName || '';
+
+  if (titleEl) titleEl.textContent = eventName;
+  if (subEl) subEl.textContent = creatorName ? 'by ' + creatorName : '';
+
+  var spotsBooked = (ev.spotsInfo && ev.spotsInfo.spotsBooked) || ev.participantsCount || (ev.participants && ev.participants.length) || 0;
+  var totalSpots = (ev.spotsInfo && ev.spotsInfo.totalSpots) || ev.eventMaxGuest || Math.max(spotsBooked, 1);
+  var isFull = totalSpots > 0 && spotsBooked >= totalSpots;
+
+  if (spotsTextEl) spotsTextEl.textContent = spotsBooked + '/' + totalSpots;
+  if (spotsLabelEl) spotsLabelEl.textContent = isFull ? 'Full' : 'Spots Available';
+  if (progressEl) {
+    var pct = totalSpots > 0 ? Math.min(100, (spotsBooked / totalSpots) * 100).toFixed(1) : 0;
+    progressEl.style.width = pct + '%';
+  }
+
+  // Populate participants
+  var participants = ev.participants || [];
+  if (gridEl) {
+    if (participants.length === 0) {
+      gridEl.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:32px;color:var(--c-text-3);">No participants yet</div>';
+    } else {
+      gridEl.innerHTML = participants.map(function(p) {
+        var initials = (p.fullName || '?').split(/\s+/).slice(0, 2).map(function(w){return w[0];}).join('').toUpperCase();
+        var av = p.profilePic
+          ? '<img class="modal-participant-av" src="' + escHtml(p.profilePic) + '" alt="' + escHtml(p.fullName || '') + '" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'flex\';">'
+            + '<div class="modal-participant-av-fallback" style="display:none;">' + escHtml(initials) + '</div>'
+          : '<div class="modal-participant-av-fallback">' + escHtml(initials) + '</div>';
+        var extra = (p.guestsCount || p.guestCount || 1) - 1;
+        var name = (p.fullName || 'Guest') + (extra > 0 ? ' (+' + extra + ')' : '');
+        return '<div class="modal-participant">' + av + '<div class="modal-participant-name">' + escHtml(name) + '</div></div>';
+      }).join('');
+    }
+  }
+
+  modal.classList.add('open');
+  document.body.style.overflow = 'hidden';
+};
+
+window.closeMembersModal = function(e) {
+  var modal = document.getElementById('members-modal');
+  if (!modal) return;
+  if (!e || e.target === modal || (e.target && e.target.closest && e.target.closest('.modal-close'))) {
+    modal.classList.remove('open');
+    document.body.style.overflow = '';
+  }
+};
+
+window.openMembersModalForEvent = function(eventId) {
+  var idStr = String(eventId || '');
+  var ev = null;
+
+  // 1. Check window.__RALLY_EVENTS_MAP__
+  if (window.__RALLY_EVENTS_MAP__ && window.__RALLY_EVENTS_MAP__[idStr]) {
+    ev = window.__RALLY_EVENTS_MAP__[idStr];
+  }
+
+  // 2. Check window.__RALLY_PICKED_EVENTS__
+  if (!ev && window.__RALLY_PICKED_EVENTS__) {
+    ev = window.__RALLY_PICKED_EVENTS__.find(function(item) {
+      return String(item._id || item.eventId || item.id) === idStr;
+    });
+  }
+
+  // 3. Check window.__RALLY_FEATURED_EVENTS__
+  if (!ev && window.__RALLY_FEATURED_EVENTS__) {
+    ev = window.__RALLY_FEATURED_EVENTS__.find(function(item) {
+      return String(item._id || item.eventId || item.id) === idStr;
+    });
+  }
+
+  // 4. Check window.__RALLY_EVENTS__ (Organiser profile page)
+  if (!ev && window.__RALLY_EVENTS__) {
+    ev = window.__RALLY_EVENTS__.find(function(item) {
+      return String(item._id || item.eventId || item.id) === idStr;
+    });
+  }
+
+  // 5. Check window.__RALLY__ (Shell data)
+  if (!ev && window.__RALLY__) {
+    var rally = window.__RALLY__;
+    var allList = [].concat(rally.pickedEvents || [], rally.featuredEvents || [], rally.events || []);
+    ev = allList.find(function(item) {
+      return String(item._id || item.eventId || item.id) === idStr;
+    });
+    if (!ev && rally.event && String(rally.event._id || rally.event.eventId || rally.event.id) === idStr) {
+      ev = rally.event;
+    }
+  }
+
+  if (ev) {
+    window.openMembersModal(ev);
+    var pCount = ev.participantsCount || (ev.spotsInfo && ev.spotsInfo.spotsBooked) || 0;
+    if ((!ev.participants || ev.participants.length === 0) && pCount > 0) {
+      fetchEventParticipants(idStr, ev);
+    }
+    return;
+  }
+
+  // Fallback: fetch from API
+  fetchEventParticipants(idStr);
+};
+
+function fetchEventParticipants(idStr, existingEv) {
+  fetch('/api/events/' + encodeURIComponent(idStr) + '/participants')
+    .then(function(res) { return res.json(); })
+    .then(function(data) {
+      if (data && data.success && data.data) {
+        var participants = data.data.participants || data.data || [];
+        var count = data.data.count || participants.length;
+        var updated = existingEv || { eventName: 'Event', eventId: idStr };
+        updated.participants = participants;
+        updated.participantsCount = count;
+        window.openMembersModal(updated);
+      }
+    })
+    .catch(function(err) {
+      console.warn('[MembersModal] Failed to fetch participants:', err);
+    });
+}
+
+window.openMembersModalForPackage = function(packageId) {
+  var idStr = String(packageId || '');
+  var pkg = null;
+
+  // 1. Check window.__RALLY_PACKAGES__ (Organiser profile page)
+  if (window.__RALLY_PACKAGES__ && Array.isArray(window.__RALLY_PACKAGES__)) {
+    pkg = window.__RALLY_PACKAGES__.find(function(item) {
+      return String(item.packageId || item._id || item.id) === idStr;
+    });
+  }
+
+  // 2. Check window.__RALLY_PACKAGE__ (Package detail page)
+  if (!pkg && window.__RALLY_PACKAGE__) {
+    if (String(window.__RALLY_PACKAGE__.packageId || window.__RALLY_PACKAGE__._id || window.__RALLY_PACKAGE__.id) === idStr) {
+      pkg = window.__RALLY_PACKAGE__;
+    }
+  }
+
+  // 3. Check window.__RALLY__ (Shell data)
+  if (!pkg && window.__RALLY__) {
+    var rally = window.__RALLY__;
+    if (rally.package && String(rally.package.packageId || rally.package._id || rally.package.id) === idStr) {
+      pkg = rally.package;
+    } else if (rally.packages && Array.isArray(rally.packages)) {
+      pkg = rally.packages.find(function(item) {
+        return String(item.packageId || item._id || item.id) === idStr;
+      });
+    }
+  }
+
+  if (pkg) {
+    var rawParticipants = pkg.joinedUsers || pkg.purchasedBy || (window.__RALLY_PARTICIPANTS__) || [];
+    var mappedParticipants = rawParticipants.map(function(item) {
+      var u = item.user || item;
+      return {
+        fullName: u.fullName || 'Player',
+        profilePic: u.profilePic || null,
+        userId: u.userId,
+      };
+    });
+
+    var creatorName = (pkg.creator && (pkg.creator.communityName || pkg.creator.fullName)) || '';
+    var totalSpots = pkg.maxPurchases || pkg.maxEvents || (pkg.joinedUsersCount || rawParticipants.length || 20);
+
+    var pkgEventFormat = {
+      eventName: pkg.packageName || 'Package Members',
+      creator: { communityName: creatorName },
+      participants: mappedParticipants,
+      participantsCount: pkg.joinedUsersCount !== undefined ? pkg.joinedUsersCount : mappedParticipants.length,
+      eventMaxGuest: totalSpots,
+      spotsInfo: {
+        spotsBooked: pkg.joinedUsersCount !== undefined ? pkg.joinedUsersCount : mappedParticipants.length,
+        totalSpots: totalSpots,
+      }
+    };
+    window.openMembersModal(pkgEventFormat);
+    return;
+  }
+
+  // Fallback: fetch from API
+  fetch('/api/packages/' + encodeURIComponent(idStr) + '/details')
+    .then(function(res) { return res.json(); })
+    .then(function(data) {
+      if (data && data.success && data.data && data.data.package) {
+        var p = data.data.package;
+        var rawP = p.joinedUsers || p.purchasedBy || [];
+        var mappedP = rawP.map(function(item) {
+          var u = item.user || item;
+          return {
+            fullName: u.fullName || 'Player',
+            profilePic: u.profilePic || null,
+            userId: u.userId,
+          };
+        });
+        var cName = (p.creator && (p.creator.communityName || p.creator.fullName)) || '';
+        var tSpots = p.maxPurchases || p.maxEvents || (p.joinedUsersCount || rawP.length || 20);
+
+        window.openMembersModal({
+          eventName: p.packageName || 'Package Members',
+          creator: { communityName: cName },
+          participants: mappedP,
+          participantsCount: p.joinedUsersCount || mappedP.length,
+          eventMaxGuest: tSpots,
+          spotsInfo: {
+            spotsBooked: p.joinedUsersCount || mappedP.length,
+            totalSpots: tSpots,
+          }
+        });
+      }
+    })
+    .catch(function(err) {
+      console.warn('[MembersModal] Failed to fetch package details:', err);
+    });
+};
+
 

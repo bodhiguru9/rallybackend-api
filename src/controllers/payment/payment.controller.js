@@ -5,6 +5,7 @@ const Event = require('../../models/Event');
 const Booking = require('../../models/Booking');
 const EventJoin = require('../../models/EventJoin');
 const User = require('../../models/User');
+const Notification = require('../../models/Notification');
 const { findEventById } = require('../../utils/eventHelper');
 const { validateAgeForEvent } = require('../../utils/ageRestriction');
 const EventJoinRequest = require('../../models/EventJoinRequest');
@@ -312,9 +313,108 @@ const verifyPayment = async (req, res, next) => {
       });
     }
 
+    // Helper function to activate package purchase and send notifications idempotently
+    const activatePackagePurchase = async (currentPayment) => {
+      const PackagePurchase = require('../../models/PackagePurchase');
+      const Package = require('../../models/Package');
+      const db = getDB();
+
+      const pkg = await Package.findById(currentPayment.packageId);
+      if (!pkg) {
+        console.error(`activatePackagePurchase: Package not found: ${currentPayment.packageId}`);
+        return null;
+      }
+
+      let purchase = currentPayment.purchaseId ? await PackagePurchase.findById(currentPayment.purchaseId) : null;
+      if (!purchase) {
+        const purchasesCollection = db.collection('packagePurchases');
+        const existing = await purchasesCollection.findOne({
+          userId: currentPayment.userId,
+          packageId: pkg._id,
+          createdAt: { $gte: new Date(currentPayment.createdAt ? new Date(currentPayment.createdAt).getTime() - 120000 : Date.now() - 120000) },
+        });
+
+        if (existing) {
+          purchase = existing;
+        } else {
+          purchase = await PackagePurchase.create({
+            userId: currentPayment.userId,
+            packageId: pkg._id,
+            organiserId: pkg.organiserId,
+            validityMonths: pkg.validityMonths || 1,
+            maxEvents: (pkg.maxEvents !== undefined && pkg.maxEvents !== null) ? pkg.maxEvents : 0,
+          });
+        }
+
+        const query = currentPayment._id ? { _id: currentPayment._id } : { paymentId: currentPayment.paymentId };
+        await db.collection('payments').updateOne(
+          query,
+          { $set: { purchaseId: purchase._id, status: 'success', updatedAt: new Date() } }
+        );
+
+        // Send notification to organiser & player
+        try {
+          const buyer = await User.findById(currentPayment.userId);
+          await Notification.create(
+            pkg.organiserId,
+            'package_purchase',
+            'Package Purchased',
+            `${buyer?.fullName || 'A player'} has purchased your package: ${pkg.packageName}`,
+            {
+              packageId: pkg.packageId,
+              purchaseId: purchase._id.toString(),
+              userId: currentPayment.userId.toString(),
+              organiserId: pkg.organiserId ? pkg.organiserId.toString() : '',
+            }
+          );
+
+          await Notification.create(
+            currentPayment.userId,
+            'package_purchase_confirmed',
+            'Package Purchase Confirmed',
+            `You have successfully purchased ${pkg.packageName}!`,
+            {
+              packageId: pkg.packageId,
+              packageName: pkg.packageName,
+              purchaseId: purchase._id.toString(),
+              organiserId: pkg.organiserId ? pkg.organiserId.toString() : '',
+            }
+          );
+        } catch (notifErr) {
+          console.error('activatePackagePurchase: Error creating package notifications:', notifErr.message);
+        }
+      }
+
+      return { purchase, pkg };
+    };
+
     // If payment is already successful (e.g., processed by webhook), return early
     // to avoid duplicate database updates and duplicate notifications.
     if (payment.status === 'success') {
+      if (payment.type === 'package' || payment.packageId) {
+        const result = await activatePackagePurchase(payment);
+        const updatedPayment = await Payment.findById(payment.paymentId || payment._id);
+        return res.status(200).json({
+          success: true,
+          verified: true,
+          message: 'Package payment verified and activated successfully',
+          data: {
+            payment: {
+              paymentId: updatedPayment?.paymentId || payment.paymentId,
+              status: 'success',
+              amount: updatedPayment?.amount || payment.amount,
+              finalAmount: updatedPayment?.finalAmount || payment.finalAmount,
+            },
+            purchase: result?.purchase ? {
+              purchaseId: result.purchase._id.toString(),
+              packageId: result.pkg?.packageId,
+              packageName: result.pkg?.packageName,
+              expiryDate: result.purchase.expiryDate,
+            } : null,
+          },
+        });
+      }
+
       let booking = null;
       let eventForResponse = null;
       
@@ -382,6 +482,31 @@ const verifyPayment = async (req, res, next) => {
         if (!claimed) {
           // Already processed by webhook — return the existing success state
           console.log(`⚠️ [DUPLICATE IGNORED] Verify ignored for PI: ${payment_intent_id} (already claimed by webhook)`);
+
+          if (payment.type === 'package' || payment.packageId) {
+            const result = await activatePackagePurchase(payment);
+            const updatedPayment = await Payment.findById(payment.paymentId || payment._id);
+            return res.status(200).json({
+              success: true,
+              verified: true,
+              message: 'Package payment verified and activated successfully',
+              data: {
+                payment: {
+                  paymentId: updatedPayment?.paymentId || payment.paymentId,
+                  status: 'success',
+                  amount: updatedPayment?.amount || payment.amount,
+                  finalAmount: updatedPayment?.finalAmount || payment.finalAmount,
+                },
+                purchase: result?.purchase ? {
+                  purchaseId: result.purchase._id.toString(),
+                  packageId: result.pkg?.packageId,
+                  packageName: result.pkg?.packageName,
+                  expiryDate: result.purchase.expiryDate,
+                } : null,
+              },
+            });
+          }
+
           const existingBooking = await Booking.findByPaymentIntentId(payment_intent_id);
           const updatedPayment = await Payment.findById(payment.paymentId || payment._id);
           return res.status(200).json({
@@ -402,6 +527,31 @@ const verifyPayment = async (req, res, next) => {
         }
 
         console.log(`✅ [PAYMENT CLAIMED] By VERIFY — PI: ${payment_intent_id}, PaymentID: ${payment.paymentId || payment._id}`);
+
+        // Check if this payment is for a package
+        if (payment.type === 'package' || payment.packageId) {
+          const result = await activatePackagePurchase(payment);
+          const updatedPayment = await Payment.findById(payment.paymentId || payment._id);
+          return res.status(200).json({
+            success: true,
+            verified: true,
+            message: 'Package payment verified and activated successfully',
+            data: {
+              payment: {
+                paymentId: updatedPayment?.paymentId,
+                status: 'success',
+                amount: updatedPayment?.amount,
+                finalAmount: updatedPayment?.finalAmount,
+              },
+              purchase: result?.purchase ? {
+                purchaseId: result.purchase._id.toString(),
+                packageId: result.pkg?.packageId,
+                packageName: result.pkg?.packageName,
+                expiryDate: result.purchase.expiryDate,
+              } : null,
+            },
+          });
+        }
 
         // Increment promo code usage if used (safe — only one caller reaches here)
         if (payment.promoCodeId) {

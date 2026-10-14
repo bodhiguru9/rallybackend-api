@@ -1,4 +1,5 @@
 const Package = require('../../../models/Package');
+const PackagePurchase = require('../../../models/PackagePurchase');
 
 /**
  * @desc    Delete a package (Organiser only)
@@ -31,6 +32,13 @@ const deletePackage = async (req, res, next) => {
         success: false,
         error: 'Failed to delete package',
       });
+    }
+
+    // Cascade delete any purchases of this package so they are completely removed
+    try {
+      await PackagePurchase.deleteByPackage(packageId, pkg);
+    } catch (cleanErr) {
+      console.error('Failed to clean up purchases for deleted package:', cleanErr.message);
     }
 
     return res.status(200).json({

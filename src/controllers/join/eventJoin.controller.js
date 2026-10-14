@@ -5,7 +5,6 @@ const User = require('../../models/User');
 const Notification = require('../../models/Notification');
 const Booking = require('../../models/Booking');
 const Payment = require('../../models/Payment');
-const PackagePurchase = require('../../models/PackagePurchase');
 const { findEventById, validateEventId } = require('../../utils/eventHelper');
 const { getPaginationParams, createPaginationResponse } = require('../../utils/pagination');
 const { validateAgeForEvent } = require('../../utils/ageRestriction');
@@ -177,14 +176,7 @@ if (new Date() > eventEndTimeForJoining) {
       });
     }
 
-    // Find any active package for this organiser (read only — the credit is consumed
-    // AFTER a successful join so a race-loss never wastes a package credit).
-    let packageUsed = null;
-    const Package = require('../../models/Package');
-    const activePackage = await PackagePurchase.findAvailablePackageForUser(userId, event.creatorId);
-    const packageDetails = activePackage ? await Package.findById(activePackage.packageId) : null;
-
-    // Join event FIRST, with the atomic capacity guard (prevents overbooking the last
+    // Join event with the atomic capacity guard (prevents overbooking the last
     // spot under concurrency).
     try {
       await EventJoin.join(userId, event._id, occurrenceStart, {
@@ -209,15 +201,6 @@ if (new Date() > eventEndTimeForJoining) {
       throw joinErr; // e.g. 'Already joined this occurrence' → handled by outer catch
     }
 
-    // Consume the package credit only now that the join has succeeded.
-    if (activePackage) {
-      await PackagePurchase.incrementEventsJoined(activePackage._id, event._id);
-      packageUsed = {
-        packageId: packageDetails ? packageDetails.packageId : null,
-        eventsRemaining: activePackage.maxEvents - activePackage.eventsJoined - 1,
-      };
-    }
-
     // Get updated event
     const updatedEvent = await findEventById(eventId);
     
@@ -238,12 +221,6 @@ occurrenceEnd: occurrenceEnd,
         },
       },
     };
-
-    // Add package info if package was used
-    if (packageUsed) {
-      responseData.data.package = packageUsed;
-      responseData.message += ' (using package)';
-    }
 
     res.status(200).json(responseData);
   } catch (error) {

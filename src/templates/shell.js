@@ -55,6 +55,32 @@ module.exports = function shell({ title, description, ogImage, ogUrl, bodyClass 
     ${bodyContent}
   </div>
 
+  <!-- MEMBERS MODAL -->
+  <div class="modal-backdrop" id="members-modal" onclick="closeMembersModal(event)">
+    <div class="modal-sheet">
+      <div class="modal-handle"></div>
+      <div class="modal-header">
+        <div>
+          <div class="modal-title" id="modal-title">Members</div>
+          <div class="modal-subtitle" id="modal-subtitle"></div>
+        </div>
+        <button class="modal-close" onclick="closeMembersModal(event)" aria-label="Close">
+          <svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+      <div class="modal-spots-row">
+        <span class="modal-spots-text" id="modal-spots-text">0/0</span>
+        <span class="modal-spots-label" id="modal-spots-label">Spots Available</span>
+      </div>
+      <div class="progress-bar-bg">
+        <div class="progress-bar-fill" id="modal-progress" style="width:0%"></div>
+      </div>
+      <div class="modal-grid" id="modal-grid">
+        <!-- Populated dynamically -->
+      </div>
+    </div>
+  </div>
+
   <!-- Page data pre-injected by server for instant render (no API round-trip on load) -->
   <script>window.__RALLY__ = ${safePageData};</script>
   <!-- App JS -->

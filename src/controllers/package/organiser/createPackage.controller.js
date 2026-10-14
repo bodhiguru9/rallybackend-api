@@ -1,6 +1,7 @@
 const Package = require('../../../models/Package');
 const Event = require('../../../models/Event');
 const { findEventById } = require('../../../utils/eventHelper');
+const { notifySubscribersOnPackageCreation } = require('../../../services/packageNotification.service');
 
 /**
  * @desc    Create a new package (Organiser only)
@@ -19,7 +20,6 @@ const createPackage = async (req, res, next) => {
       eventIds,
       sports,
       eventType,
-      credits,
       validity,
       events,
       price,
@@ -58,13 +58,6 @@ const createPackage = async (req, res, next) => {
       });
     }
 
-    if (credits !== undefined && credits !== null && parseInt(credits) < 0) {
-      return res.status(400).json({
-        success: false,
-        error: 'Credits cannot be negative',
-      });
-    }
-
     // Validate event IDs if provided
     const validatedEventIds = [];
     if (eventIds && Array.isArray(eventIds) && eventIds.length > 0) {
@@ -94,14 +87,30 @@ const createPackage = async (req, res, next) => {
       packageDescription: packageDescription || null,
       sports: Array.isArray(sports) ? sports : [],
       eventType: eventType || null,
-      credits: credits !== undefined && credits !== null ? parseInt(credits) : 0,
       packagePrice: parseFloat(normalizedPackagePrice),
       validityMonths: parseInt(normalizedValidityMonths),
       maxEvents: parseInt(normalizedMaxEvents),
       eventIds: validatedEventIds,
+      validityPeriod: req.body.validityPeriod || null,
+      location: req.body.location || null,
+      eventLocation: req.body.eventLocation || null,
+      restrictions: req.body.restrictions || null,
+      imageUri: req.body.imageUri || null,
+      packageImages: req.body.packageImages || (req.body.imageUri ? [req.body.imageUri] : []),
+      registrationStartTime: req.body.registrationStartTime || null,
+      faqs: req.body.faqs || [],
     };
 
     const newPackage = await Package.create(packageData);
+
+    // Notify organiser's subscribers (asynchronous, non-blocking)
+    notifySubscribersOnPackageCreation({
+      organiserId,
+      package: newPackage,
+      organiser: req.user,
+    }).catch((err) => {
+      console.error('[PACKAGE-NOTIF] Background dispatch error:', err.message);
+    });
 
     res.status(201).json({
       success: true,
@@ -113,11 +122,18 @@ const createPackage = async (req, res, next) => {
           packageDescription: newPackage.packageDescription,
           sports: newPackage.sports || [],
           eventType: newPackage.eventType || null,
-          credits: newPackage.credits || 0,
           packagePrice: newPackage.packagePrice,
           validityMonths: newPackage.validityMonths,
           maxEvents: newPackage.maxEvents,
           eventIds: validatedEventIds.map(id => id.toString()),
+          validityPeriod: newPackage.validityPeriod,
+          location: newPackage.location,
+          eventLocation: newPackage.eventLocation,
+          restrictions: newPackage.restrictions,
+          imageUri: newPackage.imageUri,
+          packageImages: newPackage.packageImages,
+          registrationStartTime: newPackage.registrationStartTime,
+          faqs: newPackage.faqs,
           isActive: newPackage.isActive,
           createdAt: newPackage.createdAt,
         },

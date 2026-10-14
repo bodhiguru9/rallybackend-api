@@ -1,5 +1,6 @@
 const Package = require('../../../models/Package');
 const { findEventById } = require('../../../utils/eventHelper');
+const { notifySubscribersOnPackageCreation } = require('../../../services/packageNotification.service');
 
 /**
  * @desc    Create packages in bulk (Organiser only)
@@ -31,7 +32,6 @@ const createBulkPackages = async (req, res, next) => {
         eventIds,
         sports,
         eventType,
-        credits,
         validity,
         events,
         price,
@@ -69,13 +69,6 @@ const createBulkPackages = async (req, res, next) => {
         });
       }
 
-      if (credits !== undefined && credits !== null && parseInt(credits) < 0) {
-        return res.status(400).json({
-          success: false,
-          error: `Credits cannot be negative (package index ${index})`,
-        });
-      }
-
       const validatedEventIds = [];
       if (eventIds && Array.isArray(eventIds) && eventIds.length > 0) {
         for (const eventId of eventIds) {
@@ -102,7 +95,6 @@ const createBulkPackages = async (req, res, next) => {
         packageDescription: packageDescription || null,
         sports: Array.isArray(sports) ? sports : [],
         eventType: eventType || null,
-        credits: credits !== undefined && credits !== null ? parseInt(credits) : 0,
         packagePrice: parseFloat(normalizedPackagePrice),
         validityMonths: parseInt(normalizedValidityMonths),
         maxEvents: parseInt(normalizedMaxEvents),
@@ -116,13 +108,23 @@ const createBulkPackages = async (req, res, next) => {
         packageDescription: newPackage.packageDescription,
         sports: newPackage.sports || [],
         eventType: newPackage.eventType || null,
-        credits: newPackage.credits || 0,
         packagePrice: newPackage.packagePrice,
         validityMonths: newPackage.validityMonths,
         maxEvents: newPackage.maxEvents,
         eventIds: validatedEventIds.map(id => id.toString()),
         isActive: newPackage.isActive,
         createdAt: newPackage.createdAt,
+      });
+    }
+
+    // Asynchronously notify organiser's subscribers for created packages
+    for (const createdPkg of created) {
+      notifySubscribersOnPackageCreation({
+        organiserId,
+        package: createdPkg,
+        organiser: req.user,
+      }).catch((err) => {
+        console.error('[PACKAGE-NOTIF] Background dispatch error (bulk):', err.message);
       });
     }
 

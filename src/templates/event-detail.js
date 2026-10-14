@@ -107,7 +107,7 @@ module.exports = function eventDetailTemplate({ event }) {
         ${isFull ? 'Full' : 'Spots Available'}
       </span>
     </div>
-    ${renderParticipantAvatars(participants, 4)}
+    ${renderParticipantAvatars(participants, 4, event._id || event.eventId)}
     ${refundNote ? `<div class="ed-refund-note">Refundable until: ${e(refundNote)}</div>` : ''}
   </div>
 
@@ -141,8 +141,8 @@ module.exports = function eventDetailTemplate({ event }) {
       <div style="flex:1;min-width:0;">
         <div class="ed-org-name">${e(communityName || creatorName)}</div>
         <div class="ed-org-stats">
-          <span class="tag tag-hosted">&#127931; ${eventsCreated} Hosted</span>
-          <span class="tag tag-attendees">&#128101; ${totalAttendees} Attendees</span>
+          <span class="tag tag-hosted"><img src="/public/webapp/assets/calendar-hosted.png" width="13" height="13" alt="Hosted" style="vertical-align:middle;margin-right:4px;" />${eventsCreated} Hosted</span>
+          <span class="tag tag-attendees"><img src="/public/webapp/assets/multiple-users.png" width="13" height="13" alt="Attendees" style="vertical-align:middle;margin-right:4px;" />${totalAttendees} Attendees</span>
         </div>
         ${instagramHandle ? `<div class="org-contact-row" style="margin-top:8px;">
           <a href="https://instagram.com/${e(instagramHandle.replace(/^@/,''))}" target="_blank" rel="noopener" class="org-contact-link" onclick="event.stopPropagation()">
@@ -174,32 +174,6 @@ module.exports = function eventDetailTemplate({ event }) {
   </div>
 </div>
 
-<!-- MEMBERS MODAL -->
-<div class="modal-backdrop" id="members-modal" onclick="closeMembersModal(event)">
-  <div class="modal-sheet">
-    <div class="modal-handle"></div>
-    <div class="modal-header">
-      <div>
-        <div class="modal-title">${e(event.eventName || 'Members')}</div>
-        <div class="modal-subtitle">by ${e(communityName || creatorName)}</div>
-      </div>
-      <button class="modal-close" onclick="closeMembersModal()" aria-label="Close">
-        <svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-      </button>
-    </div>
-    <div class="modal-spots-row">
-      <span class="modal-spots-text">${spotsBooked}/${totalSpots}</span>
-      <span class="modal-spots-label">${isFull ? 'Full' : 'Spots Available'}</span>
-    </div>
-    <div class="progress-bar-bg">
-      <div class="progress-bar-fill" id="modal-progress" style="width:${totalSpots > 0 ? Math.min(100, (spotsBooked/totalSpots)*100).toFixed(1) : 0}%"></div>
-    </div>
-    <div class="modal-grid" id="modal-grid">
-      <!-- Populated by app.js from window.__RALLY__.participants -->
-    </div>
-  </div>
-</div>
-
 <!-- Page-specific scripts -->
 <script>
 (function() {
@@ -215,43 +189,6 @@ module.exports = function eventDetailTemplate({ event }) {
       descEl.dataset.expanded = expanded ? '0' : '1';
       event.target.textContent = expanded ? 'Read More' : 'Read Less';
     };
-  }
-
-  // Members modal
-  window.openMembersModal = function() {
-    document.getElementById('members-modal').classList.add('open');
-    document.body.style.overflow = 'hidden';
-    renderModalGrid();
-  };
-  window.closeMembersModal = function(e) {
-    if (!e || e.target === document.getElementById('members-modal')) {
-      document.getElementById('members-modal').classList.remove('open');
-      document.body.style.overflow = '';
-    }
-  };
-
-  function renderModalGrid() {
-    var grid = document.getElementById('modal-grid');
-    if (!grid) return;
-    var participants = (window.__RALLY__ && window.__RALLY__.participants) || [];
-    if (participants.length === 0) {
-      grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:32px;color:var(--c-text-3);">No participants yet</div>';
-      return;
-    }
-    grid.innerHTML = participants.map(function(p) {
-      var initials = (p.fullName || '?').split(/\\s+/).slice(0,2).map(function(w){return w[0];}).join('').toUpperCase();
-      var av = p.profilePic
-        ? '<img class="modal-participant-av" src="' + escHtml(p.profilePic) + '" alt="' + escHtml(p.fullName || '') + '" onerror="this.style.display=\\\'none\\\';this.nextElementSibling.style.display=\\\'flex\\\';">'
-          + '<div class="modal-participant-av-fallback" style="display:none;">' + escHtml(initials) + '</div>'
-        : '<div class="modal-participant-av-fallback">' + escHtml(initials) + '</div>';
-      var extra = (p.guestsCount || p.guestCount || 1) - 1;
-      var name = (p.fullName || 'Guest') + (extra > 0 ? ' (+' + extra + ')' : '');
-      return '<div class="modal-participant">' + av + '<div class="modal-participant-name">' + escHtml(name) + '</div></div>';
-    }).join('');
-  }
-
-  function escHtml(str) {
-    return (str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
   }
 })();
 </script>`;

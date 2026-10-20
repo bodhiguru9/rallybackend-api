@@ -33,6 +33,7 @@ const updatePackage = async (req, res, next) => {
       'packagePrice',
       'validityMonths',
       'maxEvents',
+      'maxPurchases',
       'eventIds',
       'validityPeriod',
       'location',

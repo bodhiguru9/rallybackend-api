@@ -9,9 +9,9 @@
   --c-bg: #F0F2F5;
   --c-bg-org: #E4F0EE;
   --c-surface: #FFFFFF;
-  --c-primary: #3B82F6;
-  --c-primary-dark: #2563EB;
-  --c-primary-light: rgba(59, 130, 246, 0.10);
+  --c-primary: #3D6F92;
+  --c-primary-dark: #2B506B;
+  --c-primary-light: rgba(61, 111, 146, 0.10);
   --c-text-1: #0F172A;
   --c-text-2: #475569;
   --c-text-3: #94A3B8;
@@ -1781,18 +1781,20 @@ button {
   top: 20%;
   bottom: 20%;
   width: 1px;
-  background: var(--c-border);
+  background: rgba(61, 111, 146, 0.18);
 }
 
 .org-stat-num {
   font-size: 18px;
   font-weight: 800;
-  color: var(--c-text-1);
+  color: var(--c-primary);
 }
 
 .org-stat-label {
   font-size: 11px;
-  color: var(--c-text-2);
+  font-weight: 500;
+  color: var(--c-primary);
+  opacity: 0.85;
   margin-top: 2px;
 }
 
@@ -1872,9 +1874,10 @@ button {
 }
 
 .org-tab.active {
-  background: #334155;
+  background: var(--c-primary);
   color: #fff;
   font-weight: 700;
+  box-shadow: 0 2px 8px rgba(61, 111, 146, 0.30);
 }
 
 /* ---- Organiser Package Card (matches OrganiserPackageCard.tsx) ---- */

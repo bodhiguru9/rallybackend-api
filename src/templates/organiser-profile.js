@@ -4,7 +4,7 @@
  */
 const { e, renderTags, formatDateTime, formatPrice, titleCase, mapEmbedUrl, renderAvatar, renderEventCard, renderPackageCard } = require('./helpers');
 
-module.exports = function organiserProfileTemplate({ organiser, events = [], packages = [] }) {
+module.exports = function organiserProfileTemplate({ organiser, events = [], packages = [], timeZone = null }) {
   const name = organiser.communityName || organiser.fullName || 'Organiser';
   const pic = organiser.profilePic || '';
   const bio = organiser.organiserBio || '';
@@ -118,7 +118,7 @@ module.exports = function organiserProfileTemplate({ organiser, events = [], pac
           communityName: name,
           fullName: organiser.fullName || name
         }
-      })).join('')}
+      }, timeZone)).join('')}
   </div>
 
   <!-- TAB CONTENT: PACKAGES -->
@@ -129,7 +129,7 @@ module.exports = function organiserProfileTemplate({ organiser, events = [], pac
         <div class="empty-state-text">No packages available</div>
         <div class="empty-state-sub">This organiser hasn't created any packages yet</div>
       </div>
-    ` : packages.map(pkg => renderPackageCard(pkg, organiser)).join('')}
+    ` : packages.map(pkg => renderPackageCard(pkg, organiser, timeZone)).join('')}
   </div>
 
 </div>
@@ -166,6 +166,9 @@ module.exports = function organiserProfileTemplate({ organiser, events = [], pac
     
     document.getElementById('tab-' + tab).classList.add('active');
     document.getElementById('content-' + tab).style.display = 'block';
+    if (tab === 'events' && window.hydrateAllLocalTimes) {
+      window.hydrateAllLocalTimes();
+    }
   };
 
   // Safe share handler

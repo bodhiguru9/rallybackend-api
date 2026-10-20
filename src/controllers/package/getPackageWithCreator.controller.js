@@ -101,37 +101,46 @@ const getPackageWithCreator = async (req, res, next) => {
           canCancel: false,
         };
       }
-
-      if (creator && creator._id.toString() === req.user.id) {
-        const usersCollection = db.collection('users');
-        const purchases = await purchasesCollection.find({ packageId: packageObjectId }).toArray();
-        const buyerIds = purchases.map((p) => p.userId);
-        const buyers = buyerIds.length > 0
-          ? await usersCollection.find({ _id: { $in: buyerIds } }).toArray()
-          : [];
-
-        purchasedBy = purchases.map((p) => {
-          const buyer = buyers.find((b) => b._id.toString() === p.userId.toString());
-          return {
-            purchaseId: p.purchaseId || p._id.toString(),
-            user: buyer ? {
-              userId: buyer.userId,
-              fullName: buyer.fullName || null,
-              profilePic: buyer.profilePic || null,
-              email: buyer.email || null,
-              mobileNumber: buyer.mobileNumber || null,
-              gender: buyer.gender || null,
-            } : null,
-            purchaseDate: p.purchaseDate,
-            expiryDate: p.expiryDate || null,
-            eventsJoined: p.eventsJoined || 0,
-            maxEvents: p.maxEvents || 0,
-            isActive: p.isActive !== undefined ? p.isActive : true,
-            cancelledAt: p.cancelledAt || null,
-          };
-        });
-      }
     }
+
+    // Always fetch package purchases so both organiser and players see accurate spot counts & members
+    const db = getDB();
+    const purchasesCollection = db.collection('packagePurchases');
+    const packageObjectId = typeof pkg._id === 'string' ? new ObjectId(pkg._id) : pkg._id;
+    const purchases = await purchasesCollection.find({ packageId: packageObjectId }).toArray();
+
+    const isCreator = req.user && creator && creator._id.toString() === req.user.id;
+    const usersCollection = db.collection('users');
+    const buyerIds = purchases.map((p) => p.userId).filter(Boolean);
+    const buyers = buyerIds.length > 0
+      ? await usersCollection.find({ _id: { $in: buyerIds } }).toArray()
+      : [];
+
+    purchasedBy = purchases.map((p) => {
+      const buyer = buyers.find((b) => b._id.toString() === p.userId?.toString());
+      return {
+        purchaseId: p.purchaseId || p._id.toString(),
+        user: buyer ? {
+          userId: buyer.userId,
+          fullName: buyer.fullName || 'Player',
+          profilePic: buyer.profilePic || null,
+          email: isCreator ? (buyer.email || null) : null,
+          mobileNumber: isCreator ? (buyer.mobileNumber || buyer.phone || null) : null,
+          gender: buyer.gender || null,
+        } : null,
+        purchaseDate: p.purchaseDate,
+        expiryDate: p.expiryDate || null,
+        eventsJoined: p.eventsJoined || 0,
+        maxEvents: p.maxEvents || 0,
+        isActive: p.isActive !== undefined ? p.isActive : true,
+        cancelledAt: p.cancelledAt || null,
+      };
+    });
+
+    const joinedUsersCount = purchases.length;
+    const maxPurchases = pkg.maxPurchases !== undefined && pkg.maxPurchases !== null
+      ? pkg.maxPurchases
+      : pkg.maxEvents;
 
     return res.status(200).json({
       success: true,
@@ -146,6 +155,7 @@ const getPackageWithCreator = async (req, res, next) => {
           packagePrice: pkg.packagePrice,
           validityMonths: pkg.validityMonths,
           maxEvents: pkg.maxEvents,
+          maxPurchases,
           eventIds: (pkg.eventIds || []).map(id => id.toString()),
           validityPeriod: pkg.validityPeriod || null,
           location: pkg.location || null,
@@ -161,8 +171,8 @@ const getPackageWithCreator = async (req, res, next) => {
           creator: creatorData,
           purchaseInfo,
           purchasedBy,
-          joinedUsers: purchasedBy || [],
-          joinedUsersCount: (purchasedBy || []).length,
+          joinedUsers: purchasedBy,
+          joinedUsersCount,
         },
       },
     });

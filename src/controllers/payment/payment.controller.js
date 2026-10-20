@@ -352,34 +352,17 @@ const verifyPayment = async (req, res, next) => {
           { $set: { purchaseId: purchase._id, status: 'success', updatedAt: new Date() } }
         );
 
-        // Send notification to organiser & player
+        // Send notifications (in-app + FCM push) to organiser & player
         try {
-          const buyer = await User.findById(currentPayment.userId);
-          await Notification.create(
-            pkg.organiserId,
-            'package_purchase',
-            'Package Purchased',
-            `${buyer?.fullName || 'A player'} has purchased your package: ${pkg.packageName}`,
-            {
-              packageId: pkg.packageId,
-              purchaseId: purchase._id.toString(),
-              userId: currentPayment.userId.toString(),
-              organiserId: pkg.organiserId ? pkg.organiserId.toString() : '',
-            }
-          );
-
-          await Notification.create(
-            currentPayment.userId,
-            'package_purchase_confirmed',
-            'Package Purchase Confirmed',
-            `You have successfully purchased ${pkg.packageName}!`,
-            {
-              packageId: pkg.packageId,
-              packageName: pkg.packageName,
-              purchaseId: purchase._id.toString(),
-              organiserId: pkg.organiserId ? pkg.organiserId.toString() : '',
-            }
-          );
+          const { notifyOnPackagePurchase } = require('../../services/packageNotification.service');
+          notifyOnPackagePurchase({
+            buyerId: currentPayment.userId,
+            organiserId: pkg.organiserId,
+            package: pkg,
+            purchase,
+          }).catch((notifErr) => {
+            console.error('activatePackagePurchase: Error creating package notifications:', notifErr.message);
+          });
         } catch (notifErr) {
           console.error('activatePackagePurchase: Error creating package notifications:', notifErr.message);
         }

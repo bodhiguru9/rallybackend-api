@@ -17,6 +17,22 @@ const packageDetailTemplate  = require('../../templates/package-detail');
 /* Helpers                                                              */
 /* ------------------------------------------------------------------ */
 
+/** Extract and validate viewer timezone from request cookies */
+function getViewerTimeZone(req) {
+  const cookieHeader = req?.headers?.cookie || '';
+  const match = cookieHeader.match(/(?:^|;\s*)viewer_tz=([^;]+)/);
+  if (match) {
+    try {
+      const decoded = decodeURIComponent(match[1]);
+      Intl.DateTimeFormat(undefined, { timeZone: decoded });
+      return decoded;
+    } catch {
+      // Invalid timeZone name, ignore
+    }
+  }
+  return null;
+}
+
 /** Try to convert a string to ObjectId; return null on failure */
 function toObjectId(id) {
   try { return new ObjectId(id); } catch { return null; }
@@ -199,7 +215,8 @@ exports.renderHome = async (req, res) => {
     const featuredEvents = events.slice(0, 4);
     const pickedEvents   = events;
 
-    const bodyContent = homeTemplate({ topOrganisers, featuredEvents, pickedEvents });
+    const timeZone = getViewerTimeZone(req);
+    const bodyContent = homeTemplate({ topOrganisers, featuredEvents, pickedEvents, timeZone });
     const html = shellTemplate({
       title: 'Find Sports Events Near You',
       bodyClass: 'org-bg',
@@ -259,11 +276,12 @@ exports.renderEventDetail = async (req, res) => {
     // DB stores IsPrivateEvent (capital I)
     const isPrivate = eventDoc.IsPrivateEvent === true || eventDoc.isPrivateEvent === true;
 
+    const timeZone = getViewerTimeZone(req);
     let bodyContent;
     if (isPrivate) {
       bodyContent = privateEventWallTemplate({ eventId: idParam });
     } else {
-      bodyContent = eventDetailTemplate({ event });
+      bodyContent = eventDetailTemplate({ event, timeZone });
     }
 
     const html = shellTemplate({
@@ -436,7 +454,8 @@ exports.renderOrganiserProfile = async (req, res) => {
       };
     });
 
-    const bodyContent = organiserProfileTemplate({ organiser: organiserData, events, packages });
+    const timeZone = getViewerTimeZone(req);
+    const bodyContent = organiserProfileTemplate({ organiser: organiserData, events, packages, timeZone });
 
     const html = shellTemplate({
       title: organiserData.communityName || organiserData.fullName || 'Organiser Profile',
@@ -549,7 +568,8 @@ exports.renderPackageDetail = async (req, res) => {
       creator: creatorData,
     };
 
-    const bodyContent = packageDetailTemplate({ package: pkg, organiser: creatorData });
+    const timeZone = getViewerTimeZone(req);
+    const bodyContent = packageDetailTemplate({ package: pkg, organiser: creatorData, timeZone });
 
     const html = shellTemplate({
       title: pkg.packageName || 'Package Details',

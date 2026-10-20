@@ -121,6 +121,9 @@ const getMyPackages = async (req, res, next) => {
           packagePrice: pkg.packagePrice,
           validityMonths: pkg.validityMonths,
           maxEvents: pkg.maxEvents,
+          maxPurchases: pkg.maxPurchases !== undefined && pkg.maxPurchases !== null
+            ? pkg.maxPurchases
+            : pkg.maxEvents,
           eventIds: (pkg.eventIds || []).map(id => id.toString()),
           validityPeriod: pkg.validityPeriod || null,
           location: pkg.location || null,

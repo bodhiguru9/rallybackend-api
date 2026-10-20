@@ -90,6 +90,9 @@ const createPackage = async (req, res, next) => {
       packagePrice: parseFloat(normalizedPackagePrice),
       validityMonths: parseInt(normalizedValidityMonths),
       maxEvents: parseInt(normalizedMaxEvents),
+      maxPurchases: req.body.maxPurchases !== undefined && req.body.maxPurchases !== null
+        ? parseInt(req.body.maxPurchases)
+        : parseInt(normalizedMaxEvents),
       eventIds: validatedEventIds,
       validityPeriod: req.body.validityPeriod || null,
       location: req.body.location || null,
@@ -125,6 +128,7 @@ const createPackage = async (req, res, next) => {
           packagePrice: newPackage.packagePrice,
           validityMonths: newPackage.validityMonths,
           maxEvents: newPackage.maxEvents,
+          maxPurchases: newPackage.maxPurchases ?? newPackage.maxEvents,
           eventIds: validatedEventIds.map(id => id.toString()),
           validityPeriod: newPackage.validityPeriod,
           location: newPackage.location,

@@ -1,6 +1,7 @@
 const { getDB } = require('../config/database');
 const { ObjectId } = require('mongodb');
-const { sendPushToMany } = require('./push.service');
+const { sendPushToMany, sendPushNotification } = require('./push.service');
+const Notification = require('../models/Notification');
 
 /**
  * Notify subscribers (followers) of an organiser when a new package is created.
@@ -165,6 +166,160 @@ async function notifySubscribersOnPackageCreation({ organiserId, package: pkg, o
   }
 }
 
+/**
+ * Send in-app and FCM push notifications when a package is purchased.
+ * Notifies both the organiser (new sale) and the player (purchase confirmation).
+ *
+ * @param {Object} options
+ * @param {string|ObjectId} options.buyerId - ID of the buyer (player)
+ * @param {string|ObjectId} [options.organiserId] - ID of the package creator (optional if on pkg)
+ * @param {Object} options.package - The package document
+ * @param {Object} options.purchase - The purchase document
+ * @returns {Promise<{success: boolean, organiserPush: boolean, buyerPush: boolean}>}
+ */
+async function notifyOnPackagePurchase({ buyerId, organiserId, package: pkg, purchase }) {
+  try {
+    const db = getDB();
+    const usersCollection = db.collection('users');
+
+    const buyerObjectId = typeof buyerId === 'string' ? new ObjectId(buyerId) : buyerId;
+    const targetOrganiserId = organiserId || pkg?.organiserId;
+    const organiserObjectId = targetOrganiserId
+      ? (typeof targetOrganiserId === 'string' ? new ObjectId(targetOrganiserId) : targetOrganiserId)
+      : null;
+
+    // Fetch buyer and organiser documents concurrently
+    const [buyerDoc, organiserDoc] = await Promise.all([
+      usersCollection.findOne({ _id: buyerObjectId }),
+      organiserObjectId ? usersCollection.findOne({ _id: organiserObjectId }) : Promise.resolve(null),
+    ]);
+
+    const buyerName = buyerDoc?.fullName || 'A player';
+    const packageName = pkg?.packageName || 'Package';
+    const packageSeqId = pkg?.packageId ? String(pkg.packageId) : (pkg?._id ? String(pkg._id) : '');
+    const packageMongoId = pkg?._id ? String(pkg._id) : '';
+    const purchaseIdStr = purchase?._id ? String(purchase._id) : '';
+    const imageUrl = pkg?.imageUri || (Array.isArray(pkg?.packageImages) && pkg.packageImages[0]) || null;
+
+    const notifData = {
+      packageId: packageSeqId,
+      packageMongoId,
+      purchaseId: purchaseIdStr,
+      userId: buyerObjectId.toString(),
+      playerId: buyerDoc?.userId ? String(buyerDoc.userId) : '',
+      organiserId: organiserObjectId ? organiserObjectId.toString() : '',
+    };
+
+    let organiserPushSent = false;
+    let buyerPushSent = false;
+
+    // 1. Organiser Notification (In-App + FCM Push)
+    if (organiserObjectId) {
+      const organiserTitle = 'Package Purchased';
+      const organiserBody = `${buyerName} has purchased your package: ${packageName}`;
+
+      // In-app
+      try {
+        await Notification.create(
+          organiserObjectId,
+          'package_purchase',
+          organiserTitle,
+          organiserBody,
+          notifData
+        );
+      } catch (inAppErr) {
+        console.error('[PACKAGE-PURCHASE-NOTIF] In-app notification to organiser failed:', inAppErr.message);
+      }
+
+      // FCM Push
+      if (organiserDoc?.fcmToken) {
+        try {
+          const pushResult = await sendPushNotification({
+            token: organiserDoc.fcmToken,
+            title: 'New Package Purchase! 🎉',
+            body: `${buyerName} just purchased "${packageName}".`,
+            data: {
+              type: 'package_purchase',
+              packageId: packageSeqId,
+              packageMongoId,
+              purchaseId: purchaseIdStr,
+              userId: buyerObjectId.toString(),
+              playerId: buyerDoc?.userId ? String(buyerDoc.userId) : '',
+              buyerName: String(buyerName),
+              packageName: String(packageName),
+            },
+            imageUrl: imageUrl || undefined,
+          });
+          organiserPushSent = !pushResult?.skipped && pushResult?.success !== false;
+          console.log(`[PACKAGE-PURCHASE-NOTIF] FCM Push sent to organiser ${organiserObjectId}:`, organiserPushSent);
+        } catch (pushErr) {
+          console.error('[PACKAGE-PURCHASE-NOTIF] FCM push to organiser failed:', pushErr.message);
+        }
+      } else {
+        console.log(`[PACKAGE-PURCHASE-NOTIF] Organiser ${organiserObjectId} has no registered FCM token.`);
+      }
+    }
+
+    // 2. Player Notification (In-App + FCM Push)
+    if (buyerObjectId) {
+      const playerTitle = 'Package Purchase Confirmed';
+      const playerBody = `You have successfully purchased ${packageName}!`;
+
+      // In-app
+      try {
+        await Notification.create(
+          buyerObjectId,
+          'package_purchase_confirmed',
+          playerTitle,
+          playerBody,
+          {
+            ...notifData,
+            packageName,
+          }
+        );
+      } catch (inAppErr) {
+        console.error('[PACKAGE-PURCHASE-NOTIF] In-app notification to player failed:', inAppErr.message);
+      }
+
+      // FCM Push
+      if (buyerDoc?.fcmToken) {
+        try {
+          const pushResult = await sendPushNotification({
+            token: buyerDoc.fcmToken,
+            title: 'Package Purchased! 🎉',
+            body: `You have successfully purchased "${packageName}".`,
+            data: {
+              type: 'package_purchase_confirmed',
+              packageId: packageSeqId,
+              packageMongoId,
+              purchaseId: purchaseIdStr,
+              packageName: String(packageName),
+            },
+            imageUrl: imageUrl || undefined,
+          });
+          buyerPushSent = !pushResult?.skipped && pushResult?.success !== false;
+          console.log(`[PACKAGE-PURCHASE-NOTIF] FCM Push sent to buyer ${buyerObjectId}:`, buyerPushSent);
+        } catch (pushErr) {
+          console.error('[PACKAGE-PURCHASE-NOTIF] FCM push to buyer failed:', pushErr.message);
+        }
+      }
+    }
+
+    return {
+      success: true,
+      organiserPush: organiserPushSent,
+      buyerPush: buyerPushSent,
+    };
+  } catch (error) {
+    console.error('[PACKAGE-PURCHASE-NOTIF] Error in notifyOnPackagePurchase:', error.message);
+    return {
+      success: false,
+      error: error.message,
+    };
+  }
+}
+
 module.exports = {
   notifySubscribersOnPackageCreation,
+  notifyOnPackagePurchase,
 };

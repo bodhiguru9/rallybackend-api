@@ -40,14 +40,17 @@ const DEFAULT_FAQS = [
   },
 ];
 
-module.exports = function packageDetailTemplate({ package: pkg, organiser = {} }) {
+module.exports = function packageDetailTemplate({ package: pkg, organiser = {}, timeZone = null }) {
   const pkgId = pkg.packageId || (pkg._id ? String(pkg._id) : '');
   const title = pkg.packageName || 'Package Details';
   const price = Number(pkg.packagePrice ?? pkg.price ?? 0);
   const vat = Math.round(price * 0.05 * 100) / 100;
   const finalTotal = price + vat;
 
-  const validityDateString = formatPackageValidity(pkg);
+  const validityDateString = formatPackageValidity(pkg, timeZone);
+  const duration = pkg.validityPeriod?.duration;
+  const durationStartIso = duration && duration[0] ? new Date(duration[0]).toISOString() : '';
+  const durationEndIso = duration && duration[1] ? new Date(duration[1]).toISOString() : '';
   const locationDisplayString = formatPackageLocation(pkg);
   const mapUrl = mapEmbedUrl(locationDisplayString);
 
@@ -129,17 +132,20 @@ module.exports = function packageDetailTemplate({ package: pkg, organiser = {} }
   // Future registration check
   let isRegFuture = false;
   let regStartText = '';
+  const regStartIso = pkg.registrationStartTime ? new Date(pkg.registrationStartTime).toISOString() : '';
   if (pkg.registrationStartTime) {
     try {
       const regTime = new Date(pkg.registrationStartTime).getTime();
       if (!isNaN(regTime) && regTime > Date.now()) {
         isRegFuture = true;
         const d = new Date(pkg.registrationStartTime);
-        const formatted = d.toLocaleDateString('en-US', {
+        const opts = {
           weekday: 'short',
           day: 'numeric',
           month: 'short',
-        });
+        };
+        if (timeZone) opts.timeZone = timeZone;
+        const formatted = d.toLocaleDateString('en-GB', opts);
         regStartText = `Registration starts on ${formatted}`;
       }
     } catch {}
@@ -202,7 +208,7 @@ module.exports = function packageDetailTemplate({ package: pkg, organiser = {} }
   <div class="ed-card">
     <div class="ed-card-row">
       <img src="/public/webapp/assets/time.png" alt="Time" width="16" height="16" style="flex-shrink:0;margin-top:2px;" />
-      <span class="ed-card-row-text">${e(validityDateString)}</span>
+      <span class="ed-card-row-text js-validity-text" data-duration-start="${e(durationStartIso)}" data-duration-end="${e(durationEndIso)}">${e(validityDateString)}</span>
     </div>
     <div class="ed-card-row" style="margin-top:8px;">
       <img src="/public/webapp/assets/location-pin.png" alt="Location" width="16" height="16" style="flex-shrink:0;margin-top:2px;" />
@@ -272,7 +278,7 @@ module.exports = function packageDetailTemplate({ package: pkg, organiser = {} }
   ${isRegFuture ? `
   <div class="ed-card pd-reg-banner">
     <img src="/public/webapp/assets/warning-shield.png" width="24" height="24" alt="Warning" style="object-fit:contain;flex-shrink:0;" />
-    <span class="pd-reg-banner-text">${e(regStartText)}</span>
+    <span class="pd-reg-banner-text js-reg-start" data-reg-start="${e(regStartIso)}">${e(regStartText)}</span>
   </div>` : ''}
 
   <!-- 7. FAQS ACCORDION CARD -->

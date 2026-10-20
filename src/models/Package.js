@@ -17,7 +17,6 @@ class Package {
     this.packagePrice = data.packagePrice; // Package price
     this.validityMonths = data.validityMonths; // How many months the package is valid
     this.maxEvents = data.maxEvents !== undefined ? data.maxEvents : null; // Maximum number of events that can be joined
-    this.maxPurchases = data.maxPurchases !== undefined ? data.maxPurchases : null; // Maximum purchases/spots allowed
     this.eventIds = Array.isArray(data.eventIds) ? data.eventIds : []; // Array of event IDs included in this package
     this.validityPeriod = data.validityPeriod || null; // { duration: [start, end], validDays: [...] }
     this.location = data.location || null;

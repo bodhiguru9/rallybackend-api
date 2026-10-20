@@ -12,16 +12,9 @@ const { ObjectId } = require('mongodb');
 // ── Mocks ─────────────────────────────────────────────────────────────────────
 
 const mockSendPushToMany = jest.fn().mockResolvedValue({ sentCount: 2, failedCount: 0 });
-const mockSendPushNotification = jest.fn().mockResolvedValue({ success: true });
 
 jest.mock('../services/push.service', () => ({
   sendPushToMany: mockSendPushToMany,
-  sendPushNotification: mockSendPushNotification,
-}));
-
-const mockNotificationCreate = jest.fn().mockResolvedValue({ _id: 'notif-123' });
-jest.mock('../models/Notification', () => ({
-  create: mockNotificationCreate,
 }));
 
 const mockInsertMany = jest.fn().mockResolvedValue({ insertedCount: 2 });
@@ -55,10 +48,7 @@ jest.mock('../config/database', () => ({
   })),
 }));
 
-const {
-  notifySubscribersOnPackageCreation,
-  notifyOnPackagePurchase,
-} = require('../services/packageNotification.service');
+const { notifySubscribersOnPackageCreation } = require('../services/packageNotification.service');
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
@@ -251,136 +241,5 @@ describe('packageNotification.service — notifySubscribersOnPackageCreation', (
     expect(result.success).toBe(true);
     expect(mockSendPushToMany).not.toHaveBeenCalled();
     expect(mockInsertMany).toHaveBeenCalledTimes(1);
-  });
-});
-
-describe('packageNotification.service — notifyOnPackagePurchase', () => {
-  const organiserId = new ObjectId('507f1f77bcf86cd799439011');
-  const buyerId = new ObjectId('507f1f77bcf86cd799439012');
-  const purchaseId = new ObjectId('507f1f77bcf86cd799439099');
-  const packageDoc = {
-    _id: new ObjectId('507f1f77bcf86cd799439088'),
-    packageId: 'PKG1',
-    packageName: 'Cricket Membership',
-    organiserId,
-  };
-  const purchaseDoc = {
-    _id: purchaseId,
-    purchaseId: 'PURCH1',
-  };
-
-  beforeEach(() => {
-    jest.clearAllMocks();
-  });
-
-  test('sends push to organiser and buyer when both have FCM tokens', async () => {
-    mockFindOneUser.mockImplementation(({ _id }) => {
-      if (_id.toString() === organiserId.toString()) {
-        return Promise.resolve({
-          _id: organiserId,
-          fullName: 'Rally Socials',
-          communityName: 'Rally Socials',
-          fcmToken: 'fcm-organiser-token',
-        });
-      }
-      if (_id.toString() === buyerId.toString()) {
-        return Promise.resolve({
-          _id: buyerId,
-          userId: 101,
-          fullName: 'Ayush Buyer',
-          fcmToken: 'fcm-buyer-token',
-        });
-      }
-      return Promise.resolve(null);
-    });
-
-    const result = await notifyOnPackagePurchase({
-      buyerId,
-      organiserId,
-      package: packageDoc,
-      purchase: purchaseDoc,
-    });
-
-    expect(result.success).toBe(true);
-    expect(result.organiserPush).toBe(true);
-    expect(result.buyerPush).toBe(true);
-
-    // Organiser push verification
-    expect(mockSendPushNotification).toHaveBeenCalledWith(
-      expect.objectContaining({
-        token: 'fcm-organiser-token',
-        title: 'New Package Purchase! 🎉',
-        body: 'Ayush Buyer just purchased "Cricket Membership".',
-        data: expect.objectContaining({
-          type: 'package_purchase',
-          packageId: 'PKG1',
-          buyerName: 'Ayush Buyer',
-          packageName: 'Cricket Membership',
-        }),
-      })
-    );
-
-    // Buyer push verification
-    expect(mockSendPushNotification).toHaveBeenCalledWith(
-      expect.objectContaining({
-        token: 'fcm-buyer-token',
-        title: 'Package Purchased! 🎉',
-        body: 'You have successfully purchased "Cricket Membership".',
-        data: expect.objectContaining({
-          type: 'package_purchase_confirmed',
-          packageId: 'PKG1',
-          packageName: 'Cricket Membership',
-        }),
-      })
-    );
-
-    // In-app notifications created for both
-    expect(mockNotificationCreate).toHaveBeenCalledWith(
-      organiserId,
-      'package_purchase',
-      'Package Purchased',
-      'Ayush Buyer has purchased your package: Cricket Membership',
-      expect.any(Object)
-    );
-    expect(mockNotificationCreate).toHaveBeenCalledWith(
-      buyerId,
-      'package_purchase_confirmed',
-      'Package Purchase Confirmed',
-      'You have successfully purchased Cricket Membership!',
-      expect.any(Object)
-    );
-  });
-
-  test('skips push when organiser and buyer have no FCM tokens, but creates in-app notifications', async () => {
-    mockFindOneUser.mockImplementation(({ _id }) => {
-      if (_id.toString() === organiserId.toString()) {
-        return Promise.resolve({
-          _id: organiserId,
-          fullName: 'Rally Socials',
-          fcmToken: null,
-        });
-      }
-      if (_id.toString() === buyerId.toString()) {
-        return Promise.resolve({
-          _id: buyerId,
-          fullName: 'Player Without Token',
-          fcmToken: null,
-        });
-      }
-      return Promise.resolve(null);
-    });
-
-    const result = await notifyOnPackagePurchase({
-      buyerId,
-      organiserId,
-      package: packageDoc,
-      purchase: purchaseDoc,
-    });
-
-    expect(result.success).toBe(true);
-    expect(result.organiserPush).toBe(false);
-    expect(result.buyerPush).toBe(false);
-    expect(mockSendPushNotification).not.toHaveBeenCalled();
-    expect(mockNotificationCreate).toHaveBeenCalledTimes(2);
   });
 });

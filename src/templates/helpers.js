@@ -10,58 +10,10 @@ const validator = require('validator');
 const e = (str) => (typeof str === 'string' ? validator.escape(str) : '');
 
 /** Format event date: "Sat 24 Oct, 1:00 - 2:00 PM" matching EventCard.tsx formatDisplayRange */
-function formatDateTime(start, end, timeZone) {
+function formatDateTime(start, end) {
   if (!start) return '';
   const s = new Date(start);
   if (isNaN(s.getTime())) return '';
-
-  if (timeZone) {
-    try {
-      const getParts = (d) => {
-        const parts = new Intl.DateTimeFormat('en-US', {
-          weekday: 'short',
-          day: 'numeric',
-          month: 'short',
-          hour: 'numeric',
-          minute: '2-digit',
-          hour12: true,
-          timeZone,
-        }).formatToParts(d);
-        const g = (type) => parts.find((p) => p.type === type)?.value || '';
-        const hour = g('hour');
-        const min = g('minute');
-        const ampm = g('dayPeriod').toUpperCase();
-        return {
-          day: g('weekday'),
-          date: g('day'),
-          month: g('month'),
-          hour,
-          min,
-          ampm,
-          hm: `${hour}:${min}`,
-          full: `${hour}:${min} ${ampm}`,
-        };
-      };
-
-      const sParts = getParts(s);
-      const dayDateMonth = `${sParts.day} ${sParts.date} ${sParts.month}`;
-
-      if (end) {
-        const en = new Date(end);
-        if (!isNaN(en.getTime())) {
-          const eParts = getParts(en);
-          if (sParts.ampm === eParts.ampm) {
-            return `${dayDateMonth}, ${sParts.hm} - ${eParts.full}`;
-          }
-          return `${dayDateMonth}, ${sParts.full} - ${eParts.full}`;
-        }
-      }
-      return `${dayDateMonth}, ${sParts.full}`;
-    } catch {
-      // Fallback below if invalid timezone
-    }
-  }
-
   const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   const day = days[s.getDay()];
@@ -91,8 +43,8 @@ function formatDateTime(start, end, timeZone) {
 }
 
 /** Format short date for cards: "Sat 24 Oct, 1:00 PM" */
-function formatDateShort(start, timeZone) {
-  return formatDateTime(start, null, timeZone);
+function formatDateShort(start) {
+  return formatDateTime(start, null);
 }
 
 const SPORT_ICON_MAP = {
@@ -210,7 +162,7 @@ function mapEmbedUrl(location) {
 }
 
 /** Refund policy text from policyJoind field */
-function refundPolicyText(policyJoind, eventDateTime, timeZone) {
+function refundPolicyText(policyJoind, eventDateTime) {
   if (!policyJoind) return null;
   const labels = {
     'before-event': 'Refundable before the event starts',
@@ -218,10 +170,10 @@ function refundPolicyText(policyJoind, eventDateTime, timeZone) {
     'no-restrictions': 'No refund restrictions',
   };
   if (labels[policyJoind]) return labels[policyJoind];
-  if (typeof policyJoind === 'string' && (policyJoind.includes('T') || policyJoind.includes('-'))) {
+  if (policyJoind.includes('T') || policyJoind.includes('-')) {
     const d = new Date(policyJoind);
     if (!isNaN(d.getTime())) {
-      return `Refundable until ${formatDateShort(policyJoind, timeZone)}`;
+      return `Refundable until ${formatDateShort(policyJoind)}`;
     }
   }
   return e(String(policyJoind));
@@ -260,7 +212,7 @@ function renderParticipantAvatars(participants, maxShow = 4, eventId = '', isPac
 /**
  * Render an event card matching EventCard.tsx (Requirement 1)
  */
-function renderEventCard(ev, timeZone) {
+function renderEventCard(ev) {
   const id = ev.eventId || ev.mongoId || (ev._id ? String(ev._id) : '');
   const thumb = (ev.eventImages || ev.gameImages || [])[0] || '';
   const creator = ev.creator || {};
@@ -272,10 +224,7 @@ function renderEventCard(ev, timeZone) {
   const price = ev.eventPricePerGuest || ev.gameJoinPrice || 0;
   const isFree = price === 0;
   const location = ev.eventLocation || ev.gameLocationArena || 'Location TBD';
-  const startRaw = ev.eventDateTime || ev.gameStartDate;
-  const startIso = startRaw ? new Date(startRaw).toISOString() : '';
-  const endIso = ev.eventEndDateTime ? new Date(ev.eventEndDateTime).toISOString() : '';
-  const dateFormatted = formatDateTime(startRaw, ev.eventEndDateTime, timeZone);
+  const dateFormatted = formatDateTime(ev.eventDateTime, ev.eventEndDateTime);
 
   let spotsText = '';
   let spotsColorClass = 'spots-avail';
@@ -290,6 +239,7 @@ function renderEventCard(ev, timeZone) {
     spotsColorClass = 'spots-avail';
   }
 
+  const shareParamDate = e(dateFormatted);
   const shareParamLoc = e(location);
   const shareParamPrice = isFree ? 'Free' : `AED ${price}`;
 
@@ -309,7 +259,7 @@ function renderEventCard(ev, timeZone) {
             <div class="event-card-name">${e(ev.eventName || 'Event')}</div>
             ${creatorName ? `<div class="event-card-by">by ${e(creatorName)}</div>` : ''}
           </div>
-          <button class="event-card-share-btn" onclick="event.stopPropagation();handleShareEvent('${e(String(id))}', '${e(ev.eventName || 'Event')}', '${e(creatorName)}', '${e(startIso)}', '${shareParamLoc}', '${shareParamPrice}', '${e(endIso)}')" aria-label="Share">
+          <button class="event-card-share-btn" onclick="event.stopPropagation();handleShareEvent('${e(String(id))}', '${e(ev.eventName || 'Event')}', '${e(creatorName)}', '${shareParamDate}', '${shareParamLoc}', '${shareParamPrice}')" aria-label="Share">
             <img src="/public/webapp/assets/paper-plane.png" width="18" height="18" alt="Share" />
           </button>
         </div>
@@ -317,7 +267,7 @@ function renderEventCard(ev, timeZone) {
         <div class="event-card-meta">
           <div class="event-card-meta-row">
             <img src="/public/webapp/assets/time.png" width="14" height="14" alt="Time" class="meta-icon" />
-            <span class="event-card-meta-text js-event-datetime" data-event-start="${e(startIso)}" data-event-end="${e(endIso)}">${e(dateFormatted)}</span>
+            <span class="event-card-meta-text">${e(dateFormatted)}</span>
           </div>
           <div class="event-card-meta-row">
             <img src="/public/webapp/assets/location-pin.png" width="14" height="14" alt="Location" class="meta-icon" />
@@ -342,7 +292,7 @@ function renderEventCard(ev, timeZone) {
 }
 
 /** Format package validity text matching OrganiserPackageCard.tsx formatValidityDisplay */
-function formatPackageValidity(pkg, timeZone) {
+function formatPackageValidity(pkg) {
   const duration = pkg.validityPeriod?.duration;
   const validDays = pkg.validityPeriod?.validDays;
 
@@ -352,10 +302,8 @@ function formatPackageValidity(pkg, timeZone) {
       const start = new Date(duration[0]);
       const end = new Date(duration[1]);
       if (!isNaN(start.getTime()) && !isNaN(end.getTime())) {
-        const opts = { day: 'numeric', month: 'short' };
-        if (timeZone) opts.timeZone = timeZone;
-        const startFormatted = start.toLocaleDateString('en-GB', opts);
-        const endFormatted = end.toLocaleDateString('en-GB', opts);
+        const startFormatted = start.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+        const endFormatted = end.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
         datePart = `${startFormatted} - ${endFormatted}`;
       }
     } catch {
@@ -399,18 +347,14 @@ function formatPackageLocation(pkg) {
 /**
  * Render a package card matching OrganiserPackageCard.tsx
  */
-function renderPackageCard(pkg, organiser = {}, timeZone) {
+function renderPackageCard(pkg, organiser = {}) {
   const pkgId = pkg.packageId || (pkg._id ? String(pkg._id) : '');
   const name = pkg.packageName || 'Package';
   const price = pkg.packagePrice ?? pkg.price ?? 0;
-  const validityText = formatPackageValidity(pkg, timeZone);
+  const validityText = formatPackageValidity(pkg);
   const locationText = formatPackageLocation(pkg);
   const sports = Array.isArray(pkg.sports) && pkg.sports.length > 0 ? pkg.sports : ['all-sports'];
   const creatorName = organiser.communityName || organiser.fullName || pkg.creator?.communityName || pkg.creator?.fullName || 'Organiser';
-
-  const duration = pkg.validityPeriod?.duration;
-  const durationStartIso = duration && duration[0] ? new Date(duration[0]).toISOString() : '';
-  const durationEndIso = duration && duration[1] ? new Date(duration[1]).toISOString() : '';
 
   const joinedUsers = Array.isArray(pkg.joinedUsers) ? pkg.joinedUsers : (Array.isArray(pkg.purchasedBy) ? pkg.purchasedBy : []);
   const totalJoined = pkg.joinedUsersCount !== undefined && pkg.joinedUsersCount !== null ? pkg.joinedUsersCount : joinedUsers.length;
@@ -448,7 +392,7 @@ function renderPackageCard(pkg, organiser = {}, timeZone) {
     <div class="pkg-card-meta">
       <div class="pkg-card-meta-row">
         <img src="/public/webapp/assets/time.png" width="16" height="16" alt="Time" class="meta-icon" />
-        <span class="pkg-card-meta-text js-validity-text" data-duration-start="${e(durationStartIso)}" data-duration-end="${e(durationEndIso)}">${e(validityText)}</span>
+        <span class="pkg-card-meta-text">${e(validityText)}</span>
       </div>
       <div class="pkg-card-meta-row">
         <img src="/public/webapp/assets/location-pin.png" width="16" height="16" alt="Location" class="meta-icon" />

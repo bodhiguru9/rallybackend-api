@@ -30,18 +30,14 @@ window.handleShareProfile = function(id, name, creatorName) {
 };
 
 /* Share helpers */
-window.handleShareEvent = function(id, name, creator, dateOrStart, loc, priceStr, end) {
+window.handleShareEvent = function(id, name, creator, date, loc, priceStr) {
   var url = window.location.origin + '/event/' + id;
   var title = name || 'Event';
   var text = (creator ? 'Check this event out! ' + title + ' by ' + creator + '.' : 'Check this event out! ' + title);
-  var date = dateOrStart;
-  if (dateOrStart && (dateOrStart.indexOf('T') !== -1 || dateOrStart.indexOf('Z') !== -1 || !isNaN(Date.parse(dateOrStart)))) {
-    date = formatDateTimeRange(dateOrStart, end);
-  }
-  if (date) text += '\n\n📅 ' + date;
-  if (loc) text += '\n📍 ' + loc;
-  if (priceStr) text += '\n💰 ' + priceStr;
-  text += '\n\n🔗 Book Now: ' + url;
+  if (date) text += '\\n\\n📅 ' + date;
+  if (loc) text += '\\n📍 ' + loc;
+  if (priceStr) text += '\\n💰 ' + priceStr;
+  text += '\\n\\n🔗 Book Now: ' + url;
   
   if (navigator.share) {
     navigator.share({ title: title, text: text, url: url }).catch(function(){});
@@ -163,16 +159,6 @@ window.selectFilter = function(type, value, el) {
   renderPickedEvents();
 };
 
-function getLocalDateKey(d) {
-  if (!d) return '';
-  var dt = typeof d === 'string' || typeof d === 'number' ? new Date(d) : d;
-  if (isNaN(dt.getTime())) return '';
-  var y = dt.getFullYear();
-  var m = (dt.getMonth() + 1).toString().padStart(2, '0');
-  var day = dt.getDate().toString().padStart(2, '0');
-  return y + '-' + m + '-' + day;
-}
-
 window.filterByDate = function(el, isoDate) {
   var isActive = el.classList.contains('active');
   document.querySelectorAll('.date-chip').forEach(function(c) { c.classList.remove('active'); });
@@ -184,12 +170,7 @@ window.filterByDate = function(el, isoDate) {
   } else {
     el.classList.add('active');
     activeDateISO = isoDate;
-    if (typeof isoDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(isoDate)) {
-      var parts = isoDate.split('-').map(Number);
-      d = new Date(parts[0], parts[1] - 1, parts[2]);
-    } else {
-      d = new Date(isoDate);
-    }
+    d = new Date(isoDate);
   }
   
   var monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
@@ -203,12 +184,12 @@ window.filterByDate = function(el, isoDate) {
   renderPickedEvents();
 };
 
-function isSameDay(dateA, dateOrKeyB) {
-  if (!dateA || !dateOrKeyB) return false;
-  if (typeof dateOrKeyB === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dateOrKeyB)) {
-    return getLocalDateKey(dateA) === dateOrKeyB;
-  }
-  return getLocalDateKey(dateA) === getLocalDateKey(dateOrKeyB);
+function isSameDay(dateA, isoB) {
+  var a = new Date(dateA);
+  var b = new Date(isoB);
+  return a.getFullYear() === b.getFullYear() &&
+         a.getMonth()    === b.getMonth()    &&
+         a.getDate()     === b.getDate();
 }
 
 var SPORT_ICONS = {
@@ -427,8 +408,6 @@ function renderPickedEvents() {
     var id = ev.eventId || ev.mongoId || (ev._id ? String(ev._id) : '');
     var dateFormatted = formatDateTimeRange(ev.eventDateTime || ev.gameStartDate, ev.eventEndDateTime);
     var location = ev.eventLocation || ev.gameLocationArena || 'Location TBD';
-    var startIso = dt ? new Date(dt).toISOString() : '';
-    var endIso = ev.eventEndDateTime ? new Date(ev.eventEndDateTime).toISOString() : '';
 
     html += '<div class="event-card fade-in" onclick="location.href=\'/event/' + escHtml(id) + '\'" role="button" tabindex="0">' +
       '<div class="event-card-top">' +
@@ -444,7 +423,7 @@ function renderPickedEvents() {
               '<div class="event-card-name">' + escHtml(ev.eventName || 'Event') + '</div>' +
               (creatorName ? '<div class="event-card-by">by ' + escHtml(creatorName) + '</div>' : '') +
             '</div>' +
-            '<button class="event-card-share-btn" onclick="event.stopPropagation();handleShareEvent(\'' + escHtml(id) + '\', \'' + escHtml(ev.eventName) + '\', \'' + escHtml(creatorName) + '\', \'' + escHtml(startIso) + '\', \'' + escHtml(location) + '\', \'' + (isFree ? 'Free' : 'AED ' + price) + '\', \'' + escHtml(endIso) + '\')" aria-label="Share">' +
+            '<button class="event-card-share-btn" onclick="event.stopPropagation();handleShareEvent(\'' + escHtml(id) + '\', \'' + escHtml(ev.eventName) + '\', \'' + escHtml(creatorName) + '\', \'' + escHtml(dateFormatted) + '\', \'' + escHtml(location) + '\', \'' + (isFree ? 'Free' : 'AED ' + price) + '\')" aria-label="Share">' +
               '<img src="/public/webapp/assets/paper-plane.png" width="18" height="18" alt="Share" />' +
             '</button>' +
           '</div>' +
@@ -452,7 +431,7 @@ function renderPickedEvents() {
           '<div class="event-card-meta">' +
             '<div class="event-card-meta-row">' +
               '<img src="/public/webapp/assets/time.png" width="14" height="14" alt="Time" class="meta-icon" />' +
-              '<span class="event-card-meta-text js-event-datetime" data-event-start="' + escHtml(startIso) + '" data-event-end="' + escHtml(endIso) + '">' + escHtml(dateFormatted) + '</span>' +
+              '<span class="event-card-meta-text">' + escHtml(dateFormatted) + '</span>' +
             '</div>' +
             '<div class="event-card-meta-row">' +
               '<img src="/public/webapp/assets/location-pin.png" width="14" height="14" alt="Location" class="meta-icon" />' +
@@ -492,116 +471,12 @@ function formatTime(d) {
   return (h % 12 || 12) + ':' + m + ' ' + ampm;
 }
 
-function formatRefundPolicyNote(policyJoind) {
-  if (!policyJoind) return '';
-  var labels = {
-    'before-event': 'Before the event starts',
-    'until-start':  'Until event start time',
-    'no-restrictions': 'No refund restrictions',
-  };
-  if (labels[policyJoind]) return labels[policyJoind];
-  if (typeof policyJoind === 'string' && (policyJoind.indexOf('T') !== -1 || policyJoind.indexOf('-') !== -1)) {
-    var d = new Date(policyJoind);
-    if (!isNaN(d.getTime())) {
-      return formatDateTimeRange(policyJoind, null);
-    }
-  }
-  return policyJoind;
-}
-
-function formatRefundPolicyFull(policyJoind) {
-  if (!policyJoind) return '';
-  var labels = {
-    'before-event': 'Refundable before the event starts',
-    'until-start':  'Refundable until event start time',
-    'no-restrictions': 'No refund restrictions',
-  };
-  if (labels[policyJoind]) return labels[policyJoind];
-  if (typeof policyJoind === 'string' && (policyJoind.indexOf('T') !== -1 || policyJoind.indexOf('-') !== -1)) {
-    var d = new Date(policyJoind);
-    if (!isNaN(d.getTime())) {
-      return 'Refundable until ' + formatDateTimeRange(policyJoind, null);
-    }
-  }
-  return policyJoind;
-}
-
-window.hydrateAllLocalTimes = function() {
-  // 1. All event date-time elements
-  document.querySelectorAll('.js-event-datetime').forEach(function(el) {
-    var start = el.getAttribute('data-event-start');
-    var end = el.getAttribute('data-event-end');
-    if (start) {
-      var formatted = formatDateTimeRange(start, end);
-      if (formatted) {
-        var textEl = el.querySelector('.featured-card-date-text') || el.querySelector('.event-card-meta-text') || el;
-        textEl.textContent = formatted;
-      }
-    }
-  });
-
-  // 2. Refund policy notes
-  document.querySelectorAll('.js-refund-note').forEach(function(el) {
-    var policy = el.getAttribute('data-policy');
-    if (policy) {
-      var note = formatRefundPolicyNote(policy);
-      if (note) el.textContent = note;
-    }
-  });
-  document.querySelectorAll('.js-refund-text').forEach(function(el) {
-    var policy = el.getAttribute('data-policy');
-    if (policy) {
-      var full = formatRefundPolicyFull(policy);
-      if (full) el.textContent = full;
-    }
-  });
-
-  // 3. Registration start banners
-  document.querySelectorAll('.js-reg-start').forEach(function(el) {
-    var start = el.getAttribute('data-reg-start');
-    if (start) {
-      var d = new Date(start);
-      if (!isNaN(d.getTime())) {
-        var days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-        var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-        el.textContent = 'Registration starts on ' + days[d.getDay()] + ' ' + d.getDate() + ' ' + months[d.getMonth()];
-      }
-    }
-  });
-
-  // 4. Package validity date ranges
-  document.querySelectorAll('.js-validity-text').forEach(function(el) {
-    var start = el.getAttribute('data-duration-start');
-    var end = el.getAttribute('data-duration-end');
-    if (start && end) {
-      var s = new Date(start);
-      var en = new Date(end);
-      if (!isNaN(s.getTime()) && !isNaN(en.getTime())) {
-        var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-        var cur = el.textContent || '';
-        var mDays = cur.match(/(\s*\[[^\]]+\])/);
-        var extra = mDays ? mDays[1] : '';
-        el.textContent = s.getDate() + ' ' + months[s.getMonth()] + ' - ' + en.getDate() + ' ' + months[en.getMonth()] + extra;
-      }
-    }
-  });
-};
-
-// Run initial render and hydration logic on DOM ready
+// Run initial render and scroll logic on DOM ready
 document.addEventListener('DOMContentLoaded', function() {
-  if (window.hydrateAllLocalTimes) {
-    window.hydrateAllLocalTimes();
-  }
   if (document.getElementById('picked-events-container')) {
     renderPickedEvents();
   }
 });
-
-if (document.readyState === 'interactive' || document.readyState === 'complete') {
-  if (window.hydrateAllLocalTimes) {
-    window.hydrateAllLocalTimes();
-  }
-}
 
 /* ------------------------------------------------------------------ */
 /* Calendar Modal Logic                                                 */
@@ -657,13 +532,12 @@ function renderCalendar() {
     var dateObj = new Date(currentCalYear, currentCalMonth, d);
     var isPast = dateObj < today;
     var isActive = activeDateISO && isSameDay(dateObj, activeDateISO);
-    var dateKey = getLocalDateKey(dateObj);
     
     if (isPast) {
       html += '<div class="cal-date disabled">' + d + '</div>';
     } else {
       var actClass = isActive ? ' active' : '';
-      html += '<div class="cal-date' + actClass + '" onclick="selectCalendarDate(\'' + dateKey + '\')">' + d + '</div>';
+      html += '<div class="cal-date' + actClass + '" onclick="selectCalendarDate(\'' + dateObj.toISOString() + '\')">' + d + '</div>';
     }
   }
   
@@ -671,15 +545,8 @@ function renderCalendar() {
 }
 
 window.selectCalendarDate = function(iso) {
-  var d;
-  if (typeof iso === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(iso)) {
-    var parts = iso.split('-').map(Number);
-    d = new Date(parts[0], parts[1] - 1, parts[2]);
-  } else {
-    d = new Date(iso);
-  }
-  var key = getLocalDateKey(d);
-  activeDateISO = key;
+  activeDateISO = iso;
+  var d = new Date(iso);
   var monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
   var fullDays = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
   
@@ -690,7 +557,7 @@ window.selectCalendarDate = function(iso) {
   
   document.querySelectorAll('.date-chip').forEach(function(c) { c.classList.remove('active'); });
   document.querySelectorAll('.date-chip').forEach(function(c) {
-    if (c.getAttribute('data-date-key') === key || (c.getAttribute('onclick') && c.getAttribute('onclick').includes(key))) {
+    if (c.getAttribute('onclick') && c.getAttribute('onclick').includes(iso.substring(0, 10))) {
       c.classList.add('active');
     }
   });

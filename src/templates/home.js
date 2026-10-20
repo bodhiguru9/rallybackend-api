@@ -4,7 +4,7 @@
  */
 const { e, renderTags, formatDateTime, formatPrice, renderAvatar } = require('./helpers');
 
-module.exports = function homepageTemplate({ topOrganisers = [], featuredEvents = [], pickedEvents = [], timeZone = null }) {
+module.exports = function homepageTemplate({ topOrganisers = [], featuredEvents = [], pickedEvents = [] }) {
   
   // Inject data for client-side interactivity (filters & date strip)
   const safePickedEvents = JSON.stringify(pickedEvents).replace(/<\/script>/gi, '<\\/script>');
@@ -60,9 +60,6 @@ module.exports = function homepageTemplate({ topOrganisers = [], featuredEvents 
       const thumb = (ev.eventImages || ev.gameImages || [])[0] || '';
       const creatorName = ev.creator?.communityName || ev.creator?.fullName || ev.eventCreatorName || 'Organiser';
       const id = ev.eventId || ev._id;
-      const startRaw = ev.eventDateTime || ev.gameStartDate;
-      const startIso = startRaw ? new Date(startRaw).toISOString() : '';
-      const endIso = ev.eventEndDateTime ? new Date(ev.eventEndDateTime).toISOString() : '';
       return `
       <div class="featured-card" onclick="location.href='/event/${e(String(id))}'">
         ${thumb
@@ -77,9 +74,9 @@ module.exports = function homepageTemplate({ topOrganisers = [], featuredEvents 
         <div class="featured-card-body">
           <div class="featured-card-name">${e(ev.eventName || 'Event')}</div>
           <div class="featured-card-by">by ${e(creatorName)}</div>
-          <div class="featured-card-date js-event-datetime" data-event-start="${e(startIso)}" data-event-end="${e(endIso)}">
+          <div class="featured-card-date">
             <img src="/public/webapp/assets/time.png" width="12" height="12" alt="Time" style="vertical-align:middle;margin-right:4px;" />
-            <span class="featured-card-date-text">${e(formatDateTime(startRaw, ev.eventEndDateTime, timeZone))}</span>
+            ${e(formatDateTime(ev.eventDateTime, ev.eventEndDateTime))}
           </div>
         </div>
       </div>
@@ -209,41 +206,33 @@ module.exports = function homepageTemplate({ topOrganisers = [], featuredEvents 
   window.__RALLY_PICKED_EVENTS__ = ${safePickedEvents};
   window.__RALLY_FEATURED_EVENTS__ = ${safeFeaturedEvents};
   
-    // Quick date strip generator (next 14 days)
-    var ds = document.getElementById('home-date-strip');
-    if (ds) {
-      var html = '';
-      var today = new Date();
-      var days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-      var monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
-      var fullDays = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
-      
-      var mDisp = document.getElementById('current-month-display');
-      var dDisp = document.getElementById('current-day-display');
-      if (mDisp) mDisp.textContent = monthNames[today.getMonth()];
-      if (dDisp) dDisp.textContent = fullDays[today.getDay()];
-      
-      function getLocalDateKey(date) {
-        var y = date.getFullYear();
-        var m = (date.getMonth() + 1).toString().padStart(2, '0');
-        var d = date.getDate().toString().padStart(2, '0');
-        return y + '-' + m + '-' + d;
-      }
+  // Quick date strip generator (next 14 days)
+  var ds = document.getElementById('home-date-strip');
+  if (ds) {
+    var html = '';
+    var today = new Date();
+    var days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+    var monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+    var fullDays = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+    
+    var mDisp = document.getElementById('current-month-display');
+    var dDisp = document.getElementById('current-day-display');
+    if (mDisp) mDisp.textContent = monthNames[today.getMonth()];
+    if (dDisp) dDisp.textContent = fullDays[today.getDay()];
+    
+    // Set activeDateISO for initial render
+    if (window.activeDateISO === null) window.activeDateISO = today.toISOString();
 
-      // Set activeDateISO for initial render to today's local date key
-      if (window.activeDateISO === null) window.activeDateISO = getLocalDateKey(today);
-
-      for(var i=0; i<14; i++) {
-        var d = new Date(today.getFullYear(), today.getMonth(), today.getDate() + i);
-        var dateKey = getLocalDateKey(d);
-        var act = i === 0 ? ' active' : '';
-        html += '<div class="date-chip' + act + '" data-date-key="' + dateKey + '" onclick="filterByDate(this, \\'' + dateKey + '\\')">' +
-                '<div class="d-num">' + d.getDate() + '</div>' +
-                '<div class="d-day">' + days[d.getDay()] + '</div>' +
-                '</div>';
-      }
-      ds.innerHTML = html;
+    for(var i=0; i<14; i++) {
+      var d = new Date(today.getFullYear(), today.getMonth(), today.getDate() + i);
+      var act = i === 0 ? ' active' : '';
+      html += '<div class="date-chip' + act + '" onclick="filterByDate(this, \\'' + d.toISOString() + '\\')">' +
+              '<div class="d-num">' + d.getDate() + '</div>' +
+              '<div class="d-day">' + days[d.getDay()] + '</div>' +
+              '</div>';
     }
+    ds.innerHTML = html;
+  }
 })();
 </script>
 `;

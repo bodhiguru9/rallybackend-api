@@ -18,7 +18,7 @@
 const { e, formatDateTime, renderTags, renderAvatar, formatPrice,
         restrictionText, mapEmbedUrl, refundPolicyText, renderParticipantAvatars } = require('./helpers');
 
-module.exports = function eventDetailTemplate({ event, timeZone = null }) {
+module.exports = function eventDetailTemplate({ event }) {
   const price = event.eventPricePerGuest || event.gameJoinPrice || 0;
   const priceFormatted = formatPrice(price);
   const spotsBooked = event.participantsCount || (event.participants || []).length || 0;
@@ -36,11 +36,7 @@ module.exports = function eventDetailTemplate({ event, timeZone = null }) {
 
   const restriction = restrictionText(event);
   const mapUrl = mapEmbedUrl(event.eventLocation || event.gameLocationArena);
-  const startRaw = event.eventDateTime || event.gameStartDate;
-  const startIso = startRaw ? new Date(startRaw).toISOString() : '';
-  const endIso = event.eventEndDateTime ? new Date(event.eventEndDateTime).toISOString() : '';
-  const refundNote = refundPolicyText(event.policyJoind, event.eventDateTime, timeZone);
-  const dateFormatted = formatDateTime(startRaw, event.eventEndDateTime, timeZone);
+  const refundNote = refundPolicyText(event.policyJoind, event.eventDateTime);
   const heroImage = (event.eventImages || event.gameImages || [])[0] || '';
 
   const instagramHandle = event.creator?.instagramHandle || event.creator?.instagramLink || '';
@@ -83,7 +79,7 @@ module.exports = function eventDetailTemplate({ event, timeZone = null }) {
       <div class="ed-by">by ${e(communityName || creatorName)}</div>
       <div class="event-card-tags">${renderTags(event.eventSports, event.eventType)}</div>
     </div>
-    <button class="ed-hero-share" onclick="handleShareEvent('${e(String(event.eventId || event._id))}', '${e(event.eventName || 'Event')}', '${e(communityName || creatorName)}', '${e(startIso)}', '${e(event.eventLocation || event.gameLocationArena || '')}', '${priceFormatted ? 'AED ' + price : 'Free'}', '${e(endIso)}')" aria-label="Share event">
+    <button class="ed-hero-share" onclick="handleShare()" aria-label="Share event">
       <img src="/public/webapp/assets/paper-plane.png" alt="Share" width="16" height="16" />
     </button>
   </div>
@@ -93,7 +89,7 @@ module.exports = function eventDetailTemplate({ event, timeZone = null }) {
     <div class="ed-card-title">Date &amp; Location</div>
     <div class="ed-card-row">
       <img src="/public/webapp/assets/time.png" alt="Time" width="15" height="15" style="flex-shrink:0;margin-top:2px;" />
-      <span class="ed-card-row-text js-event-datetime" data-event-start="${e(startIso)}" data-event-end="${e(endIso)}">${e(dateFormatted)}</span>
+      <span class="ed-card-row-text">${e(formatDateTime(event.eventDateTime, event.eventEndDateTime))}</span>
     </div>
     <div class="ed-card-row">
       <img src="/public/webapp/assets/location-pin.png" alt="Location" width="15" height="15" style="flex-shrink:0;margin-top:2px;" />
@@ -112,7 +108,7 @@ module.exports = function eventDetailTemplate({ event, timeZone = null }) {
       </span>
     </div>
     ${renderParticipantAvatars(participants, 4, event._id || event.eventId)}
-    ${refundNote ? `<div class="ed-refund-note">Refundable until: <span class="js-refund-note" data-policy="${e(event.policyJoind)}">${e(refundNote.replace(/^Refundable until\s*/i, ''))}</span></div>` : ''}
+    ${refundNote ? `<div class="ed-refund-note">Refundable until: ${e(refundNote)}</div>` : ''}
   </div>
 
   <!-- 4. ABOUT EVENT & RESTRICTIONS -->
@@ -131,7 +127,7 @@ module.exports = function eventDetailTemplate({ event, timeZone = null }) {
   ${priceFormatted && refundNote ? `
   <div class="ed-card">
     <div class="ed-card-title">Refund Policy</div>
-    <div class="refund-text js-refund-text" data-policy="${e(event.policyJoind)}">${e(refundNote)}</div>
+    <div class="refund-text">${e(refundNote)}</div>
   </div>` : ''}
 
   <!-- 7. ORGANISER CARD -->

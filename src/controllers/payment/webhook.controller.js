@@ -130,17 +130,35 @@ const handlePaymentIntentSucceeded = async (paymentIntent) => {
           { $set: { purchaseId: purchase._id, status: 'success', updatedAt: new Date() } }
         );
 
-        // Send notifications (in-app + FCM push) to organiser & player
+        // Send notifications
         try {
-          const { notifyOnPackagePurchase } = require('../../services/packageNotification.service');
-          notifyOnPackagePurchase({
-            buyerId: payment.userId,
-            organiserId: pkg.organiserId,
-            package: pkg,
-            purchase,
-          }).catch((notifErr) => {
-            console.error('Webhook: Failed to send package notifications:', notifErr.message);
-          });
+          const User = require('../../models/User');
+          const Notification = require('../../models/Notification');
+          const buyer = await User.findById(payment.userId);
+          await Notification.create(
+            pkg.organiserId,
+            'package_purchase',
+            'Package Purchased',
+            `${buyer?.fullName || 'A player'} has purchased your package: ${pkg.packageName}`,
+            {
+              packageId: pkg.packageId,
+              purchaseId: purchase._id.toString(),
+              userId: payment.userId.toString(),
+              organiserId: pkg.organiserId ? pkg.organiserId.toString() : '',
+            }
+          );
+          await Notification.create(
+            payment.userId,
+            'package_purchase_confirmed',
+            'Package Purchase Confirmed',
+            `You have successfully purchased ${pkg.packageName}!`,
+            {
+              packageId: pkg.packageId,
+              packageName: pkg.packageName,
+              purchaseId: purchase._id.toString(),
+              organiserId: pkg.organiserId ? pkg.organiserId.toString() : '',
+            }
+          );
         } catch (notifErr) {
           console.error('Webhook: Failed to send package notifications:', notifErr.message);
         }

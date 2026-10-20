@@ -20,7 +20,7 @@ module.exports = function shell({ title, description, ogImage, ogUrl, bodyClass 
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no">
-  <meta name="theme-color" content="#3D6F92">
+  <meta name="theme-color" content="#3B82F6">
   <title>${title ? `${title} | Rally` : 'Rally — Find Sports Events Near You'}</title>
   <meta name="description" content="${description || 'Find and join exciting sports events near you on Rally.'}">
   <meta name="robots" content="noindex,nofollow">
@@ -47,23 +47,6 @@ module.exports = function shell({ title, description, ogImage, ogUrl, bodyClass 
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 
-  <!-- Client Timezone Auto-detection -->
-  <script>
-    (function() {
-      try {
-        var tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-        if (tz) {
-          window.viewerTimeZone = tz;
-          var curMatch = document.cookie.match(/(?:^|;\s*)viewer_tz=([^;]+)/);
-          var curTz = curMatch ? decodeURIComponent(curMatch[1]) : '';
-          if (curTz !== tz) {
-            document.cookie = 'viewer_tz=' + encodeURIComponent(tz) + ';path=/;max-age=31536000;SameSite=Lax';
-          }
-        }
-      } catch (e) {}
-    })();
-  </script>
-
   <!-- Rally Web CSS -->
   <link rel="stylesheet" href="/public/webapp/styles/rally-web.css">
 </head>
@@ -71,55 +54,6 @@ module.exports = function shell({ title, description, ogImage, ogUrl, bodyClass 
   <div id="app"${bodyClass ? ` class="${bodyClass}"` : ''}>
     ${bodyContent}
   </div>
-
-  <!-- Immediate local time hydration to prevent layout shift before app.js executes -->
-  <script>
-    (function() {
-      function pad(n) { return n < 10 ? '0' + n : n; }
-      function fmtRange(start, end) {
-        if (!start) return '';
-        var s = new Date(start);
-        if (isNaN(s.getTime())) return '';
-        var days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-        var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-        var pTime = function(d) {
-          var h = d.getHours();
-          var m = pad(d.getMinutes());
-          var ampm = h >= 12 ? 'PM' : 'AM';
-          var h12 = h % 12 || 12;
-          return { hm: h12 + ':' + m, full: h12 + ':' + m + ' ' + ampm, ampm: ampm };
-        };
-        var sT = pTime(s);
-        var dayStr = days[s.getDay()] + ' ' + s.getDate() + ' ' + months[s.getMonth()];
-        if (end) {
-          var en = new Date(end);
-          if (!isNaN(en.getTime())) {
-            var eT = pTime(en);
-            if (sT.ampm === eT.ampm) {
-              return dayStr + ', ' + sT.hm + ' - ' + eT.full;
-            }
-            return dayStr + ', ' + sT.full + ' - ' + eT.full;
-          }
-        }
-        return dayStr + ', ' + sT.full;
-      }
-      try {
-        var els = document.querySelectorAll('.js-event-datetime');
-        for (var i = 0; i < els.length; i++) {
-          var el = els[i];
-          var st = el.getAttribute('data-event-start');
-          var en = el.getAttribute('data-event-end');
-          if (st) {
-            var txt = fmtRange(st, en);
-            if (txt) {
-              var target = el.querySelector('.featured-card-date-text') || el.querySelector('.event-card-meta-text') || el;
-              target.textContent = txt;
-            }
-          }
-        }
-      } catch (e) {}
-    })();
-  </script>
 
   <!-- MEMBERS MODAL -->
   <div class="modal-backdrop" id="members-modal" onclick="closeMembersModal(event)">

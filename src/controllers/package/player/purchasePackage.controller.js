@@ -87,17 +87,34 @@ const purchasePackage = async (req, res, next) => {
 
       const purchase = await PackagePurchase.create(purchaseData);
 
-      // Send notifications (in-app + FCM push) for package acquisition
+      // Send notifications for free package acquisition
       try {
-        const { notifyOnPackagePurchase } = require('../../../services/packageNotification.service');
-        notifyOnPackagePurchase({
-          buyerId: userId,
-          organiserId: package.organiserId,
-          package,
-          purchase,
-        }).catch((notifErr) => {
-          console.error('Free package notification error:', notifErr.message);
-        });
+        const Notification = require('../../../models/Notification');
+        const buyer = await User.findById(userId);
+        await Notification.create(
+          package.organiserId,
+          'package_purchase',
+          'Package Purchased',
+          `${buyer?.fullName || 'A player'} has acquired your package: ${package.packageName}`,
+          {
+            packageId: package.packageId,
+            purchaseId: purchase._id.toString(),
+            userId: userId.toString(),
+            organiserId: package.organiserId ? package.organiserId.toString() : '',
+          }
+        );
+        await Notification.create(
+          userId,
+          'package_purchase_confirmed',
+          'Package Purchase Confirmed',
+          `You have successfully acquired ${package.packageName}!`,
+          {
+            packageId: package.packageId,
+            packageName: package.packageName,
+            purchaseId: purchase._id.toString(),
+            organiserId: package.organiserId ? package.organiserId.toString() : '',
+          }
+        );
       } catch (notifErr) {
         console.error('Free package notification error:', notifErr.message);
       }

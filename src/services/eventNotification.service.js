@@ -12,20 +12,20 @@ const APP_NAME = process.env.APP_NAME || 'Rally';
 // subsequent calls use the in-memory cached SID.
 const TEMPLATES = {
   bookingConfirmed: {
-    friendlyName: `${APP_NAME} Booking Confirmed`,
-    body: `Hi {{1}}, your booking is confirmed for {{2}} on {{3}} at {{4}}. Booking ID: {{5}}.`,
+    friendlyName: `${APP_NAME} Booking Confirmed v2`,
+    body: `Hi {{1}}, your booking with Rally is confirmed!\n\nSession details:\n• Event: {{2}}\n• Date & Time: {{3}}\n• Location: {{4}}\n• Booking ID: {{5}}\n\nWe look forward to seeing you there. You can view match directions and manage your booking directly in the Rally app.`,
   },
   newBooking: {
-    friendlyName: `${APP_NAME} New Booking`,
-    body: `Hi {{1}}, {{2}} has joined your event {{3}} on {{4}} at {{5}}.`,
+    friendlyName: `${APP_NAME} New Booking v2`,
+    body: `Hi {{1}}, a new player has joined your event on Rally.\n\nBooking details:\n• Player: {{2}}\n• Event: {{3}}\n• Date & Time: {{4}}\n• Location: {{5}}\n\nPlease open your Rally organiser dashboard to view attendee details or manage your roster.`,
   },
   bookingCancelled: {
     friendlyName: `${APP_NAME} Booking Cancelled`,
     body: `Hi {{1}}, your booking for {{2}} on {{3}} at {{4}} has been cancelled.`,
   },
   hostBookingCancelled: {
-    friendlyName: `${APP_NAME} Host Booking Cancelled`,
-    body: `Hi {{1}}, {{2}} cancelled their booking for {{3}} on {{4}} at {{5}}.`,
+    friendlyName: `${APP_NAME} Host Booking Cancelled v2`,
+    body: `Hi {{1}}, a player has cancelled their booking for your event on Rally.\n\nCancellation details:\n• Player: {{2}}\n• Event: {{3}}\n• Date & Time: {{4}}\n• Location: {{5}}\n\nThe spot has been reopened automatically for other players or waitlist members in the Rally app.`,
   },
   eventCancelled: {
     friendlyName: `${APP_NAME} Event Cancelled`,
@@ -40,16 +40,16 @@ const TEMPLATES = {
     body: `Hi {{1}}, we're sorry but the last available spot for {{2}} has just been taken. You are still on the waitlist in case another spot opens.`,
   },
   waitlistJoinHost: {
-    friendlyName: `${APP_NAME} New Waitlist Request`,
-    body: `Hi {{1}}, {{2}} has joined the waitlist for your full event {{3}} on {{4}}.`,
+    friendlyName: `${APP_NAME} New Waitlist Request v2`,
+    body: `Hi {{1}}, a player has joined the waitlist for your session on Rally.\n\nWaitlist details:\n• Player: {{2}}\n• Event: {{3}}\n• Date & Time: {{4}}\n\nIf a spot opens up, they will be notified automatically to complete their booking.`,
   },
   organiserJoinRequest: {
-    friendlyName: `${APP_NAME} New Community Join Request`,
-    body: `Hi {{1}}, {{2}} has requested to join your community {{3}}.`,
+    friendlyName: `${APP_NAME} New Community Join Request v2`,
+    body: `Hi {{1}}, you have received a new membership request on Rally.\n\nRequest details:\n• Player: {{2}}\n• Community: {{3}}\n\nPlease open your Rally app to review and accept or decline this request.`,
   },
   eventRequestAccepted: {
-    friendlyName: `${APP_NAME} Event Request Accepted`,
-    body: `Hi {{1}}, your request to join {{2}} has been accepted! {{3}}`,
+    friendlyName: `${APP_NAME} Event Request Accepted v2`,
+    body: `Hi {{1}}, your request to join {{2}} on Rally has been approved by the organiser!\n\nNext steps: {{3}}. Please open the Rally app to complete your registration and secure your spot.`,
   },
   eventRequestRejected: {
     friendlyName: `${APP_NAME} Event Request Rejected`,

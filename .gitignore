@@ -88,6 +88,14 @@ exportUsersCsv.js
 findEnv.js
 testApi.js
 testMongo.js
+check-login-debug.js
+check-users-debug.js
+check-users-pwd-debug.js
+remove_dob.js
+scratch/
+scripts/fix-and-submit-whatsapp-templates.js
+scripts/reset-user-password.js
+.expo/
 
 # IDE
 .vscode/

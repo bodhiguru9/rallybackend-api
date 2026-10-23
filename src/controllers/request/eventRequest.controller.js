@@ -168,11 +168,14 @@ const joinWaitlist = async (req, res, next) => {
         `${user.fullName || 'A player'} has joined the waitlist of your event ${eventName}`,
         {
           userId: userId,
+          playerId: user.userId,
+          playerName: user.fullName,
+          playerProfilePic: user.profilePic,
           eventId: event._id.toString(),
           eventName: eventName,
           waitlistId: waitlistResult.waitlistId,
           requestId: waitlistResult.requestId,
-          requestType: 'event-join-request',
+          requestType: 'event_waitlist_join',
           spotsFull: true, // Always true for waitlist API
         }
       );

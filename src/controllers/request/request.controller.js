@@ -240,11 +240,10 @@ const getPendingRequests = async (req, res, next) => {
           .toArray()
       : [];
 
-    // Combine both types of requests
+    // Combine actionable requests (exclude waitlist as waitlists are handled separately on event page)
     const allRequests = [
       ...organiserJoinRequests.map(r => ({ ...r, requestType: 'organiser-join' })),
-      ...eventPendingRequests.map(r => ({ ...r, requestType: 'event-pending' })),
-      ...eventWaitlistRequests.map(r => ({ ...r, requestType: 'event-waitlist' }))
+      ...eventPendingRequests.map(r => ({ ...r, requestType: 'event-pending' }))
     ];
 
     // Sort by creation date (newest first) and apply pagination
@@ -253,8 +252,8 @@ const getPendingRequests = async (req, res, next) => {
     const paginatedRequests = allRequests.slice(skip, skip + perPage);
     const pagination = createPaginationResponse(totalCount, page, perPage);
 
-    // Get user details for event waitlist requests
-    const eventRequestUserIds = [...eventPendingRequests, ...eventWaitlistRequests].map(r => r.userId);
+    // Get user details for event requests
+    const eventRequestUserIds = eventPendingRequests.map(r => r.userId).filter(Boolean);
     const eventRequestUsers = eventRequestUserIds.length > 0
       ? await usersCollection.find({ 
           _id: { $in: eventRequestUserIds.map(id => id instanceof ObjectId ? id : new ObjectId(id)) } 
@@ -271,7 +270,7 @@ const getPendingRequests = async (req, res, next) => {
             ...request,
           };
         } else {
-          // This is an event join request (pending or waitlist)
+          // This is an event join request (pending private event request)
           const event = organiserEvents.find(e => e._id.toString() === request.eventId.toString());
           const user = eventRequestUsers.find(u => {
             const requestUserId = request.userId instanceof ObjectId ? request.userId : new ObjectId(request.userId);
@@ -281,10 +280,10 @@ const getPendingRequests = async (req, res, next) => {
 
           return {
             type: 'event-join-request',
-            requestSubtype: request.requestType === 'event-pending' ? 'pending-request' : 'waitlist',
-            joinRequestId: request.requestType === 'event-pending' ? request.joinRequestId : (request.waitlistId || null),
-            waitlistId: request.requestType === 'event-waitlist' ? request._id.toString() : null,
-            requestId: request.requestType === 'event-waitlist' ? (request.requestId || null) : (request.joinRequestId || null),
+            requestSubtype: 'pending-request',
+            joinRequestId: request.joinRequestId || null,
+            waitlistId: null,
+            requestId: request.joinRequestId || null,
             user: user ? {
               userId: user.userId,
               userType: user.userType,

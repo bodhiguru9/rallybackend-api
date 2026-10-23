@@ -164,6 +164,9 @@ const joinPrivateEventRequest = async (req, res, next) => {
           : `${user.fullName || 'A player'} requested to join your private event: ${eventName}`,
         {
           userId: userId,
+          playerId: user.userId,
+          playerName: user.fullName,
+          playerProfilePic: user.profilePic,
           eventId: event._id.toString(),
           eventName: eventName,
           joinRequestId: joinRequestResult.joinRequestId || joinRequestResult.waitlistId || null,

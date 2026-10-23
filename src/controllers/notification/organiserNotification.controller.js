@@ -57,29 +57,14 @@ const getOrganiserNotifications = async (req, res, next) => {
         })
       : 0;
 
-    // Unread count = total pending requests (organiser join + event waitlist)
-    // This increases when any new request comes in
-    const unreadCount = organiserJoinCount + eventPendingCount + eventWaitlistCount;
-
-    // Get general notifications (new_booking, event_booking_cancelled, etc.)
+    // Get general notifications (new_booking, event_booking_cancelled, event_waitlist_join, etc.)
     const genericNotifications = await Notification.getUserNotifications(organiserMongoId, 100, 0);
     const unreadGenericCount = await Notification.getUnreadCount(organiserMongoId);
 
-    // 2. Get organiser join requests
+    // 2. Get organiser join requests (requests to join organiser's community)
     const organiserJoinRequests = await Request.getPendingRequests(organiserMongoId, 1000, 0);
-    
-    // 3. Get event waitlist requests
-    const eventWaitlistRequests = eventIds.length > 0
-      ? await waitlistCollection
-          .find({
-            eventId: { $in: eventIds },
-            status: 'pending',
-          })
-          .sort({ createdAt: -1 })
-          .toArray()
-      : [];
 
-    // 4. Get event pending requests (private events not full at request time)
+    // 3. Get event pending requests (requests to join private events requiring organiser approval)
     const eventPendingRequests = eventIds.length > 0
       ? await eventJoinRequestsCollection
           .find({
@@ -90,8 +75,11 @@ const getOrganiserNotifications = async (req, res, next) => {
           .toArray()
       : [];
 
+    // Note: Waitlist entries are managed via event details and are not approval requests.
+    // Waitlist join notifications remain in genericNotifications to appear under the General tab.
+
     // Get user details for event requests
-    const eventRequestUserIds = [...eventPendingRequests, ...eventWaitlistRequests].map(r => r.userId);
+    const eventRequestUserIds = eventPendingRequests.map(r => r.userId).filter(Boolean);
     const eventRequestUsers = eventRequestUserIds.length > 0
       ? await usersCollection.find({ 
           _id: { $in: eventRequestUserIds.map(id => id instanceof ObjectId ? id : new ObjectId(id)) } 
@@ -106,8 +94,7 @@ const getOrganiserNotifications = async (req, res, next) => {
           return n.data?.requestId === request.requestId;
         }
         if (type === 'event_join_request') {
-          return n.data?.joinRequestId === (request.joinRequestId || request.requestId) || 
-                 n.data?.waitlistId === (request.waitlistId || request._id?.toString());
+          return n.data?.joinRequestId === (request.joinRequestId || request.requestId);
         }
         return false;
       });
@@ -120,12 +107,11 @@ const getOrganiserNotifications = async (req, res, next) => {
       return null;
     };
 
-    // Combine all types and format them
+    // Combine actionable request types and format them (Requests tab: organiser join + private event pending join)
     const formattedRequests = await Promise.all(
       [
         ...organiserJoinRequests.map(r => ({ ...r, requestType: 'organiser-join' })),
-        ...eventPendingRequests.map(r => ({ ...r, requestType: 'event-pending' })),
-        ...eventWaitlistRequests.map(r => ({ ...r, requestType: 'event-waitlist' }))
+        ...eventPendingRequests.map(r => ({ ...r, requestType: 'event-pending' }))
       ].map(async (request) => {
         if (request.requestType === 'organiser-join') {
           const linkedNotification = findAndLinkNotification(request, 'organiser_join_request');
@@ -149,12 +135,12 @@ const getOrganiserNotifications = async (req, res, next) => {
           });
 
           return {
-            notificationId: linkedNotification ? linkedNotification._id.toString() : (request.requestType === 'event-pending' ? request.joinRequestId : (request._id?.toString() || Math.random().toString())),
+            notificationId: linkedNotification ? linkedNotification._id.toString() : (request.joinRequestId || request._id?.toString() || Math.random().toString()),
             type: 'event-join-request',
-            requestSubtype: request.requestType === 'event-pending' ? 'pending-request' : 'waitlist',
-            joinRequestId: request.requestType === 'event-pending' ? request.joinRequestId : (request.waitlistId || null),
-            waitlistId: request.requestType === 'event-waitlist' ? request._id.toString() : null,
-            requestId: request.requestType === 'event-waitlist' ? (request.requestId || null) : (request.joinRequestId || null),
+            requestSubtype: 'pending-request',
+            joinRequestId: request.joinRequestId || null,
+            waitlistId: null,
+            requestId: request.joinRequestId || null,
             user: user ? {
               userId: user.userId,
               userType: user.userType,
@@ -179,25 +165,47 @@ const getOrganiserNotifications = async (req, res, next) => {
       })
     );
 
-    // Get user details for generic notifications (new_booking, booking_cancelled, etc.)
-    const genericUserIds = genericNotifications
-      .map(n => n.user) // Notification model stores recipientId as user sometimes, but we want the "actor"
-      // Actually, we need to find who triggered it.
-      // For some notifications, we might have stored it in data.
-      .filter(id => id);
-    
-    // Better way: get all unique playerNames/IDs if available
-    // But since the current notifications only have playerName, let's look at who joined the event
-    // Wait, the best way is to fetch the user by the ID stored in data if we add it. 
-    // For now, let's just make it NOT crash and try to find the user by fullName if needed,
-    // or just leave it for now and fix the creation logic for future ones.
-    
-    // ACTUALLY, let's just make sure it returns a safe structure first.
-    
-    // Format remaining Generic Notifications (those not linked to a request, like bookings/cancellations)
+    // Look up actor users for generic notifications (new_booking, booking_cancelled, event_waitlist_join, etc.)
+    const genericUserLookups = genericNotifications
+      .map(n => n.data?.userId || n.data?.playerId || n.user)
+      .filter(Boolean);
+
+    const genericUserObjectIds = [];
+    const genericUserSequentialIds = [];
+    genericUserLookups.forEach(id => {
+      if (id instanceof ObjectId) {
+        genericUserObjectIds.push(id);
+      } else if (typeof id === 'string' && ObjectId.isValid(id) && id.length === 24) {
+        genericUserObjectIds.push(new ObjectId(id));
+      } else if (typeof id === 'number' || (!isNaN(Number(id)) && String(Number(id)) === String(id))) {
+        genericUserSequentialIds.push(Number(id));
+      }
+    });
+
+    const genericUsers = (genericUserObjectIds.length > 0 || genericUserSequentialIds.length > 0)
+      ? await usersCollection.find({
+          $or: [
+            ...(genericUserObjectIds.length > 0 ? [{ _id: { $in: genericUserObjectIds } }] : []),
+            ...(genericUserSequentialIds.length > 0 ? [{ userId: { $in: genericUserSequentialIds } }] : [])
+          ]
+        }).toArray()
+      : [];
+
+    // Format Generic Notifications (those not linked to a request, like bookings, cancellations, waitlists)
     const formattedGeneric = genericNotifications.map(n => {
       const eventId = n.data?.eventId;
-      const event = organiserEvents.find(e => e._id.toString() === (eventId?.toString() || ''));
+      const event = organiserEvents.find(e => 
+        e._id.toString() === (eventId?.toString() || '') ||
+        (e.eventId !== undefined && e.eventId.toString() === (eventId?.toString() || ''))
+      );
+
+      const targetUserId = n.data?.userId || n.data?.playerId || n.user;
+      const actorUser = targetUserId
+        ? genericUsers.find(u => 
+            (u._id && u._id.toString() === targetUserId.toString()) || 
+            (u.userId !== undefined && u.userId.toString() === targetUserId.toString())
+          )
+        : null;
 
       return {
         notificationId: n._id.toString(),
@@ -207,9 +215,9 @@ const getOrganiserNotifications = async (req, res, next) => {
         isRead: n.isRead,
         createdAt: n.createdAt,
         user: {
-          fullName: n.data?.playerName || 'Someone',
-          userId: n.data?.playerId || 0, // Fallback to 0 if missing
-          profilePic: n.data?.playerProfilePic || null,
+          fullName: actorUser?.fullName || n.data?.playerName || 'Someone',
+          userId: actorUser?.userId || n.data?.playerId || 0, // Fallback to 0 if missing
+          profilePic: actorUser?.profilePic || n.data?.playerProfilePic || null,
         },
         event: event ? {
           eventId: event.eventId,
@@ -234,8 +242,9 @@ const getOrganiserNotifications = async (req, res, next) => {
     const paginatedItems = allItems.slice(skip, skip + perPage);
     const pagination = createPaginationResponse(totalCount, page, perPage);
 
-    // Total unread count (requests + general)
-    const totalUnreadCount = unreadGenericCount + organiserJoinCount + eventPendingCount + eventWaitlistCount;
+    // Total unread count (actionable requests + unread generic notifications)
+    // Waitlist join notifications are stored in notifications collection and already tracked in unreadGenericCount
+    const totalUnreadCount = unreadGenericCount + organiserJoinCount + eventPendingCount;
 
     res.status(200).json({
       success: true,

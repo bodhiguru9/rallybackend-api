@@ -21,9 +21,9 @@ window.handleDownload = function() {
 window.handleShareProfile = function(id, name, creatorName) {
   var url = window.location.origin + '/organiser/' + id;
   var title = 'Check out ' + name + ' on Rally!';
-  var text = (creatorName ? 'Check out ' + name + ' by ' + creatorName + ' on Rally!' : title) + '\\n\\n🔗 View Profile: ' + url;
+  var text = (creatorName ? 'Check out ' + name + ' by ' + creatorName + ' on Rally!' : title) + '\n\n🔗 View Profile: ' + url;
   if (navigator.share) {
-    navigator.share({ title: title, text: text, url: url }).catch(function(){});
+    navigator.share({ title: title, text: text }).catch(function(){});
   } else {
     copyToClipboard(url);
   }
@@ -44,7 +44,7 @@ window.handleShareEvent = function(id, name, creator, dateOrStart, loc, priceStr
   text += '\n\n🔗 Book Now: ' + url;
   
   if (navigator.share) {
-    navigator.share({ title: title, text: text, url: url }).catch(function(){});
+    navigator.share({ title: title, text: text }).catch(function(){});
   } else {
     copyToClipboard(url);
   }
@@ -60,7 +60,7 @@ window.handleSharePackage = function(id, name, creator, validity, loc, sports, p
   text += '\n\n🔗 View Package: ' + url;
 
   if (navigator.share) {
-    navigator.share({ title: title, text: text, url: url }).catch(function(){});
+    navigator.share({ title: title, text: text }).catch(function(){});
   } else {
     copyToClipboard(url);
   }

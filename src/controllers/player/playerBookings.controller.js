@@ -5,7 +5,7 @@ const { getPaginationParams, createPaginationResponse } = require('../../utils/p
 
 /**
  * @desc    Get player bookings (joined events) with upcoming/past filter
- * @route   GET /api/player/bookings?status=upcoming|past|all&page=1
+ * @route   GET /api/player/bookings?status=upcoming|past|all&page=1&include=waitlist
  * @access  Private (Player)
  */
 const getPlayerBookings = async (req, res, next) => {
@@ -30,6 +30,16 @@ const getPlayerBookings = async (req, res, next) => {
 
     const { page, perPage, skip } = getPaginationParams(req.query.page, 20);
 
+    // Opt-in extras. `include=waitlist` adds the player's waitlist entries and
+    // private-event join requests to the response. It is opt-in so existing
+    // callers (home calendar strip, event-details join check) keep getting a
+    // joined-only list and are unaffected by this addition.
+    const includeWaitlist = String(req.query.include || '')
+      .toLowerCase()
+      .split(',')
+      .map((part) => part.trim())
+      .includes('waitlist');
+
     // Fetch all joined events for this player (cap high, then paginate after filtering/sorting)
     const joinedEvents = await EventJoin.getUserJoinedEvents(userId, 5000, 0);
 
@@ -48,9 +58,50 @@ const getPlayerBookings = async (req, res, next) => {
 
     const now = new Date();
     
+    // Waitlist entries (open events that were full) and private-event join
+    // requests, each paired with its event document. Empty unless opted in.
+    let waitlistEntries = [];
+    if (includeWaitlist) {
+      const { getDB } = require('../../config/database');
+      const { ObjectId } = require('mongodb');
+      const db = getDB();
+      const userObjectId = typeof userId === 'string' ? new ObjectId(userId) : userId;
+
+      const [waitlistDocs, requestDocs] = await Promise.all([
+        db
+          .collection('waitlist')
+          .find({ userId: userObjectId, status: { $in: ['pending', 'rejected'] } })
+          .toArray(),
+        db
+          .collection('eventJoinRequests')
+          .find({ userId: userObjectId, status: { $in: ['pending', 'rejected'] } })
+          .toArray(),
+      ]);
+
+      const docs = [
+        ...waitlistDocs.map((d) => ({ ...d, waitlistType: 'waitlist' })),
+        ...requestDocs.map((d) => ({ ...d, waitlistType: 'pending-request' })),
+      ];
+
+      if (docs.length > 0) {
+        const waitlistEventDocs = await db
+          .collection('events')
+          .find({ _id: { $in: docs.map((d) => d.eventId) } })
+          .toArray();
+        const eventById = new Map(waitlistEventDocs.map((e) => [e._id.toString(), e]));
+
+        waitlistEntries = docs
+          .map((doc) => ({ doc, event: eventById.get(doc.eventId.toString()) || null }))
+          .filter((entry) => entry.event !== null);
+      }
+    }
+
     // Batch-fetch creators + payments in ONE query each (was N findById calls — N+1)
     const { getUsersByIds, getByField } = require('../../utils/batchLoad');
-    const _creatorMap = await getUsersByIds(joinedEvents.map((e) => e.creatorId));
+    const _creatorMap = await getUsersByIds([
+      ...joinedEvents.map((e) => e.creatorId),
+      ...waitlistEntries.map((entry) => entry.event.creatorId),
+    ]);
     const _paymentMap = await getByField(
       'payments',
       'paymentId',
@@ -195,8 +246,95 @@ const getPlayerBookings = async (req, res, next) => {
       })
     );
 
+    // Joined lookup sets, so a waitlist row disappears the moment the player
+    // actually gets the spot — the joined ("Going") card represents it instead.
+    const joinedEventKeys = new Set();
+    const joinedOccurrenceKeys = new Set();
+    withMeta.forEach((e) => {
+      [e.mongoId, e.eventId].filter(Boolean).map(String).forEach((key) => {
+        joinedEventKeys.add(key);
+        if (e.booking.occurrenceStart) {
+          joinedOccurrenceKeys.add(key + '|' + new Date(e.booking.occurrenceStart).toISOString());
+        }
+      });
+    });
+
+    const waitlistMeta = waitlistEntries
+      .map(({ doc, event }) => {
+        const formattedEvent = formatEventResponse(event);
+        const eventKey = String(formattedEvent.mongoId || event._id.toString());
+
+        const isNonRecurring =
+          !event.eventFrequency ||
+          !Array.isArray(event.eventFrequency) ||
+          event.eventFrequency.length === 0;
+
+        const occurrenceStart = isNonRecurring
+          ? formattedEvent.eventDateTime || doc.occurrenceStart || null
+          : doc.occurrenceStart || formattedEvent.eventDateTime || null;
+        const occurrenceEnd = isNonRecurring
+          ? formattedEvent.eventEndDateTime || doc.occurrenceEnd || null
+          : doc.occurrenceEnd || formattedEvent.eventEndDateTime || null;
+
+        // Drop the waitlist row once the player holds a join for it. A
+        // non-recurring event is matched on the event alone; a recurring one is
+        // matched per occurrence, so its other sessions stay waitlisted.
+        const occurrenceKey = occurrenceStart
+          ? eventKey + '|' + new Date(occurrenceStart).toISOString()
+          : null;
+        const alreadyJoined =
+          isNonRecurring || !occurrenceKey
+            ? joinedEventKeys.has(eventKey)
+            : joinedOccurrenceKeys.has(occurrenceKey);
+        if (alreadyJoined) {
+          return null;
+        }
+
+        const computedStatus = occurrenceStart
+          ? calculateEventStatus(occurrenceStart, occurrenceEnd)
+          : 'upcoming';
+        formattedEvent.eventStatus = computedStatus;
+
+        const creator = _creatorMap.get(String(event.creatorId));
+
+        return {
+          ...formattedEvent,
+          creator: {
+            userId: creator ? creator.userId : null,
+            fullName: creator ? creator.fullName : null,
+          },
+          booking: {
+            bookingId: null,
+            joinedAt: doc.createdAt || null,
+            bookingStatus: computedStatus,
+            bookingStatusValue: null,
+            guestsCount: doc.guestsCount >= 1 ? doc.guestsCount : 1,
+            occurrenceStart: occurrenceStart,
+            occurrenceEnd: occurrenceEnd,
+            isPast: computedStatus === 'past',
+            isOngoing: computedStatus === 'ongoing',
+            isUpcoming: computedStatus === 'upcoming',
+          },
+          // No money changes hands while waiting, so nothing is pending.
+          payment: { paymentStatus: 'not_required' },
+          isJoined: false,
+          isLeave: false,
+          // Waitlist markers — read by the calendar and the EventCard badge
+          isWaitlisted: true,
+          waitlistType: doc.waitlistType,
+          waitlistStatus: doc.status,
+          waitlistId: doc.waitlistId || doc.joinRequestId || null,
+          isRejected: doc.status === 'rejected',
+          isPending: doc.waitlistType === 'pending-request' && doc.status === 'pending',
+          ...(doc.waitlistType === 'pending-request' ? { approvalStatus: doc.status } : {}),
+        };
+      })
+      .filter(Boolean);
+
+    const allMeta = [...withMeta, ...waitlistMeta];
+
     // Filter events based on status
-    const filtered = withMeta.filter((e) => {
+    const filtered = allMeta.filter((e) => {
       if (status === 'past') return e.booking.isPast;
       if (status === 'upcoming') return e.booking.isUpcoming || e.booking.isOngoing;
       // status === 'all' - return all events (past, ongoing, upcoming)
@@ -243,9 +381,9 @@ const getPlayerBookings = async (req, res, next) => {
     const paginated = filtered.slice(skip, skip + perPage);
 
     // Summary counts
-    const pastCount = withMeta.filter((e) => e.booking.isPast).length;
-    const ongoingCount = withMeta.filter((e) => e.booking.isOngoing).length;
-    const upcomingCount = withMeta.filter((e) => e.booking.isUpcoming).length;
+    const pastCount = allMeta.filter((e) => e.booking.isPast).length;
+    const ongoingCount = allMeta.filter((e) => e.booking.isOngoing).length;
+    const upcomingCount = allMeta.filter((e) => e.booking.isUpcoming).length;
 
     return res.status(200).json({
       success: true,
@@ -253,10 +391,12 @@ const getPlayerBookings = async (req, res, next) => {
       data: {
         status,
         summary: {
-          totalBookings: withMeta.length,
+          totalBookings: allMeta.length,
           upcomingBookings: upcomingCount,
           ongoingBookings: ongoingCount,
           pastBookings: pastCount,
+          joinedBookings: withMeta.length,
+          waitlistBookings: waitlistMeta.length,
           now: now.toISOString(),
         },
         bookings: paginated,

@@ -15,6 +15,7 @@ const adminAudit = require('../middleware/adminAudit');
 const { createBroadcast } = require('../controllers/admin/broadcast.controller');
 const { getBookingDetails } = require('../controllers/admin/booking.controller');
 const { listOrganisers, getOrganiserById, getOrganiserEvents, deleteOrganiser } = require('../controllers/admin/organiser.controller');
+const { listAllEvents } = require('../controllers/admin/events.controller');
 
 router.use(adminKeyAuth, adminAudit);
 
@@ -76,6 +77,14 @@ router.delete('/organisers/:userId', deleteOrganiser);
  * Response: { broadcast_id: "brd_...", status: "queued" }, or
  * { dryRun: true, recipientCount } when dryRun is true.
  */
+/**
+ * GET /api/admin/events?type=all|free|paid&search=&page=&perPage=
+ *
+ * Events tab: every event across all organisers, same shape as the
+ * per-organiser events route plus an `organiser` summary per event.
+ */
+router.get('/events', listAllEvents);
+
 router.post('/broadcasts', createBroadcast);
 
 module.exports = router;

@@ -34,6 +34,10 @@ const listOrganisers = async (req, res, next) => {
     if (search) {
       const regex = new RegExp(escapeRegex(search), 'i');
       query.$or = [{ fullName: regex }, { email: regex }, { communityName: regex }];
+      // userId is stored as a number, so regex can't match it — only exact match works
+      if (!isNaN(search) && search.trim() !== '') {
+        query.$or.push({ userId: parseInt(search, 10) });
+      }
     }
 
     const totalCount = await usersCollection.countDocuments(query);
@@ -61,6 +65,49 @@ const listOrganisers = async (req, res, next) => {
           createdAt: o.createdAt,
         })),
         pagination: createPaginationResponse(totalCount, page, perPage),
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * @desc    Get a single organiser's full details (includes bio, mobileNumber)
+ * @route   GET /api/admin/organisers/:userId
+ * @access  Admin key (adminKeyAuth)
+ *
+ * The list endpoint omits bio to keep the landing page light; the delete
+ * confirmation modal needs the real bio (and mobileNumber/email) to build
+ * its confirm payload, so it fetches this route first.
+ */
+const getOrganiserById = async (req, res, next) => {
+  try {
+    const { userId } = req.params;
+    const organiser = await findOrganiserByIdParam(userId);
+
+    if (!organiser) {
+      return res.status(404).json({ success: false, error: 'Organiser not found' });
+    }
+    if (organiser.userType !== 'organiser') {
+      return res.status(400).json({ success: false, error: 'Target user is not an organiser' });
+    }
+
+    res.status(200).json({
+      success: true,
+      data: {
+        userId: organiser.userId,
+        mongoId: organiser._id.toString(),
+        fullName: organiser.fullName,
+        email: organiser.email,
+        mobileNumber: organiser.mobileNumber,
+        bio: organiser.bio || '',
+        communityName: organiser.communityName,
+        yourCity: organiser.yourCity,
+        profilePic: organiser.profilePic,
+        eventsCreated: organiser.eventsCreated || 0,
+        totalAttendees: organiser.totalAttendees || 0,
+        createdAt: organiser.createdAt,
       },
     });
   } catch (error) {
@@ -234,4 +281,4 @@ const deleteOrganiser = async (req, res, next) => {
   }
 };
 
-module.exports = { listOrganisers, getOrganiserEvents, deleteOrganiser };
+module.exports = { listOrganisers, getOrganiserById, getOrganiserEvents, deleteOrganiser };

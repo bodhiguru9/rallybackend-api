@@ -14,7 +14,7 @@ const adminKeyAuth = require('../middleware/adminKeyAuth');
 const adminAudit = require('../middleware/adminAudit');
 const { createBroadcast } = require('../controllers/admin/broadcast.controller');
 const { getBookingDetails } = require('../controllers/admin/booking.controller');
-const { listOrganisers, getOrganiserEvents, deleteOrganiser } = require('../controllers/admin/organiser.controller');
+const { listOrganisers, getOrganiserById, getOrganiserEvents, deleteOrganiser } = require('../controllers/admin/organiser.controller');
 
 router.use(adminKeyAuth, adminAudit);
 
@@ -32,6 +32,15 @@ router.get('/bookings/:bookingId', getBookingDetails);
  * optionally filtered by name/email/community search.
  */
 router.get('/organisers', listOrganisers);
+
+/**
+ * GET /api/admin/organisers/:userId
+ *
+ * Single organiser's full details, including bio and mobileNumber (the
+ * list endpoint omits these). The delete confirmation modal fetches this
+ * first so it can send a real confirm payload.
+ */
+router.get('/organisers/:userId', getOrganiserById);
 
 /**
  * GET /api/admin/organisers/:organiserId/events?type=all|free|paid&page=&perPage=

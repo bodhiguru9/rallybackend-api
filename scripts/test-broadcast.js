@@ -15,7 +15,7 @@ async function runTest() {
 
     // 3. Mock Express req/res
     const req = {
-      user: { id: 'test-admin-id', userType: 'superadmin' },
+      admin: { email: 'test-admin@local' },
       body: {
         audience: { type: 'all' },
         message: {

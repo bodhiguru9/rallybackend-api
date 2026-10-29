@@ -50,9 +50,9 @@ jest.mock('../../src/config/database', () => ({
 const { createBroadcast } = require('../../src/controllers/admin/broadcast.controller');
 
 // ── Helper: build mock express req/res ───────────────────────────────────────
-const makeReq = (body = {}, user = { id: 'admin-id', userType: 'superadmin' }) => ({
+const makeReq = (body = {}, admin = { email: 'admin@test.com' }) => ({
   body,
-  user,
+  admin,
 });
 
 const makeRes = () => {
@@ -231,37 +231,15 @@ describe('POST /api/admin/broadcasts — push sending', () => {
 });
 
 describe('POST /api/admin/broadcasts — auth enforcement', () => {
-  // Note: Auth enforcement is in middleware (admin.routes.js requireSuperadmin).
-  // The controller itself doesn't check userType — it trusts the middleware.
-  // We test the middleware separately here.
-  test('requireSuperadmin pattern rejects non-superadmin', () => {
-    const requireSuperadmin = (req, res, next) => {
-      if (!req.user || req.user.userType !== 'superadmin') {
-        return res.status(403).json({ error: 'Access denied.' });
-      }
-      next();
-    };
-
-    const req = { user: { id: 'player-id', userType: 'player' } };
+  // Note: Auth enforcement is in middleware (adminKeyAuth), tested directly
+  // in adminKeyAuth.test.js. The controller itself doesn't check auth — it
+  // trusts req.admin.email set by that middleware and uses it as `sentBy`.
+  test('uses req.admin.email as sentBy', async () => {
+    const req = makeReq(validPayload(), { email: 'someone@rallysports.ae' });
     const res = makeRes();
-    const nextFn = jest.fn();
-    requireSuperadmin(req, res, nextFn);
-    expect(res._status).toBe(403);
-    expect(nextFn).not.toHaveBeenCalled();
-  });
-
-  test('requireSuperadmin allows superadmin through', () => {
-    const requireSuperadmin = (req, res, next) => {
-      if (!req.user || req.user.userType !== 'superadmin') {
-        return res.status(403).json({ error: 'Access denied.' });
-      }
-      next();
-    };
-
-    const req = { user: { id: 'admin-id', userType: 'superadmin' } };
-    const res = makeRes();
-    const nextFn = jest.fn();
-    requireSuperadmin(req, res, nextFn);
-    expect(nextFn).toHaveBeenCalledTimes(1);
+    await createBroadcast(req, res, next);
+    expect(mockInsertOne).toHaveBeenCalledWith(
+      expect.objectContaining({ sentBy: 'someone@rallysports.ae' })
+    );
   });
 });

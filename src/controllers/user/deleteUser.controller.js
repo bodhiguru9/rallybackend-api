@@ -8,11 +8,12 @@ const { safeUnlinkUpload } = require('../../utils/fileCleanup');
 const { getDB } = require('../../config/database');
 
 /**
- * @desc    Delete user account
- * @route   DELETE /api/users/:id
- * @access  Private
- * 
- * Users can only delete their own account.
+ * Delete a user account and all of its non-financial related data.
+ *
+ * Used by both the user-facing DELETE /api/users/:id route (self-deletion,
+ * ownership-checked by the caller) and the admin DELETE /api/admin/organisers/:userId
+ * route (key-authenticated, confirm-checked by the caller) so the two never drift apart.
+ *
  * Supports both sequential userId (1, 2, 3, etc.) and MongoDB ObjectId.
  * This will:
  * - Delete user's profile picture
@@ -22,6 +23,348 @@ const { getDB } = require('../../config/database');
  * - Remove user from all waitlists
  * - Delete all events created by the user (if organiser)
  * - Delete the user account
+ *
+ * Financial records (bookings, payments, package purchases) are NOT deleted,
+ * so accounting and refund history survive account deletion.
+ *
+ * @param {object} user - a user document (as returned by User.findById/findByUserId)
+ * @returns {Promise<boolean>} true if the user account was deleted
+ */
+const deleteUserAccount = async (user) => {
+  // Use the user's MongoDB ObjectId for deletion operations
+  const userId = user._id.toString();
+  const userObjectId = user._id;
+
+  // Delete profile picture (non-blocking; S3 URLs are cleaned separately)
+  if (user.profilePic) {
+    await safeUnlinkUpload(user.profilePic);
+  }
+
+  // Clean up follow relationships where user is a follower
+  try {
+    const db = getDB();
+    const followsCollection = db.collection('follows');
+
+    // Find all follows where user is follower
+    const followsAsFollower = await followsCollection.find({ followerId: userObjectId }).toArray();
+
+    // Update follower counts for organisers being unfollowed
+    for (const follow of followsAsFollower) {
+      await Follow.updateFollowerCount(follow.followingId, -1);
+    }
+
+    // Delete all follows where user is follower
+    await followsCollection.deleteMany({ followerId: userObjectId });
+
+    // Update following count for user (set to 0)
+    await Follow.updateFollowingCount(userObjectId, -followsAsFollower.length);
+  } catch (error) {
+    console.error('Error cleaning up follows as follower:', error);
+  }
+
+  // Clean up follow relationships where user is being followed (if organiser)
+  try {
+    const db = getDB();
+    const followsCollection = db.collection('follows');
+
+    // Find all follows where user is being followed
+    const followsAsFollowing = await followsCollection.find({ followingId: userObjectId }).toArray();
+
+    // Update following counts for users who were following this organiser
+    for (const follow of followsAsFollowing) {
+      await Follow.updateFollowingCount(follow.followerId, -1);
+    }
+
+    // Delete all follows where user is being followed
+    await followsCollection.deleteMany({ followingId: userObjectId });
+
+    // Update follower count for user (set to 0)
+    await Follow.updateFollowerCount(userObjectId, -followsAsFollowing.length);
+  } catch (error) {
+    console.error('Error cleaning up follows as following:', error);
+  }
+
+  // Clean up event joins
+  try {
+    const db = getDB();
+    const joinsCollection = db.collection('eventJoins');
+
+    // Find all event joins for this user
+    const eventJoins = await joinsCollection.find({ userId: userObjectId }).toArray();
+
+    // Update attendee counts for events
+    for (const join of eventJoins) {
+      try {
+        // Decrement by the user's actual party size (default 1)
+        const partySize = (join.guestsCount && join.guestsCount >= 1) ? join.guestsCount : 1;
+        await Event.updateAttendeeCount(join.eventId.toString(), -partySize);
+      } catch (error) {
+        console.error('Error updating attendee count:', error);
+      }
+    }
+
+    // Delete all event joins for this user
+    await joinsCollection.deleteMany({ userId: userObjectId });
+  } catch (error) {
+    console.error('Error cleaning up event joins:', error);
+  }
+
+  // Clean up pending private event join requests
+  try {
+    const db = getDB();
+    const eventJoinRequestsCollection = db.collection('eventJoinRequests');
+    await eventJoinRequestsCollection.deleteMany({ userId: userObjectId });
+  } catch (error) {
+    console.error('Error cleaning up event join requests:', error);
+  }
+
+  // Clean up requests (where user requested to join organiser)
+  try {
+    const db = getDB();
+    const requestsCollection = db.collection('requests');
+
+    // Delete all requests where user is the requester
+    await requestsCollection.deleteMany({ userId: userObjectId });
+  } catch (error) {
+    console.error('Error cleaning up requests:', error);
+  }
+
+  // Clean up waitlists
+  try {
+    const db = getDB();
+    const waitlistCollection = db.collection('waitlist');
+
+    // Delete all waitlist entries for this user
+    await waitlistCollection.deleteMany({ userId: userObjectId });
+  } catch (error) {
+    console.error('Error cleaning up waitlists:', error);
+  }
+
+  // Clean up auth/login tokens (refresh tokens stored in DB)
+  try {
+    const db = getDB();
+    const tokensCollection = db.collection('tokens');
+    await tokensCollection.deleteMany({ userId: userObjectId });
+  } catch (error) {
+    console.error('Error cleaning up tokens:', error);
+  }
+
+  // Package purchases, bookings and payments made by the user are kept as financial records
+
+  // Clean up notifications:
+  // - Notifications received by the user (recipientId)
+  // - Notifications where this user was referenced in payload (data.userId / data.organiserId / data.playerId)
+  try {
+    const db = getDB();
+    const notificationsCollection = db.collection('notifications');
+    await notificationsCollection.deleteMany({
+      $or: [
+        { recipientId: userObjectId },
+        { 'data.userId': userId },
+        { 'data.userId': userObjectId },
+        { 'data.organiserId': userId },
+        { 'data.organiserId': userObjectId },
+        { 'data.playerId': userId },
+        { 'data.playerId': userObjectId },
+      ],
+    });
+  } catch (error) {
+    console.error('Error cleaning up notifications:', error);
+  }
+
+  // Clean up favorites
+  try {
+    const db = getDB();
+    const favoritesCollection = db.collection('favorites');
+    await favoritesCollection.deleteMany({ userId: userObjectId });
+  } catch (error) {
+    console.error('Error cleaning up favorites:', error);
+  }
+
+  // Clean up saved cards (tokenized references)
+  try {
+    const db = getDB();
+    const savedCardsCollection = db.collection('savedCards');
+    await savedCardsCollection.deleteMany({ userId: userObjectId });
+  } catch (error) {
+    console.error('Error cleaning up saved cards:', error);
+  }
+
+  // Clean up user blocks (as blocker or blocked)
+  try {
+    const db = getDB();
+    const blocksCollection = db.collection('blocks');
+    await blocksCollection.deleteMany({
+      $or: [{ blockerId: userObjectId }, { blockedId: userObjectId }],
+    });
+  } catch (error) {
+    console.error('Error cleaning up blocks:', error);
+  }
+
+  // Clean up blocked events
+  try {
+    const db = getDB();
+    const eventBlocksCollection = db.collection('eventBlocks');
+    await eventBlocksCollection.deleteMany({ userId: userObjectId });
+  } catch (error) {
+    console.error('Error cleaning up event blocks:', error);
+  }
+
+  // Clean up event reminders
+  try {
+    const db = getDB();
+    const remindersCollection = db.collection('eventReminders');
+    await remindersCollection.deleteMany({ userId: userObjectId });
+  } catch (error) {
+    console.error('Error cleaning up event reminders:', error);
+  }
+
+  // Clean up event invites (sent or received)
+  try {
+    const db = getDB();
+    const invitesCollection = db.collection('eventInvites');
+    await invitesCollection.deleteMany({
+      $or: [{ organiserId: userObjectId }, { playerId: userObjectId }],
+    });
+  } catch (error) {
+    console.error('Error cleaning up event invites:', error);
+  }
+
+  // If user is an organiser, delete all events created by them
+  if (user.userType === 'organiser') {
+    try {
+      const db = getDB();
+      const eventsCollection = db.collection('events');
+
+      // Build comprehensive creator query matching ObjectId, string _id, sequential string/number userId
+      const creatorIdQueries = [
+        userObjectId,
+        userId,
+        user.userId,
+        user.userId !== undefined && user.userId !== null ? String(user.userId) : null,
+        user.userId !== undefined && user.userId !== null && !isNaN(user.userId) ? Number(user.userId) : null,
+      ].filter(Boolean);
+
+      const creatorQuery = { $in: creatorIdQueries };
+
+      // Find all events created by this user
+      const events = await eventsCollection.find({ creatorId: creatorQuery }).toArray();
+
+      // Delete event files and associated records for each event
+      for (const event of events) {
+        // Delete event images (non-blocking; legacy on-disk files only — S3 URLs skipped)
+        const imagesToDelete = event.gameImages || (event.gameImage ? [event.gameImage] : []);
+        for (const imagePath of imagesToDelete) {
+          await safeUnlinkUpload(imagePath);
+        }
+
+        // Delete event video (non-blocking; legacy on-disk file only)
+        if (event.gameVideo) {
+          await safeUnlinkUpload(event.gameVideo);
+        }
+
+        // Match event by ObjectId, String _id, or sequential eventId (e.g. 'E108')
+        const eventIdsToClean = [
+          event._id,
+          event._id ? event._id.toString() : null,
+          event.eventId || null,
+        ].filter(Boolean);
+
+        const eventIdQuery = { $in: eventIdsToClean };
+
+        // Delete event joins for this event
+        const joinsCollection = db.collection('eventJoins');
+        await joinsCollection.deleteMany({ eventId: eventIdQuery });
+
+        // Delete waitlist entries for this event
+        const waitlistCollection = db.collection('waitlist');
+        await waitlistCollection.deleteMany({ eventId: eventIdQuery });
+
+        // Bookings for this event are kept as financial records (attendees' payments)
+
+        // Delete join requests for this event
+        const joinRequestsCollection = db.collection('eventJoinRequests');
+        await joinRequestsCollection.deleteMany({ eventId: eventIdQuery });
+
+        // Delete invites for this event
+        const invitesCollection = db.collection('eventInvites');
+        await invitesCollection.deleteMany({ eventId: eventIdQuery });
+
+        // Delete reminders for this event
+        const remindersCollection = db.collection('eventReminders');
+        await remindersCollection.deleteMany({ eventId: eventIdQuery });
+
+        // Delete favorites for this event
+        const favoritesCollection = db.collection('favorites');
+        await favoritesCollection.deleteMany({ eventId: eventIdQuery });
+
+        // Delete blocks for this event
+        const eventBlocksCollection = db.collection('eventBlocks');
+        await eventBlocksCollection.deleteMany({ eventId: eventIdQuery });
+      }
+
+      // Update events count before deleting (decrement by number of events)
+      if (events.length > 0) {
+        await Event.updateEventsCount(userId, -events.length);
+      }
+
+      // Delete all events created by this user
+      await eventsCollection.deleteMany({ creatorId: creatorQuery });
+    } catch (error) {
+      console.error('Error cleaning up events:', error);
+    }
+  }
+
+  // If user is an organiser, also delete organiser-specific related data (packages, organiser purchases, bank details)
+  if (user.userType === 'organiser') {
+    const creatorIdQueries = [
+      userObjectId,
+      userId,
+      user.userId,
+      user.userId !== undefined && user.userId !== null ? String(user.userId) : null,
+      user.userId !== undefined && user.userId !== null && !isNaN(user.userId) ? Number(user.userId) : null,
+    ].filter(Boolean);
+
+    // Delete packages created by organiser
+    try {
+      const db = getDB();
+      const packagesCollection = db.collection('packages');
+      await packagesCollection.deleteMany({ organiserId: { $in: creatorIdQueries } });
+    } catch (error) {
+      console.error('Error cleaning up packages:', error);
+    }
+
+    // Package purchases tied to this organiser are kept as financial records
+
+    // Delete organiser bank details (stored by sequential userId or ObjectId in organizerBankDetails collection)
+    try {
+      const db = getDB();
+      const bankDetailsCollection = db.collection('organizerBankDetails');
+      await bankDetailsCollection.deleteMany({ organizerId: { $in: creatorIdQueries } });
+    } catch (error) {
+      console.error('Error cleaning up organiser bank details:', error);
+    }
+
+    // Delete organiser bank accounts (multi-account collection, keyed by ObjectId)
+    try {
+      const db = getDB();
+      const bankAccountsCollection = db.collection('organiserBankAccounts');
+      await bankAccountsCollection.deleteMany({ organizerId: { $in: creatorIdQueries } });
+    } catch (error) {
+      console.error('Error cleaning up organiser bank accounts:', error);
+    }
+  }
+
+  // Finally, delete the user account
+  return User.deleteById(userId);
+};
+
+/**
+ * @desc    Delete user account
+ * @route   DELETE /api/users/:id
+ * @access  Private
+ *
+ * Users can only delete their own account.
  */
 const deleteUser = async (req, res, next) => {
   try {
@@ -30,12 +373,12 @@ const deleteUser = async (req, res, next) => {
 
     // Find user by sequential userId or MongoDB ObjectId
     let user = null;
-    
+
     // Check if it's a number (sequential userId)
     if (!isNaN(id) && parseInt(id).toString() === id) {
       user = await User.findByUserId(id);
     }
-    
+
     // If not found by userId, try MongoDB ObjectId
     if (!user) {
       user = await User.findById(id);
@@ -59,358 +402,7 @@ const deleteUser = async (req, res, next) => {
       });
     }
 
-    // Use the user's MongoDB ObjectId for deletion operations
-    const userId = user._id.toString();
-
-    const userObjectId = user._id;
-
-    // Delete profile picture (non-blocking; S3 URLs are cleaned separately)
-    if (user.profilePic) {
-      await safeUnlinkUpload(user.profilePic);
-    }
-
-    // Clean up follow relationships where user is a follower
-    try {
-      const db = getDB();
-      const followsCollection = db.collection('follows');
-      
-      // Find all follows where user is follower
-      const followsAsFollower = await followsCollection.find({ followerId: userObjectId }).toArray();
-      
-      // Update follower counts for organisers being unfollowed
-      for (const follow of followsAsFollower) {
-        await Follow.updateFollowerCount(follow.followingId, -1);
-      }
-      
-      // Delete all follows where user is follower
-      await followsCollection.deleteMany({ followerId: userObjectId });
-      
-      // Update following count for user (set to 0)
-      await Follow.updateFollowingCount(userObjectId, -followsAsFollower.length);
-    } catch (error) {
-      console.error('Error cleaning up follows as follower:', error);
-    }
-
-    // Clean up follow relationships where user is being followed (if organiser)
-    try {
-      const db = getDB();
-      const followsCollection = db.collection('follows');
-      
-      // Find all follows where user is being followed
-      const followsAsFollowing = await followsCollection.find({ followingId: userObjectId }).toArray();
-      
-      // Update following counts for users who were following this organiser
-      for (const follow of followsAsFollowing) {
-        await Follow.updateFollowingCount(follow.followerId, -1);
-      }
-      
-      // Delete all follows where user is being followed
-      await followsCollection.deleteMany({ followingId: userObjectId });
-      
-      // Update follower count for user (set to 0)
-      await Follow.updateFollowerCount(userObjectId, -followsAsFollowing.length);
-    } catch (error) {
-      console.error('Error cleaning up follows as following:', error);
-    }
-
-    // Clean up event joins
-    try {
-      const db = getDB();
-      const joinsCollection = db.collection('eventJoins');
-      
-      // Find all event joins for this user
-      const eventJoins = await joinsCollection.find({ userId: userObjectId }).toArray();
-      
-      // Update attendee counts for events
-      for (const join of eventJoins) {
-        try {
-          // Decrement by the user's actual party size (default 1)
-          const partySize = (join.guestsCount && join.guestsCount >= 1) ? join.guestsCount : 1;
-          await Event.updateAttendeeCount(join.eventId.toString(), -partySize);
-        } catch (error) {
-          console.error('Error updating attendee count:', error);
-        }
-      }
-      
-      // Delete all event joins for this user
-      await joinsCollection.deleteMany({ userId: userObjectId });
-    } catch (error) {
-      console.error('Error cleaning up event joins:', error);
-    }
-
-    // Clean up pending private event join requests
-    try {
-      const db = getDB();
-      const eventJoinRequestsCollection = db.collection('eventJoinRequests');
-      await eventJoinRequestsCollection.deleteMany({ userId: userObjectId });
-    } catch (error) {
-      console.error('Error cleaning up event join requests:', error);
-    }
-
-    // Clean up requests (where user requested to join organiser)
-    try {
-      const db = getDB();
-      const requestsCollection = db.collection('requests');
-      
-      // Delete all requests where user is the requester
-      await requestsCollection.deleteMany({ userId: userObjectId });
-    } catch (error) {
-      console.error('Error cleaning up requests:', error);
-    }
-
-    // Clean up waitlists
-    try {
-      const db = getDB();
-      const waitlistCollection = db.collection('waitlist');
-      
-      // Delete all waitlist entries for this user
-      await waitlistCollection.deleteMany({ userId: userObjectId });
-    } catch (error) {
-      console.error('Error cleaning up waitlists:', error);
-    }
-
-    // Clean up auth/login tokens (refresh tokens stored in DB)
-    try {
-      const db = getDB();
-      const tokensCollection = db.collection('tokens');
-      await tokensCollection.deleteMany({ userId: userObjectId });
-    } catch (error) {
-      console.error('Error cleaning up tokens:', error);
-    }
-
-    // Clean up package purchases (player purchases)
-    try {
-      const db = getDB();
-      const packagePurchasesCollection = db.collection('packagePurchases');
-      await packagePurchasesCollection.deleteMany({ userId: userObjectId });
-    } catch (error) {
-      console.error('Error cleaning up package purchases:', error);
-    }
-
-    // Clean up bookings made by the user
-    try {
-      const db = getDB();
-      const bookingsCollection = db.collection('bookings');
-      await bookingsCollection.deleteMany({ userId: userObjectId });
-    } catch (error) {
-      console.error('Error cleaning up bookings:', error);
-    }
-
-    // Clean up payments made by the user
-    try {
-      const db = getDB();
-      const paymentsCollection = db.collection('payments');
-      await paymentsCollection.deleteMany({ userId: userObjectId });
-    } catch (error) {
-      console.error('Error cleaning up payments:', error);
-    }
-
-    // Clean up notifications:
-    // - Notifications received by the user (recipientId)
-    // - Notifications where this user was referenced in payload (data.userId / data.organiserId / data.playerId)
-    try {
-      const db = getDB();
-      const notificationsCollection = db.collection('notifications');
-      await notificationsCollection.deleteMany({
-        $or: [
-          { recipientId: userObjectId },
-          { 'data.userId': userId },
-          { 'data.userId': userObjectId },
-          { 'data.organiserId': userId },
-          { 'data.organiserId': userObjectId },
-          { 'data.playerId': userId },
-          { 'data.playerId': userObjectId },
-        ],
-      });
-    } catch (error) {
-      console.error('Error cleaning up notifications:', error);
-    }
-
-    // Clean up favorites
-    try {
-      const db = getDB();
-      const favoritesCollection = db.collection('favorites');
-      await favoritesCollection.deleteMany({ userId: userObjectId });
-    } catch (error) {
-      console.error('Error cleaning up favorites:', error);
-    }
-
-    // Clean up saved cards (tokenized references)
-    try {
-      const db = getDB();
-      const savedCardsCollection = db.collection('savedCards');
-      await savedCardsCollection.deleteMany({ userId: userObjectId });
-    } catch (error) {
-      console.error('Error cleaning up saved cards:', error);
-    }
-
-    // Clean up user blocks (as blocker or blocked)
-    try {
-      const db = getDB();
-      const blocksCollection = db.collection('blocks');
-      await blocksCollection.deleteMany({
-        $or: [{ blockerId: userObjectId }, { blockedId: userObjectId }],
-      });
-    } catch (error) {
-      console.error('Error cleaning up blocks:', error);
-    }
-
-    // Clean up blocked events
-    try {
-      const db = getDB();
-      const eventBlocksCollection = db.collection('eventBlocks');
-      await eventBlocksCollection.deleteMany({ userId: userObjectId });
-    } catch (error) {
-      console.error('Error cleaning up event blocks:', error);
-    }
-
-    // Clean up event reminders
-    try {
-      const db = getDB();
-      const remindersCollection = db.collection('eventReminders');
-      await remindersCollection.deleteMany({ userId: userObjectId });
-    } catch (error) {
-      console.error('Error cleaning up event reminders:', error);
-    }
-
-    // Clean up event invites (sent or received)
-    try {
-      const db = getDB();
-      const invitesCollection = db.collection('eventInvites');
-      await invitesCollection.deleteMany({
-        $or: [{ organiserId: userObjectId }, { playerId: userObjectId }],
-      });
-    } catch (error) {
-      console.error('Error cleaning up event invites:', error);
-    }
-
-    // If user is an organiser, delete all events created by them
-    if (user.userType === 'organiser') {
-      try {
-        const db = getDB();
-        const eventsCollection = db.collection('events');
-        
-        // Build comprehensive creator query matching ObjectId, string _id, sequential string/number userId
-        const creatorIdQueries = [
-          userObjectId,
-          userId,
-          user.userId,
-          user.userId !== undefined && user.userId !== null ? String(user.userId) : null,
-          user.userId !== undefined && user.userId !== null && !isNaN(user.userId) ? Number(user.userId) : null,
-        ].filter(Boolean);
-
-        const creatorQuery = { $in: creatorIdQueries };
-        
-        // Find all events created by this user
-        const events = await eventsCollection.find({ creatorId: creatorQuery }).toArray();
-        
-        // Delete event files and associated records for each event
-        for (const event of events) {
-          // Delete event images (non-blocking; legacy on-disk files only — S3 URLs skipped)
-          const imagesToDelete = event.gameImages || (event.gameImage ? [event.gameImage] : []);
-          for (const imagePath of imagesToDelete) {
-            await safeUnlinkUpload(imagePath);
-          }
-          
-          // Delete event video (non-blocking; legacy on-disk file only)
-          if (event.gameVideo) {
-            await safeUnlinkUpload(event.gameVideo);
-          }
-          
-          // Match event by ObjectId, String _id, or sequential eventId (e.g. 'E108')
-          const eventIdsToClean = [
-            event._id,
-            event._id ? event._id.toString() : null,
-            event.eventId || null,
-          ].filter(Boolean);
-
-          const eventIdQuery = { $in: eventIdsToClean };
-
-          // Delete event joins for this event
-          const joinsCollection = db.collection('eventJoins');
-          await joinsCollection.deleteMany({ eventId: eventIdQuery });
-          
-          // Delete waitlist entries for this event
-          const waitlistCollection = db.collection('waitlist');
-          await waitlistCollection.deleteMany({ eventId: eventIdQuery });
-
-          // Delete bookings for this event
-          const bookingsCollection = db.collection('bookings');
-          await bookingsCollection.deleteMany({ eventId: eventIdQuery });
-
-          // Delete join requests for this event
-          const joinRequestsCollection = db.collection('eventJoinRequests');
-          await joinRequestsCollection.deleteMany({ eventId: eventIdQuery });
-
-          // Delete invites for this event
-          const invitesCollection = db.collection('eventInvites');
-          await invitesCollection.deleteMany({ eventId: eventIdQuery });
-
-          // Delete reminders for this event
-          const remindersCollection = db.collection('eventReminders');
-          await remindersCollection.deleteMany({ eventId: eventIdQuery });
-
-          // Delete favorites for this event
-          const favoritesCollection = db.collection('favorites');
-          await favoritesCollection.deleteMany({ eventId: eventIdQuery });
-
-          // Delete blocks for this event
-          const eventBlocksCollection = db.collection('eventBlocks');
-          await eventBlocksCollection.deleteMany({ eventId: eventIdQuery });
-        }
-        
-        // Update events count before deleting (decrement by number of events)
-        if (events.length > 0) {
-          await Event.updateEventsCount(userId, -events.length);
-        }
-        
-        // Delete all events created by this user
-        await eventsCollection.deleteMany({ creatorId: creatorQuery });
-      } catch (error) {
-        console.error('Error cleaning up events:', error);
-      }
-    }
-
-    // If user is an organiser, also delete organiser-specific related data (packages, organiser purchases, bank details)
-    if (user.userType === 'organiser') {
-      const creatorIdQueries = [
-        userObjectId,
-        userId,
-        user.userId,
-        user.userId !== undefined && user.userId !== null ? String(user.userId) : null,
-        user.userId !== undefined && user.userId !== null && !isNaN(user.userId) ? Number(user.userId) : null,
-      ].filter(Boolean);
-
-      // Delete packages created by organiser
-      try {
-        const db = getDB();
-        const packagesCollection = db.collection('packages');
-        await packagesCollection.deleteMany({ organiserId: { $in: creatorIdQueries } });
-      } catch (error) {
-        console.error('Error cleaning up packages:', error);
-      }
-
-      // Delete package purchases tied to this organiser (since organiser no longer exists)
-      try {
-        const db = getDB();
-        const packagePurchasesCollection = db.collection('packagePurchases');
-        await packagePurchasesCollection.deleteMany({ organiserId: { $in: creatorIdQueries } });
-      } catch (error) {
-        console.error('Error cleaning up organiser package purchases:', error);
-      }
-
-      // Delete organiser bank details (stored by sequential userId or ObjectId in organizerBankDetails collection)
-      try {
-        const db = getDB();
-        const bankDetailsCollection = db.collection('organizerBankDetails');
-        await bankDetailsCollection.deleteMany({ organizerId: { $in: creatorIdQueries } });
-      } catch (error) {
-        console.error('Error cleaning up organiser bank details:', error);
-      }
-    }
-
-    // Finally, delete the user account
-    const deleted = await User.deleteById(userId);
+    const deleted = await deleteUserAccount(user);
     if (!deleted) {
       return res.status(400).json({
         success: false,
@@ -433,5 +425,5 @@ const deleteUser = async (req, res, next) => {
 
 module.exports = {
   deleteUser,
+  deleteUserAccount,
 };
-

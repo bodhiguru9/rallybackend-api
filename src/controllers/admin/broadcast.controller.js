@@ -30,6 +30,9 @@
  * }
  *
  * Response: { broadcast_id, status: "queued" }
+ *
+ * dryRun: true resolves the audience and returns { recipientCount }
+ * without creating a broadcast record or sending anything.
  */
 
 const { v4: uuidv4 } = require('uuid');
@@ -154,6 +157,12 @@ const createBroadcast = async (req, res, next) => {
       return res.status(400).json({ success: false, error: `metadata.category must be one of: ${VALID_CATEGORIES.join(', ')}` });
     }
 
+    // ── 1a. Dry run: resolve audience, send nothing, record nothing ────────────
+    if (req.body.dryRun === true) {
+      const previewUsers = await resolveAudience(db, audience);
+      return res.status(200).json({ success: true, dryRun: true, recipientCount: previewUsers.length });
+    }
+
     // ── 2. Deduplication guard ────────────────────────────────────────────────
     // Reject if same title+body+audience was sent in the last 5 minutes
     const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
@@ -190,7 +199,7 @@ const createBroadcast = async (req, res, next) => {
         channels: activeChannels,
         priority 
       },
-      sentBy: req.user.id,
+      sentBy: req.admin.email,
       status: 'queued',
       createdAt: now,
     };

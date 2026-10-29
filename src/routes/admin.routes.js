@@ -15,7 +15,7 @@ const adminAudit = require('../middleware/adminAudit');
 const { createBroadcast } = require('../controllers/admin/broadcast.controller');
 const { getBookingDetails } = require('../controllers/admin/booking.controller');
 const { listOrganisers, getOrganiserById, getOrganiserEvents, deleteOrganiser } = require('../controllers/admin/organiser.controller');
-const { listAllEvents } = require('../controllers/admin/events.controller');
+const { listAllEvents, getEventDetails } = require('../controllers/admin/events.controller');
 
 router.use(adminKeyAuth, adminAudit);
 
@@ -84,6 +84,15 @@ router.delete('/organisers/:userId', deleteOrganiser);
  * per-organiser events route plus an `organiser` summary per event.
  */
 router.get('/events', listAllEvents);
+
+/**
+ * GET /api/admin/events/:eventId?status=all|booked|cancelled|pending|failed&page=&perPage=
+ *
+ * Full event detail page: event info, organiser, revenue/attendee summary
+ * (booked bookings only), and the booking list (filterable by status).
+ * :eventId accepts either the sequential id (E428) or the Mongo _id.
+ */
+router.get('/events/:eventId', getEventDetails);
 
 router.post('/broadcasts', createBroadcast);
 

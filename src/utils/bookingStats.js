@@ -64,6 +64,48 @@ const getBookingStatsByUsers = async (userIds, options = {}) => {
   return statsMap;
 };
 
+/**
+ * Aggregate booking counts, attendee counts, and sales totals per event.
+ * Free events naturally come back with totalSales: 0 but non-zero
+ * bookingCount/attendeeCount — this is how admin tooling tracks free
+ * events alongside paid ones.
+ */
+const getBookingStatsByEvents = async (eventIds) => {
+  const db = getDB();
+  const bookingsCollection = db.collection('bookings');
+  const eventObjectIds = normalizeObjectIds(eventIds);
+
+  if (eventObjectIds.length === 0) {
+    return new Map();
+  }
+
+  const stats = await bookingsCollection
+    .aggregate([
+      { $match: { status: 'booked', eventId: { $in: eventObjectIds } } },
+      {
+        $group: {
+          _id: '$eventId',
+          bookingCount: { $sum: 1 },
+          attendeeCount: { $sum: { $ifNull: ['$guestsCount', 1] } },
+          totalSales: { $sum: { $ifNull: ['$finalAmount', { $ifNull: ['$amount', 0] }] } },
+        },
+      },
+    ])
+    .toArray();
+
+  const statsMap = new Map();
+  stats.forEach((entry) => {
+    statsMap.set(entry._id.toString(), {
+      bookingCount: entry.bookingCount || 0,
+      attendeeCount: entry.attendeeCount || 0,
+      totalSales: entry.totalSales || 0,
+    });
+  });
+
+  return statsMap;
+};
+
 module.exports = {
   getBookingStatsByUsers,
+  getBookingStatsByEvents,
 };

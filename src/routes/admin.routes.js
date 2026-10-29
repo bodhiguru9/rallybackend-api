@@ -14,7 +14,7 @@ const adminKeyAuth = require('../middleware/adminKeyAuth');
 const adminAudit = require('../middleware/adminAudit');
 const { createBroadcast } = require('../controllers/admin/broadcast.controller');
 const { getBookingDetails } = require('../controllers/admin/booking.controller');
-const { deleteOrganiser } = require('../controllers/admin/organiser.controller');
+const { listOrganisers, getOrganiserEvents, deleteOrganiser } = require('../controllers/admin/organiser.controller');
 
 router.use(adminKeyAuth, adminAudit);
 
@@ -24,6 +24,23 @@ router.use(adminKeyAuth, adminAudit);
  * Look up a booking's details. No ownership check (admin-only).
  */
 router.get('/bookings/:bookingId', getBookingDetails);
+
+/**
+ * GET /api/admin/organisers?search=&page=&perPage=
+ *
+ * Landing page for the events/sales tracker: paginated organiser list,
+ * optionally filtered by name/email/community search.
+ */
+router.get('/organisers', listOrganisers);
+
+/**
+ * GET /api/admin/organisers/:organiserId/events?type=all|free|paid&page=&perPage=
+ *
+ * That organiser's events (free and paid, filterable by type) with
+ * bookingCount, attendeeCount, and totalSales per event. Free events show
+ * totalSales: 0 but real booking/attendee counts.
+ */
+router.get('/organisers/:organiserId/events', getOrganiserEvents);
 
 /**
  * DELETE /api/admin/organisers/:userId

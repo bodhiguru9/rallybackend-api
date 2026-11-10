@@ -6,6 +6,20 @@ const { deleteUserAccount } = require('../user/deleteUser.controller');
 
 const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
+/**
+ * Normalize a search term to the bare digit string a stored mobileNumber
+ * would contain, so "+971 55 189 9547", "971551899547", and the local
+ * "0551899547" all match the same E.164-stored "+971551899547".
+ *
+ * Strips every non-digit character (so the stored "+" is never part of
+ * the comparison), then drops a single leading 0 — the local-dialing
+ * prefix that a country code never actually has in this data.
+ */
+const normalizePhoneDigits = (value) => {
+  const digitsOnly = value.replace(/\D/g, '');
+  return digitsOnly.startsWith('0') ? digitsOnly.slice(1) : digitsOnly;
+};
+
 const findOrganiserByIdParam = async (idParam) => {
   let user = null;
   if (!isNaN(idParam) && parseInt(idParam).toString() === idParam) {
@@ -34,6 +48,16 @@ const listOrganisers = async (req, res, next) => {
     if (search) {
       const regex = new RegExp(escapeRegex(search), 'i');
       query.$or = [{ fullName: regex }, { email: regex }, { communityName: regex }];
+
+      // Phone search: match on digits only, so any of +971551899547 /
+      // 971551899547 / 0551899547 / 551899547 find the same organiser.
+      // Require a handful of digits so short numeric input (e.g. a 2-digit
+      // userId) doesn't accidentally match half the phone book.
+      const phoneDigits = normalizePhoneDigits(search);
+      if (phoneDigits.length >= 6) {
+        query.$or.push({ mobileNumber: new RegExp(escapeRegex(phoneDigits)) });
+      }
+
       // userId is stored as a number, so regex can't match it — only exact match works
       if (!isNaN(search) && search.trim() !== '') {
         query.$or.push({ userId: parseInt(search, 10) });

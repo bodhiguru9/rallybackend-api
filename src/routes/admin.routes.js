@@ -16,6 +16,7 @@ const { createBroadcast } = require('../controllers/admin/broadcast.controller')
 const { getBookingDetails } = require('../controllers/admin/booking.controller');
 const { listOrganisers, getOrganiserById, getOrganiserEvents, deleteOrganiser } = require('../controllers/admin/organiser.controller');
 const { listAllEvents, getEventDetails } = require('../controllers/admin/events.controller');
+const { searchUsers, deleteUser } = require('../controllers/admin/userSearch.controller');
 
 router.use(adminKeyAuth, adminAudit);
 
@@ -61,23 +62,6 @@ router.get('/organisers/:organiserId/events', getOrganiserEvents);
 router.delete('/organisers/:userId', deleteOrganiser);
 
 /**
- * POST /api/admin/broadcasts
- *
- * Send a push and/or in-app broadcast to a segment of users.
- *
- * Body:
- * {
- *   audience: { type: "all" | "players" | "organisers" | "user_ids", userIds?: string[] },
- *   message:  { title: string, body: string, action?: { type, url } },
- *   metadata: { category?: "maintenance" | "update" | "promotion" | "security" | "announcement" },
- *   notification: { channel: "push" | "in_app" | "both", priority?: "high" | "normal" },
- *   dryRun?: boolean
- * }
- *
- * Response: { broadcast_id: "brd_...", status: "queued" }, or
- * { dryRun: true, recipientCount } when dryRun is true.
- */
-/**
  * GET /api/admin/events?type=all|free|paid&search=&page=&perPage=
  *
  * Events tab: every event across all organisers, same shape as the
@@ -94,6 +78,42 @@ router.get('/events', listAllEvents);
  */
 router.get('/events/:eventId', getEventDetails);
 
+/**
+ * GET /api/admin/search-user?search=&page=&perPage=
+ *
+ * Search users of any type (player or organiser) by name, email, or
+ * phone (any format). Matching the same email/phone across multiple
+ * accounts surfaces all of them together, with join date, last booking,
+ * and (for organisers) event stats to tell accounts apart.
+ */
+router.get('/search-user', searchUsers);
+
+/**
+ * DELETE /api/admin/users/:userId
+ *
+ * Body: { confirm: { email, mobileNumber, bio?, createdAt? } } — bio for
+ * organisers, createdAt (exact join timestamp) for everyone else, since
+ * bio doesn't exist for non-organisers. Works for any user type.
+ */
+router.delete('/users/:userId', deleteUser);
+
+/**
+ * POST /api/admin/broadcasts
+ *
+ * Send a push and/or in-app broadcast to a segment of users.
+ *
+ * Body:
+ * {
+ *   audience: { type: "all" | "players" | "organisers" | "user_ids", userIds?: string[] },
+ *   message:  { title: string, body: string, action?: { type, url } },
+ *   metadata: { category?: "maintenance" | "update" | "promotion" | "security" | "announcement" },
+ *   notification: { channel: "push" | "in_app" | "both", priority?: "high" | "normal" },
+ *   dryRun?: boolean
+ * }
+ *
+ * Response: { broadcast_id: "brd_...", status: "queued" }, or
+ * { dryRun: true, recipientCount } when dryRun is true.
+ */
 router.post('/broadcasts', createBroadcast);
 
 module.exports = router;

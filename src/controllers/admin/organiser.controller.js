@@ -1,35 +1,10 @@
-const User = require('../../models/User');
 const { getDB } = require('../../config/database');
 const { getPaginationParams, createPaginationResponse } = require('../../utils/pagination');
 const { getBookingStatsByEvents } = require('../../utils/bookingStats');
 const { deleteUserAccount } = require('../user/deleteUser.controller');
-
-const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-
-/**
- * Normalize a search term to the bare digit string a stored mobileNumber
- * would contain, so "+971 55 189 9547", "971551899547", and the local
- * "0551899547" all match the same E.164-stored "+971551899547".
- *
- * Strips every non-digit character (so the stored "+" is never part of
- * the comparison), then drops a single leading 0 — the local-dialing
- * prefix that a country code never actually has in this data.
- */
-const normalizePhoneDigits = (value) => {
-  const digitsOnly = value.replace(/\D/g, '');
-  return digitsOnly.startsWith('0') ? digitsOnly.slice(1) : digitsOnly;
-};
-
-const findOrganiserByIdParam = async (idParam) => {
-  let user = null;
-  if (!isNaN(idParam) && parseInt(idParam).toString() === idParam) {
-    user = await User.findByUserId(idParam);
-  }
-  if (!user) {
-    user = await User.findById(idParam);
-  }
-  return user;
-};
+const { escapeRegex, normalizePhoneDigits } = require('../../utils/adminSearch');
+const { findUserByIdParam: findOrganiserByIdParam } = require('../../utils/adminLookup');
+const { confirmMatchesTarget } = require('../../utils/adminDeleteConfirm');
 
 /**
  * @desc    List organisers (admin panel landing page for the events/sales view)
@@ -263,21 +238,7 @@ const deleteOrganiser = async (req, res, next) => {
       });
     }
 
-    if (!confirm || typeof confirm !== 'object') {
-      return res.status(400).json({
-        success: false,
-        error: 'confirm (email, mobileNumber, bio) is required',
-      });
-    }
-
-    const normalize = (value) => (value === null || value === undefined ? '' : String(value).trim());
-
-    const fieldsMatch =
-      normalize(confirm.email).toLowerCase() === normalize(user.email).toLowerCase() &&
-      normalize(confirm.mobileNumber) === normalize(user.mobileNumber) &&
-      normalize(confirm.bio) === normalize(user.bio);
-
-    if (!fieldsMatch) {
+    if (!confirmMatchesTarget(user, confirm)) {
       return res.status(400).json({
         success: false,
         error: 'confirm fields do not match the target organiser. Re-check email, mobileNumber, and bio.',

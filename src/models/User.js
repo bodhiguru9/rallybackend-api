@@ -180,6 +180,17 @@ class User {
   }
 
   /**
+   * Find user by a linked OAuth provider account (e.g. provider 'apple', providerId = token sub)
+   */
+  static async findByOAuthProvider(provider, providerId) {
+    const db = getDB();
+    const usersCollection = db.collection('users');
+    return await usersCollection.findOne({
+      oauthProviders: { $elemMatch: { provider, providerId } },
+    });
+  }
+
+  /**
    * Find user by mobile number
    */
   static async findByMobileNumber(mobileNumber) {

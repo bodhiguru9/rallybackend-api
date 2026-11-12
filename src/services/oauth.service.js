@@ -54,105 +54,120 @@ const generateToken = (userId) => {
   return generateAccessToken(userId);
 };
 
+const parseList = (...values) =>
+  values
+    .filter(Boolean)
+    .flatMap((v) => v.split(','))
+    .map((v) => v.trim())
+    .filter(Boolean);
+
 /**
- * Verify Google OAuth Token
+ * Verify Google OAuth ID token.
+ * Allowed audiences: GOOGLE_CLIENT_IDS (comma-separated) + GOOGLE_CLIENT_ID.
+ * With the native Google Sign-In SDK the token audience is the *Web* client ID.
  */
 const verifyGoogleToken = async (idToken) => {
   try {
-    const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
-    const GOOGLE_PROJECT_ID = process.env.GOOGLE_PROJECT_ID;
-    const GOOGLE_AUTH_URL = process.env.GOOGLE_AUTH_URL;
-    const GOOGLE_TOKEN_URL = process.env.GOOGLE_TOKEN_URL;
-    const GOOGLE_AUTH_PROVIDER_X509_CERT_URL = process.env.GOOGLE_AUTH_PROVIDER_X509_CERT_URL;
-
-    if (!GOOGLE_CLIENT_ID) {
-      console.warn('GOOGLE_CLIENT_ID not set. Token audience will not be verified.');
-    }
-    if (!GOOGLE_PROJECT_ID || !GOOGLE_AUTH_URL || !GOOGLE_TOKEN_URL || !GOOGLE_AUTH_PROVIDER_X509_CERT_URL) {
-      console.warn('Google OAuth env vars missing: GOOGLE_PROJECT_ID/GOOGLE_AUTH_URL/GOOGLE_TOKEN_URL/GOOGLE_AUTH_PROVIDER_X509_CERT_URL');
+    const allowedAudiences = parseList(process.env.GOOGLE_CLIENT_IDS, process.env.GOOGLE_CLIENT_ID);
+    if (allowedAudiences.length === 0) {
+      console.error('Google OAuth: GOOGLE_CLIENT_ID(S) not set; refusing to accept tokens.');
+      return { success: false, error: 'Google sign-in is not configured' };
     }
 
-    const response = await axios.get(
-      `https://www.googleapis.com/oauth2/v3/tokeninfo?id_token=${idToken}`
-    );
+    // tokeninfo validates signature and expiry for us
+    const response = await axios.get('https://oauth2.googleapis.com/tokeninfo', {
+      params: { id_token: idToken },
+    });
+    const data = response.data || {};
 
-    if (response.data && response.data.sub) {
-      if (GOOGLE_CLIENT_ID && response.data.aud && response.data.aud !== GOOGLE_CLIENT_ID) {
-        return { success: false, error: 'Google token audience mismatch' };
-      }
-      return {
-        success: true,
-        data: {
-          providerId: response.data.sub,
-          email: response.data.email,
-          emailVerified: response.data.email_verified === 'true',
-          name: response.data.name,
-          picture: response.data.picture,
-          givenName: response.data.given_name,
-          familyName: response.data.family_name,
-        },
-      };
+    if (!['accounts.google.com', 'https://accounts.google.com'].includes(data.iss)) {
+      return { success: false, error: 'Invalid Google token issuer' };
+    }
+    if (!allowedAudiences.includes(data.aud)) {
+      console.warn('Google OAuth audience mismatch:', data.aud);
+      return { success: false, error: 'Google token audience mismatch' };
+    }
+    if (!data.sub) {
+      return { success: false, error: 'Invalid Google token' };
     }
 
-    return { success: false, error: 'Invalid Google token' };
+    return {
+      success: true,
+      data: {
+        providerId: data.sub,
+        email: data.email || null,
+        emailVerified: data.email_verified === 'true' || data.email_verified === true,
+        name: data.name,
+        picture: data.picture,
+        givenName: data.given_name,
+        familyName: data.family_name,
+      },
+    };
   } catch (error) {
-    console.error('Google token verification error:', error.message);
+    console.error('Google token verification error:', error.response?.data || error.message);
     return { success: false, error: 'Failed to verify Google token' };
   }
 };
 
 /**
- * Verify Facebook OAuth Token
+ * Resolve Facebook app credentials.
+ * Preferred: FACEBOOK_APP_ID + FACEBOOK_APP_SECRET.
+ * Legacy FACEBOOK_ID / FACEBOOK_KEY are still accepted; the all-digits value is treated as
+ * the app ID because the two were stored swapped in some environments.
+ */
+const getFacebookCredentials = () => {
+  if (process.env.FACEBOOK_APP_ID && process.env.FACEBOOK_APP_SECRET) {
+    return { appId: process.env.FACEBOOK_APP_ID, appSecret: process.env.FACEBOOK_APP_SECRET };
+  }
+  const a = process.env.FACEBOOK_ID;
+  const b = process.env.FACEBOOK_KEY;
+  if (!a || !b) return null;
+  const isNumeric = (v) => /^\d+$/.test(v);
+  if (isNumeric(b) && !isNumeric(a)) return { appId: b, appSecret: a };
+  return { appId: a, appSecret: b };
+};
+
+/**
+ * Verify Facebook user access token (must have been issued to our app)
  */
 const verifyFacebookToken = async (accessToken) => {
   try {
-    const FACEBOOK_ID = process.env.FACEBOOK_ID;
-    const FACEBOOK_KEY = process.env.FACEBOOK_KEY;
-
-    if (!FACEBOOK_ID || !FACEBOOK_KEY) {
-      console.warn('FACEBOOK_ID or FACEBOOK_KEY not set in environment variables. Proceeding with basic token verification.');
+    const creds = getFacebookCredentials();
+    if (!creds) {
+      console.error('Facebook OAuth: FACEBOOK_APP_ID / FACEBOOK_APP_SECRET not set; refusing to accept tokens.');
+      return { success: false, error: 'Facebook sign-in is not configured' };
     }
 
-    // First, verify the token and get app_id using debug_token endpoint
-    let appId = null;
-    if (FACEBOOK_ID && FACEBOOK_KEY) {
-      try {
-        const debugResponse = await axios.get(
-          `https://graph.facebook.com/debug_token?input_token=${accessToken}&access_token=${FACEBOOK_ID}|${FACEBOOK_KEY}`
-        );
-
-        if (debugResponse.data && debugResponse.data.data) {
-          const tokenData = debugResponse.data.data;
-          
-          // Verify the token is valid
-          if (!tokenData.is_valid) {
-            return { success: false, error: 'Invalid Facebook token' };
-          }
-
-          // Verify the app_id matches our FACEBOOK_ID
-          if (tokenData.app_id !== FACEBOOK_ID) {
-            return { success: false, error: 'Token does not belong to this application' };
-          }
-
-          appId = tokenData.app_id;
-        }
-      } catch (debugError) {
-        console.error('Facebook debug token error:', debugError.message);
-        // Continue with basic verification if debug fails
-      }
+    const debugResponse = await axios.get('https://graph.facebook.com/debug_token', {
+      params: { input_token: accessToken, access_token: `${creds.appId}|${creds.appSecret}` },
+    });
+    const tokenData = debugResponse.data?.data;
+    if (!tokenData || !tokenData.is_valid) {
+      return { success: false, error: 'Invalid Facebook token' };
+    }
+    if (String(tokenData.app_id) !== String(creds.appId)) {
+      return { success: false, error: 'Token does not belong to this application' };
     }
 
-    // Get user information
-    const response = await axios.get(
-      `https://graph.facebook.com/me?fields=id,name,email,picture&access_token=${accessToken}`
-    );
+    const appsecretProof = crypto
+      .createHmac('sha256', creds.appSecret)
+      .update(accessToken)
+      .digest('hex');
+    const response = await axios.get('https://graph.facebook.com/me', {
+      params: {
+        fields: 'id,name,email,picture.type(large)',
+        access_token: accessToken,
+        appsecret_proof: appsecretProof,
+      },
+    });
 
-    if (response.data && response.data.id) {
+    if (response.data && response.data.id && response.data.id === String(tokenData.user_id)) {
       return {
         success: true,
         data: {
           providerId: response.data.id,
           email: response.data.email || null,
+          // Graph API only returns confirmed emails
           emailVerified: !!response.data.email,
           name: response.data.name,
           picture: response.data.picture?.data?.url || null,
@@ -162,56 +177,77 @@ const verifyFacebookToken = async (accessToken) => {
 
     return { success: false, error: 'Invalid Facebook token' };
   } catch (error) {
-    console.error('Facebook token verification error:', error.message);
-    
-    // Provide more specific error messages
-    if (error.response && error.response.data) {
-      const fbError = error.response.data.error;
-      if (fbError) {
-        return { success: false, error: fbError.message || 'Failed to verify Facebook token' };
-      }
-    }
-    
-    return { success: false, error: 'Failed to verify Facebook token' };
+    const fbError = error.response?.data?.error;
+    console.error('Facebook token verification error:', fbError || error.message);
+    return { success: false, error: fbError?.message || 'Failed to verify Facebook token' };
   }
 };
 
-/**
- * Verify Apple OAuth Token
- * Note: Apple uses JWT tokens that need to be verified with Apple's public keys
- * This is a simplified version - for production, you should fetch Apple's public keys
- */
-const verifyAppleToken = async (idToken) => {
-  try {
-    // Decode the token without verification first to get the header
-    const decoded = jwt.decode(idToken, { complete: true });
+// Apple signing keys (JWKS), cached in memory
+const APPLE_KEYS_URL = 'https://appleid.apple.com/auth/keys';
+const APPLE_KEYS_TTL_MS = 60 * 60 * 1000;
+let appleKeysCache = { keys: null, fetchedAt: 0 };
 
-    if (!decoded || !decoded.payload) {
+const getApplePublicKey = async (kid) => {
+  const isFresh = appleKeysCache.keys && Date.now() - appleKeysCache.fetchedAt < APPLE_KEYS_TTL_MS;
+  let jwk = isFresh ? appleKeysCache.keys.find((k) => k.kid === kid) : null;
+  if (!jwk) {
+    // Refetch on cache miss too, so key rotation is picked up
+    const { data } = await axios.get(APPLE_KEYS_URL);
+    appleKeysCache = { keys: data.keys || [], fetchedAt: Date.now() };
+    jwk = appleKeysCache.keys.find((k) => k.kid === kid);
+  }
+  if (!jwk) return null;
+  return crypto.createPublicKey({ key: jwk, format: 'jwk' });
+};
+
+/**
+ * Verify Sign in with Apple identity token (signature, issuer, audience, expiry, nonce).
+ * Allowed audiences: APPLE_CLIENT_IDS (comma-separated), default is the iOS bundle id.
+ */
+const verifyAppleToken = async (idToken, rawNonce) => {
+  try {
+    const decoded = jwt.decode(idToken, { complete: true });
+    if (!decoded || !decoded.header?.kid) {
       return { success: false, error: 'Invalid Apple token format' };
     }
 
-    const payload = decoded.payload;
-
-    // Verify the token is from Apple
-    if (payload.iss !== 'https://appleid.apple.com') {
-      return { success: false, error: 'Invalid Apple token issuer' };
+    const publicKey = await getApplePublicKey(decoded.header.kid);
+    if (!publicKey) {
+      return { success: false, error: 'Unknown Apple signing key' };
     }
 
-    // For production, you should verify the signature using Apple's public keys
-    // For now, we'll trust the token if it has the required fields
-    if (payload.sub) {
-      return {
-        success: true,
-        data: {
-          providerId: payload.sub,
-          email: payload.email || null,
-          emailVerified: payload.email_verified === true || !!payload.email,
-          name: payload.name || null, // Apple may provide name on first sign-in only
-        },
-      };
+    const audiences = parseList(process.env.APPLE_CLIENT_IDS || 'com.rallysports.app');
+    const payload = jwt.verify(idToken, publicKey, {
+      algorithms: ['RS256'],
+      issuer: 'https://appleid.apple.com',
+      audience: audiences,
+    });
+
+    if (payload.nonce) {
+      if (!rawNonce) {
+        return { success: false, error: 'Missing Apple nonce' };
+      }
+      const hashed = crypto.createHash('sha256').update(rawNonce).digest('hex');
+      if (hashed !== payload.nonce) {
+        return { success: false, error: 'Apple nonce mismatch' };
+      }
     }
 
-    return { success: false, error: 'Invalid Apple token' };
+    if (!payload.sub) {
+      return { success: false, error: 'Invalid Apple token' };
+    }
+
+    return {
+      success: true,
+      data: {
+        providerId: payload.sub,
+        email: payload.email || null,
+        // Apple emails (including private relay addresses) are verified by Apple
+        emailVerified: payload.email_verified === true || payload.email_verified === 'true',
+        name: null, // Apple never puts the name in the token; the app sends it on first sign-in
+      },
+    };
   } catch (error) {
     console.error('Apple token verification error:', error.message);
     return { success: false, error: 'Failed to verify Apple token' };
@@ -233,7 +269,7 @@ const oauthSignupLogin = async (provider, token, userData = {}) => {
       verificationResult = await verifyFacebookToken(token);
       break;
     case 'apple':
-      verificationResult = await verifyAppleToken(token);
+      verificationResult = await verifyAppleToken(token, userData.nonce);
       break;
     default:
       throw new Error('Invalid OAuth provider. Supported: google, facebook, apple');
@@ -246,10 +282,11 @@ const oauthSignupLogin = async (provider, token, userData = {}) => {
   const oauthData = verificationResult.data;
   const providerId = `${provider.toLowerCase()}_${oauthData.providerId}`;
 
-  // Check if user already exists by email or provider ID
-  let user = null;
-  
-  if (oauthData.email) {
+  // Look up by linked provider account first (Apple omits email after the first sign-in),
+  // then fall back to linking by *verified* email only.
+  let user = await User.findByOAuthProvider(provider.toLowerCase(), oauthData.providerId);
+
+  if (!user && oauthData.email && oauthData.emailVerified) {
     user = await User.findByEmail(oauthData.email);
   }
 

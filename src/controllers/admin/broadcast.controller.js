@@ -42,6 +42,7 @@ const { sendPushToMany } = require('../../services/push.service');
 const { createTransporter } = require('../../utils/email');
 const { sendWhatsAppMessage } = require('../../services/twilio.service');
 const Notification = require('../../models/Notification');
+const { getPaginationParams, createPaginationResponse } = require('../../utils/pagination');
 
 // Valid enum values
 const VALID_AUDIENCE_TYPES = ['all', 'players', 'organisers', 'user_ids'];
@@ -376,4 +377,88 @@ const createBroadcast = async (req, res, next) => {
   }
 };
 
-module.exports = { createBroadcast };
+/**
+ * @desc    Check a broadcast's current status
+ * @route   GET /api/admin/broadcasts/:broadcastId
+ * @access  Admin key (adminKeyAuth)
+ *
+ * createBroadcast responds with status: "queued" immediately and does the
+ * actual sending after that response — this is how the panel finds out
+ * whether it actually landed (sent/failed, recipient/channel counts).
+ * Poll this after creating a broadcast until status leaves "queued".
+ */
+const getBroadcastStatus = async (req, res, next) => {
+  try {
+    const { broadcastId } = req.params;
+    const db = getDB();
+
+    const broadcast = await db.collection('broadcasts').findOne({ broadcastId });
+    if (!broadcast) {
+      return res.status(404).json({ success: false, error: 'Broadcast not found' });
+    }
+
+    res.status(200).json({
+      success: true,
+      data: {
+        broadcastId: broadcast.broadcastId,
+        status: broadcast.status,
+        audience: broadcast.audience,
+        message: broadcast.message,
+        notification: broadcast.notification,
+        sentBy: broadcast.sentBy,
+        recipientCount: broadcast.recipientCount ?? null,
+        pushSent: broadcast.pushSent ?? null,
+        inAppSent: broadcast.inAppSent ?? null,
+        emailSent: broadcast.emailSent ?? null,
+        whatsappSent: broadcast.whatsappSent ?? null,
+        error: broadcast.error || null,
+        createdAt: broadcast.createdAt,
+        sentAt: broadcast.sentAt || null,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * @desc    List past broadcasts (history), most recent first
+ * @route   GET /api/admin/broadcasts?page=&perPage=
+ * @access  Admin key (adminKeyAuth)
+ */
+const listBroadcasts = async (req, res, next) => {
+  try {
+    const { page, perPage, skip } = getPaginationParams(req.query.page, parseInt(req.query.perPage, 10) || 20);
+    const db = getDB();
+    const broadcastsCollection = db.collection('broadcasts');
+
+    const totalCount = await broadcastsCollection.countDocuments({});
+    const broadcasts = await broadcastsCollection
+      .find({})
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(perPage)
+      .toArray();
+
+    res.status(200).json({
+      success: true,
+      data: {
+        broadcasts: broadcasts.map((broadcast) => ({
+          broadcastId: broadcast.broadcastId,
+          status: broadcast.status,
+          audience: broadcast.audience,
+          message: broadcast.message,
+          sentBy: broadcast.sentBy,
+          recipientCount: broadcast.recipientCount ?? null,
+          createdAt: broadcast.createdAt,
+          sentAt: broadcast.sentAt || null,
+        })),
+        pagination: createPaginationResponse(totalCount, page, perPage),
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+module.exports = { createBroadcast, getBroadcastStatus, listBroadcasts };

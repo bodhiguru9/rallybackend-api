@@ -12,11 +12,12 @@ const express = require('express');
 const router = express.Router();
 const adminKeyAuth = require('../middleware/adminKeyAuth');
 const adminAudit = require('../middleware/adminAudit');
-const { createBroadcast } = require('../controllers/admin/broadcast.controller');
+const { createBroadcast, getBroadcastStatus, listBroadcasts } = require('../controllers/admin/broadcast.controller');
 const { getBookingDetails } = require('../controllers/admin/booking.controller');
 const { listOrganisers, getOrganiserById, getOrganiserEvents, deleteOrganiser } = require('../controllers/admin/organiser.controller');
 const { listAllEvents, getEventDetails } = require('../controllers/admin/events.controller');
 const { searchUsers, deleteUser } = require('../controllers/admin/userSearch.controller');
+const { createUser } = require('../controllers/admin/createUser.controller');
 
 router.use(adminKeyAuth, adminAudit);
 
@@ -98,6 +99,16 @@ router.get('/search-user', searchUsers);
 router.delete('/users/:userId', deleteUser);
 
 /**
+ * POST /api/admin/create-user
+ *
+ * Create a player or organiser account directly — bypasses the OTP
+ * signup flow; the admin vouches for the account. Body: { userType,
+ * fullName, email?, mobileNumber? (E.164), password?, ...type-specific }.
+ * At least one of email/mobileNumber is required.
+ */
+router.post('/create-user', createUser);
+
+/**
  * POST /api/admin/broadcasts
  *
  * Send a push and/or in-app broadcast to a segment of users.
@@ -113,7 +124,26 @@ router.delete('/users/:userId', deleteUser);
  *
  * Response: { broadcast_id: "brd_...", status: "queued" }, or
  * { dryRun: true, recipientCount } when dryRun is true.
+ *
+ * The response is a fire-and-forget ack, sent before the broadcast is
+ * actually processed — poll GET /broadcasts/:broadcastId afterward to see
+ * the real outcome (sent/failed, recipient and per-channel counts).
  */
 router.post('/broadcasts', createBroadcast);
+
+/**
+ * GET /api/admin/broadcasts?page=&perPage=
+ *
+ * Broadcast history, most recent first.
+ */
+router.get('/broadcasts', listBroadcasts);
+
+/**
+ * GET /api/admin/broadcasts/:broadcastId
+ *
+ * A single broadcast's current status — poll this after POSTing a
+ * broadcast until status moves off "queued" to "sent" or "failed".
+ */
+router.get('/broadcasts/:broadcastId', getBroadcastStatus);
 
 module.exports = router;

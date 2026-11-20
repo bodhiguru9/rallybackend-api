@@ -6,6 +6,7 @@ const Notification = require('../../models/Notification');
 const Booking = require('../../models/Booking');
 const Payment = require('../../models/Payment');
 const { findEventById, validateEventId } = require('../../utils/eventHelper');
+const { calculateRefundWithoutVat } = require('../../utils/refundHelper');
 const { getPaginationParams, createPaginationResponse } = require('../../utils/pagination');
 const { validateAgeForEvent } = require('../../utils/ageRestriction');
 const { getDB } = require('../../config/database');
@@ -556,7 +557,7 @@ if (!occurrenceStart) {
         userToRemove._id,
         'event_participant_removed',
         'Removed from Event',
-        `${organiserName} removed you from "${eventName}". If you paid for this event, you will be refunded shortly.`,
+        `${organiserName} removed you from "${eventName}". If you paid for this event, your booking amount will be refunded shortly (5% VAT is non-refundable).`,
         {
           organiserId: organiserId,
           organiserName: organiserName,
@@ -621,18 +622,24 @@ if (!occurrenceStart) {
             }
 
             if (payment && payment.status === 'success' && payment.stripePaymentIntentId) {
-              const refund = await stripe.refunds.create({
-                payment_intent: payment.stripePaymentIntentId,
-              });
-              await Payment.markRefunded(payment.paymentId || payment._id, {
-                refundId: refund.id,
-                refundStatus: refund.status || 'succeeded',
-                refundAmount: payment.finalAmount || payment.amount || 0,
-                refundedAt: new Date(),
-                refundReason: 'Removed by organiser',
-              });
-              refundMessage = 'A full refund has been initiated and should reflect in your account shortly.';
-              console.log(`💸 [REMOVE-PARTICIPANT] Refund issued for booking ${removedBooking.bookingId}`);
+              const { refundAmount, vatAmount, refundAmountInCents } = calculateRefundWithoutVat(payment, removedBooking);
+
+              if (refundAmountInCents > 0) {
+                const refund = await stripe.refunds.create({
+                  payment_intent: payment.stripePaymentIntentId,
+                  amount: refundAmountInCents,
+                });
+                await Payment.markRefunded(payment.paymentId || payment._id, {
+                  refundId: refund.id,
+                  refundStatus: refund.status || 'succeeded',
+                  refundAmount: refundAmount,
+                  vatRetained: vatAmount,
+                  refundedAt: new Date(),
+                  refundReason: 'Removed by organiser (5% VAT is non-refundable)',
+                });
+                refundMessage = `A refund of AED ${refundAmount} has been initiated (5% VAT of AED ${vatAmount} is non-refundable) and should reflect in your account shortly.`;
+                console.log(`💸 [REMOVE-PARTICIPANT] Refund issued for booking ${removedBooking.bookingId}: AED ${refundAmount} (VAT AED ${vatAmount} withheld)`);
+              }
             }
           } catch (refundErr) {
             console.error('[REMOVE-PARTICIPANT] Stripe refund failed:', refundErr.message);

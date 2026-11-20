@@ -31,6 +31,7 @@ class Payment {
     this.refundId = data.refundId || null;
     this.refundStatus = data.refundStatus || null;
     this.refundAmount = data.refundAmount || 0;
+    this.vatRetained = data.vatRetained || 0;
     this.refundedAt = data.refundedAt || null;
     this.refundReason = data.refundReason || null;
 
@@ -181,6 +182,7 @@ class Payment {
       refundId: refundData.refundId || null,
       refundStatus: refundData.refundStatus || 'succeeded',
       refundAmount: refundData.refundAmount || 0,
+      vatRetained: refundData.vatRetained || 0,
       refundedAt: refundData.refundedAt || new Date(),
       refundReason: refundData.refundReason || 'Refund processed',
       updatedAt: new Date(),

@@ -5,6 +5,7 @@ const EventJoin = require('../../models/EventJoin');
 const Notification = require('../../models/Notification');
 const User = require('../../models/User');
 const { findEventById } = require('../../utils/eventHelper');
+const { calculateRefundWithoutVat } = require('../../utils/refundHelper');
 const {
   sendPlayerCancelledBookingNotification,
   sendHostCancelledBookingNotification,
@@ -87,7 +88,7 @@ const cancelBooking = async (req, res, next) => {
         });
       }
 
-      const eventDateTime = event.eventDateTime || event.gameStartDate;
+      const eventDateTime = booking.occurrenceStart || event.eventDateTime || event.gameStartDate;
       if (eventDateTime) {
         const eventStartTime = new Date(eventDateTime);
         const now = new Date();
@@ -142,59 +143,70 @@ const cancelBooking = async (req, res, next) => {
                 'Refund eligible, but Stripe payment intent is missing'
               );
             } else {
-              try {
-                const stripeClient = getStripeInstance();
+              const { refundAmount, vatAmount, refundAmountInCents } = calculateRefundWithoutVat(payment, booking);
 
-                const refund = await stripeClient.refunds.create({
-                  payment_intent: payment.stripePaymentIntentId,
-                });
-
-                await Payment.markRefunded(payment.paymentId || payment._id, {
-                  refundId: refund.id,
-                  refundStatus: refund.status || 'succeeded',
-                  refundAmount: payment.finalAmount || payment.amount || 0,
-                  refundedAt: new Date(),
-                  refundReason: refundReason,
-                });
-
-                refundProcessed = true;
-                refundReason = 'Full refund processed successfully';
-
-                // Send in-app notification to player
+              if (refundAmountInCents <= 0) {
+                refundReason = 'No refundable booking amount (after 5% VAT deduction)';
+                await Payment.markRefundNotEligible(payment.paymentId || payment._id, refundReason);
+              } else {
                 try {
-                  await Notification.create(
-                    userId,
-                    'refund_initiated',
-                    'Refund Initiated',
-                    `Your refund for ${event.eventName || 'the event'} has been initiated and should reflect in your account soon.`,
-                    {
-                      eventId: booking.eventId,
-                      bookingId: booking._id || bookingId,
-                      refundAmount: payment.finalAmount || payment.amount || 0,
-                      eventName: event.eventName
-                    }
+                  const stripeClient = getStripeInstance();
+
+                  const refund = await stripeClient.refunds.create({
+                    payment_intent: payment.stripePaymentIntentId,
+                    amount: refundAmountInCents,
+                  });
+
+                  await Payment.markRefunded(payment.paymentId || payment._id, {
+                    refundId: refund.id,
+                    refundStatus: refund.status || 'succeeded',
+                    refundAmount: refundAmount,
+                    vatRetained: vatAmount,
+                    refundedAt: new Date(),
+                    refundReason: 'Booking amount refunded (5% VAT is non-refundable)',
+                  });
+
+                  refundProcessed = true;
+                  refundReason = `Booking refund of AED ${refundAmount} processed successfully (5% VAT of AED ${vatAmount} is non-refundable)`;
+
+                  // Send in-app notification to player
+                  try {
+                    await Notification.create(
+                      userId,
+                      'refund_initiated',
+                      'Refund Initiated',
+                      `Your refund of AED ${refundAmount} for ${event.eventName || 'the event'} has been initiated (5% VAT of AED ${vatAmount} is non-refundable) and should reflect in your account soon.`,
+                      {
+                        eventId: booking.eventId,
+                        bookingId: booking._id || bookingId,
+                        refundAmount: refundAmount,
+                        vatRetained: vatAmount,
+                        eventName: event.eventName,
+                      }
+                    );
+                  } catch (notificationError) {
+                    console.error('Failed to send refund notification:', notificationError.message);
+                  }
+
+                  refundData = {
+                    refundId: refund.id,
+                    refundStatus: refund.status || 'succeeded',
+                    refundAmount: refundAmount,
+                    vatRetained: vatAmount,
+                    refundedAt: new Date(),
+                  };
+                } catch (refundError) {
+                  await Payment.markRefundFailed(
+                    payment.paymentId || payment._id,
+                    refundError.message || 'Refund failed at Stripe'
                   );
-                } catch (notificationError) {
-                  console.error('Failed to send refund notification:', notificationError.message);
+
+                  refundProcessed = false;
+                  refundReason = refundError.message || 'Refund failed at Stripe';
+                  refundData = {
+                    refundStatus: 'failed',
+                  };
                 }
-
-                refundData = {
-                  refundId: refund.id,
-                  refundStatus: refund.status || 'succeeded',
-                  refundAmount: payment.finalAmount || payment.amount || 0,
-                  refundedAt: new Date(),
-                };
-              } catch (refundError) {
-                await Payment.markRefundFailed(
-                  payment.paymentId || payment._id,
-                  refundError.message || 'Refund failed at Stripe'
-                );
-
-                refundProcessed = false;
-                refundReason = refundError.message || 'Refund failed at Stripe';
-                refundData = {
-                  refundStatus: 'failed',
-                };
               }
             }
           } else {

@@ -1,5 +1,6 @@
 const Event = require('../../models/Event');
 const { findEventById, validateEventId } = require('../../utils/eventHelper');
+const { calculateRefundWithoutVat } = require('../../utils/refundHelper');
 const { safeUnlinkUpload } = require('../../utils/fileCleanup');
 const { getDB } = require('../../config/database');
 const Notification = require('../../models/Notification');
@@ -227,19 +228,25 @@ const deleteEvent = async (req, res, next) => {
               }
 
               if (payment && payment.status === 'success' && payment.stripePaymentIntentId) {
-                const refund = await stripe.refunds.create({
-                  payment_intent: payment.stripePaymentIntentId,
-                });
-                
-                await Payment.markRefunded(payment.paymentId || payment._id, {
-                  refundId: refund.id,
-                  refundStatus: refund.status || 'succeeded',
-                  refundAmount: payment.finalAmount || payment.amount || 0,
-                  refundedAt: new Date(),
-                  refundReason: 'Event deleted by organiser',
-                });
-                
-                console.log(`💸 [DELETE-EVENT] Refund issued for booking ${booking.bookingId}`);
+                const { refundAmount, vatAmount, refundAmountInCents } = calculateRefundWithoutVat(payment, booking);
+
+                if (refundAmountInCents > 0) {
+                  const refund = await stripe.refunds.create({
+                    payment_intent: payment.stripePaymentIntentId,
+                    amount: refundAmountInCents,
+                  });
+                  
+                  await Payment.markRefunded(payment.paymentId || payment._id, {
+                    refundId: refund.id,
+                    refundStatus: refund.status || 'succeeded',
+                    refundAmount: refundAmount,
+                    vatRetained: vatAmount,
+                    refundedAt: new Date(),
+                    refundReason: 'Event deleted by organiser (5% VAT is non-refundable)',
+                  });
+                  
+                  console.log(`💸 [DELETE-EVENT] Refund issued for booking ${booking.bookingId}: AED ${refundAmount} (VAT AED ${vatAmount} withheld)`);
+                }
               }
             } catch (refundErr) {
               console.error(`[DELETE-EVENT] Stripe refund failed for booking ${booking.bookingId}:`, refundErr.message);

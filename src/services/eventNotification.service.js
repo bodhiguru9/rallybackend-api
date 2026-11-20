@@ -29,7 +29,7 @@ const TEMPLATES = {
   },
   eventCancelled: {
     friendlyName: `${APP_NAME} Event Cancelled`,
-    body: `Hi {{1}}, we're sorry to inform you that {{2}}, scheduled for {{3}} at {{4}}, has been cancelled by the organiser. Any amount paid will be refunded to your account.`,
+    body: `Hi {{1}}, we're sorry to inform you that {{2}}, scheduled for {{3}} at {{4}}, has been cancelled by the organiser. Any booking amount paid will be refunded to your account (5% VAT is non-refundable).`,
   },
   waitlistSpotAvailable: {
     friendlyName: `${APP_NAME} Waitlist Spot Available`,
@@ -421,10 +421,10 @@ const sendEventCancelledNotification = async ({ user, event }) => {
   const userName = user?.fullName || 'User';
 
   const subject = `Event cancelled: ${eventName}`;
-  const text = `Hi ${userName}, we're sorry to inform you that ${eventName}, scheduled for ${eventDate} at ${eventLocation}, has been cancelled by the organiser. Any amount paid will be refunded to your account`;
+  const text = `Hi ${userName}, we're sorry to inform you that ${eventName}, scheduled for ${eventDate} at ${eventLocation}, has been cancelled by the organiser. Any booking amount paid will be refunded to your account (5% VAT is non-refundable).`;
   const html = `
     <p>Hi ${userName},</p>
-    <p>We're sorry to inform you that <strong>${eventName}</strong>, scheduled for <strong>${eventDate}</strong> at <strong>${eventLocation}</strong>, has been cancelled by the organiser. Any amount paid will be refunded to your account</p>
+    <p>We're sorry to inform you that <strong>${eventName}</strong>, scheduled for <strong>${eventDate}</strong> at <strong>${eventLocation}</strong>, has been cancelled by the organiser. Any booking amount paid will be refunded to your account (5% VAT is non-refundable).</p>
   `;
   const whatsappMessage = text;
 

@@ -529,7 +529,7 @@ const getMyFollowers = async (req, res, next) => {
 const getMyFollowing = async (req, res, next) => {
   try {
     const userId = req.user.id;
-    const { page, perPage, skip } = getPaginationParams(req.query.page, 20);
+    const { page, perPage, skip } = getPaginationParams(req.query.page, req.query.perPage || 100);
 
     // Get the logged-in user
     const user = await User.findById(userId);
@@ -548,13 +548,37 @@ const getMyFollowing = async (req, res, next) => {
     const db = getDB();
     const followsCollection = db.collection('follows');
     const usersCollection = db.collection('users');
+    const requestsCollection = db.collection('requests');
 
-    const follows = await followsCollection
-      .find({ followerId: new ObjectId(userMongoId) })
-      .sort({ createdAt: -1 })
-      .toArray();
+    const [follows, acceptedRequests] = await Promise.all([
+      followsCollection
+        .find({ followerId: new ObjectId(userMongoId) })
+        .sort({ createdAt: -1 })
+        .toArray(),
+      requestsCollection
+        .find({
+          $or: [
+            { userId: new ObjectId(userMongoId) },
+            { userId: user.userId },
+            { userId: userMongoId },
+          ],
+          status: 'accepted',
+        })
+        .toArray(),
+    ]);
 
-    const followingIds = follows.map((f) => f.followingId);
+    const allOrganiserIdStrings = new Set([
+      ...follows.map((f) => f.followingId?.toString()).filter(Boolean),
+      ...acceptedRequests.map((r) => r.organiserId?.toString()).filter(Boolean),
+    ]);
+
+    const followingIds = Array.from(allOrganiserIdStrings).map((id) => {
+      try {
+        return new ObjectId(id);
+      } catch {
+        return id;
+      }
+    });
 
     if (followingIds.length === 0) {
       const pagination = createPaginationResponse(0, page, perPage);

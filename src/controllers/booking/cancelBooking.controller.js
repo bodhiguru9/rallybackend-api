@@ -155,6 +155,8 @@ const cancelBooking = async (req, res, next) => {
                   const refund = await stripeClient.refunds.create({
                     payment_intent: payment.stripePaymentIntentId,
                     amount: refundAmountInCents,
+                  }, {
+                    idempotencyKey: `refund_${payment.stripePaymentIntentId}`,
                   });
 
                   await Payment.markRefunded(payment.paymentId || payment._id, {

@@ -176,6 +176,8 @@ const removePlayer = async (req, res, next) => {
                 const refund = await stripe.refunds.create({
                   payment_intent: payment.stripePaymentIntentId,
                   amount: refundAmountInCents,
+                }, {
+                  idempotencyKey: `refund_${payment.stripePaymentIntentId}`,
                 });
                 await Payment.markRefunded(payment.paymentId || payment._id, {
                   refundId: refund.id,

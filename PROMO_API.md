@@ -162,7 +162,7 @@ All of these accept the new body field `promoCodes: string[]` and still accept l
 ```
 Response: `{ success: true, data: { purchases: [...], pagination } }`.
 
-**Pagination object** (all list endpoints): `{ totalCount, totalPages, currentPage, perPage, hasNextPage, hasPreviousPage }`.
+**Pagination object** (all list endpoints): `{ totalCount, totalPages, currentPage, perPage, hasNextPage, hasPrevPage }`.
 
 **Responses** (all wrapped as `{ success: true, data }`): `GET /summary` -> `{ discountedTotal, activeCount, redeemedCount }`; `GET /` -> `{ promoCodes: [PromoCode], pagination }`; `POST /` (201) -> `{ promoCode, notified? }`; `GET /:id` -> `{ promoCode, stats: { discounted, collected, redeemed } }`; `PUT /:id` and `PATCH /:id/status` -> `{ promoCode }`; `DELETE /:id` -> `{ success: true, message }`; `POST /:id/notify` -> `{ notified: { totalSubscribers, pushSentCount, inAppCount }, lastNotifiedAt }`.
 

@@ -85,6 +85,10 @@ const createCode = handle(async (req, res) => {
     ownerId,
     createdBy: req.user.id,
   });
+  // Don't announce a code players can't use yet
+  if (data.notifyOnCreate && !queries.isLive({ ...data, archivedAt: null, isActive: data.isActive !== false })) {
+    return fail(res, 409, 'Can\'t notify followers about a code that isn\'t live yet. Create it without notifying, then announce it once it starts.', 'NOT_LIVE');
+  }
   const created = await PromoCode.create(data);
 
   let notified = null;
@@ -203,8 +207,8 @@ const notifyFollowers = handle(async (req, res) => {
   if (!code) {
     return;
   }
-  if (queries.computeState(code) !== 'active') {
-    return fail(res, 409, 'Only active promo codes can be announced', 'NOT_ACTIVE');
+  if (!queries.isLive(code) || queries.computeState(code) !== 'active') {
+    return fail(res, 409, 'Only a promo code that is live right now can be announced', 'NOT_LIVE');
   }
   // Atomic claim of the 24h slot, so two quick taps send one notification
   const now = new Date();

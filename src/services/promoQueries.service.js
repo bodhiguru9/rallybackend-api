@@ -45,6 +45,20 @@ function computeState(code, now = new Date()) {
   return 'active';
 }
 
+/** Can players use this code right now? (not paused, archived, not yet started, or expired) */
+function isLive(code, now = new Date()) {
+  if (code.archivedAt || !code.isActive) {
+    return false;
+  }
+  if (code.validFrom && new Date(code.validFrom) > now) {
+    return false;
+  }
+  if (code.validUntil && new Date(code.validUntil) < now) {
+    return false;
+  }
+  return true;
+}
+
 function toPromoCodeDto(code, now = new Date()) {
   return {
     id: String(code._id),
@@ -233,6 +247,7 @@ async function redemptionRows(match, { sort = { createdAt: -1 }, skip = 0, limit
 module.exports = {
   findCode,
   computeState,
+  isLive,
   toPromoCodeDto,
   tabFilter,
   codeStats,

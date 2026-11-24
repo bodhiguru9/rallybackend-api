@@ -18,6 +18,7 @@ const { listOrganisers, getOrganiserById, getOrganiserEvents, deleteOrganiser } 
 const { listAllEvents, getEventDetails } = require('../controllers/admin/events.controller');
 const { searchUsers, deleteUser } = require('../controllers/admin/userSearch.controller');
 const { createUser } = require('../controllers/admin/createUser.controller');
+const adminPromo = require('../controllers/admin/adminPromo.controller');
 
 router.use(adminKeyAuth, adminAudit);
 
@@ -145,5 +146,24 @@ router.get('/broadcasts', listBroadcasts);
  * broadcast until status moves off "queued" to "sent" or "failed".
  */
 router.get('/broadcasts/:broadcastId', getBroadcastStatus);
+
+/**
+ * PROMO CODES (Rally-funded, app-wide codes). Contract: PROMO_API.md section 5.
+ * Organiser codes appear in the list/detail views read-only; any code can be paused or resumed.
+ */
+router.get('/promo-codes', adminPromo.listCodes);
+router.post('/promo-codes', adminPromo.createCode);
+router.get('/promo-codes/:id', adminPromo.getCode);
+router.put('/promo-codes/:id', adminPromo.editCode);
+router.delete('/promo-codes/:id', adminPromo.archiveCode);
+router.patch('/promo-codes/:id/status', adminPromo.setStatus);
+router.get('/promo-codes/:id/purchases', adminPromo.listPurchases);
+router.get('/promo-codes/:id/purchases/export', adminPromo.exportPurchases);
+
+/**
+ * GET /api/admin/promo-redemptions?code&organiserId&eventId&packageId&fundedBy&status&from&to&updatedSince&page&perPage&csv
+ * Redemption tracking feed (every row has bookingId, paymentId and stripePaymentIntentId for joins).
+ */
+router.get('/promo-redemptions', adminPromo.listRedemptions);
 
 module.exports = router;

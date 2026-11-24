@@ -4,7 +4,7 @@ Status: **skeleton (milestone 1)**. Shapes below are the contract the app builds
 
 All routes need `Authorization: Bearer <token>` unless marked admin. Money is in **AED, 2 decimal places**. VAT is 5%, charged on the discounted subtotal. Dates are ISO 8601 UTC strings.
 
-Implementation status: `quote` **implemented (M2)** · checkout fields **implemented (M3)** · organiser API **implemented (M4)** · admin API M5.
+Implementation status: `quote` **implemented (M2)** · checkout fields **implemented (M3)** · organiser API **implemented (M4)** · admin API **implemented (M5)**.
 
 ---
 
@@ -166,7 +166,7 @@ Response: `{ success: true, data: { purchases: [...], pagination } }`.
 
 **Responses** (all wrapped as `{ success: true, data }`): `GET /summary` -> `{ discountedTotal, activeCount, redeemedCount }`; `GET /` -> `{ promoCodes: [PromoCode], pagination }`; `POST /` (201) -> `{ promoCode, notified? }`; `GET /:id` -> `{ promoCode, stats: { discounted, collected, redeemed } }`; `PUT /:id` and `PATCH /:id/status` -> `{ promoCode }`; `DELETE /:id` -> `{ success: true, message }`; `POST /:id/notify` -> `{ notified: { totalSubscribers, pushSentCount, inAppCount }, lastNotifiedAt }`.
 
-**Errors**: 404 `NOT_FOUND` for a code that doesn't exist *or belongs to someone else*; 400 `VALIDATION`; 409 `CODE_EXISTS`, `CODE_LOCKED`, `ARCHIVED`, `NOT_ACTIVE`; 429 `NOTIFY_COOLDOWN` (one announcement per code per 24h).
+**Errors**: 404 `NOT_FOUND` for a code that doesn't exist *or belongs to someone else*; 400 `VALIDATION`; 409 `CODE_EXISTS`, `CODE_LOCKED`, `ARCHIVED`, `NOT_ACTIVE`; 429 `NOTIFY_COOLDOWN` (one announcement per code per 24h); 409 `NOT_LIVE` (notify, or create with `notifyOnCreate`, only for a code that is live now: active, started, not expired, not archived).
 
 **CSV** (`/:id/purchases/export`): one row per redemption (confirmed or refunded) with Redemption id, Status, Date, Player, Phone, Email, Gender, Booking number, Event number (E#), Event name, Occurrence, Original / Discount / Paid (excl. VAT) / VAT in AED. Cells starting with `= + - @` are prefixed with `'`.
 
@@ -176,26 +176,38 @@ Response: `{ success: true, data: { purchases: [...], pagination } }`.
 
 ---
 
-## 5. Admin API  (M5)  — `/api/admin`, header `X-Admin-Key`
+## 5. Admin API  (M5, implemented)  — `/api/admin`, headers `X-Admin-Key` + `X-Admin-Email`
 
-Rally-funded, app-wide codes. Same fields and validation as above, except `fundedBy: "rally"`, `ownerType: "admin"`, and `eligibility: "subscribers"` is rejected. Default scope = all events, all players.
+Behind the existing `adminKeyAuth` + `adminAudit` (every call is audit-logged). Admin codes are **Rally-funded and app-wide**: `fundedBy: "rally"`, `ownerType: "admin"`, `createdBy` = the `X-Admin-Email` value. Same fields, validation and edit rules as the organiser API, except: `eligibility: "subscribers"` is rejected (400 `VALIDATION`), `notifyOnCreate` is ignored, and default scope = all events and players. Responses use the same `{ success: true, data }` wrapper; errors use the same codes as section 4, plus 403 `READ_ONLY`.
 
 | Method | Path | Notes |
 |---|---|---|
-| GET/POST | `/promo-codes` | list also includes organiser codes, read-only (`?fundedBy=rally\|organiser`) |
-| GET/PUT/DELETE | `/promo-codes/:id` | |
-| PATCH | `/promo-codes/:id/status` | pause/resume any code |
-| GET | `/promo-codes/:id/purchases` (+ `/export`) | same as organiser |
-| GET | `/promo-redemptions` | filters `code, organiserId, eventId, packageId, fundedBy, status, from, to, updatedSince`; `perPage <= 100`; `csv=true` |
+| GET | `/promo-codes?fundedBy=rally|organiser&tab=active|past&search&page&perPage` | all codes; each also has `ownerId`, `createdBy`. Organiser codes are read-only |
+| POST | `/promo-codes` | create a Rally-funded code |
+| GET | `/promo-codes/:id` | `{ promoCode, stats: { discounted, collected, redeemed, rallyFundedDiscountTotal } }` |
+| PUT | `/promo-codes/:id` | edit (admin codes only; organiser codes -> 403 `READ_ONLY`) |
+| DELETE | `/promo-codes/:id` | archive (admin codes only) |
+| PATCH | `/promo-codes/:id/status` | `{ isActive }` pause/resume **any** code |
+| GET | `/promo-codes/:id/purchases` | same as organiser (grouped per player) |
+| GET | `/promo-codes/:id/purchases/export` | CSV, one row per redemption |
+| GET | `/promo-redemptions` | tracking feed, below |
 
-Redemption row:
+**GET /promo-redemptions** filters: `code`, `organiserId` (Mongo id), `eventId` (Mongo id or `E#`), `packageId` (Mongo id or `PKG#`), `fundedBy` (`rally|organiser`), `status` (one or comma-separated of reserved, confirmed, released, refunded), `from`/`to` (reservedAt range), `updatedSince` (ISO date; returns rows with `updatedAt` after it, ordered by `updatedAt` ascending so a client can page forward; otherwise newest first). `perPage` max 100. `csv=true` downloads up to 5000 rows as CSV. Response: `{ redemptions: [Row], pagination }`.
+
+Row (every row carries ids for joins, plus readable numbers):
 ```json
 { "redemptionId": "PRD7", "code": "SAVE20", "fundedBy": "rally", "status": "confirmed",
-  "userId": "...", "organiserId": "...", "targetType": "event", "eventId": "...", "occurrenceStart": "...",
-  "bookingId": "...", "paymentId": "...", "stripePaymentIntentId": "pi_...",
+  "userId": "...", "playerName": "Sara K", "playerPhone": "+9715...", "playerEmail": "s@x.com", "playerGender": "female",
+  "organiserId": "...", "targetType": "event", "eventId": "...", "eventNumber": "E95", "eventName": "Friday Padel",
+  "occurrenceStart": "...", "packageId": null,
+  "bookingId": "<Mongo _id>", "bookingNumber": "booking12", "paymentId": "<Mongo _id>", "paymentNumber": "PAY5",
+  "stripePaymentIntentId": "pi_...",
   "originalAmount": 100, "discountAmount": 20, "paidAmount": 80, "vatAmount": 4, "rallyDueAmount": 20,
   "reservedAt": "...", "confirmedAt": "...", "releasedAt": null, "updatedAt": "..." }
 ```
+`stripePaymentIntentId` is null for free (0 AED) bookings. `rallyDueAmount` is the Rally-funded discount recorded for that use (0 once refunded or released); it is a record only, how payouts use it is undecided.
+
+**Not built yet** (plan section 10): promo-dues per organiser, settlements, per-event promo summary.
 
 ---
 

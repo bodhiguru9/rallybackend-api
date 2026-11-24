@@ -96,7 +96,11 @@ function buildTotals(base, codes) {
     while (round2(minSubtotal + round2(minSubtotal * VAT_RATE)) < STRIPE_MIN_AED) {
       minSubtotal = round2(minSubtotal + 0.01);
     }
-    if (minSubtotal <= originalAmount) {
+    if (minSubtotal > originalAmount) {
+      // The booking itself is below what Stripe accepts once VAT is added: a code can't make it payable
+      throw new PromoError('NOT_APPLICABLE', 'Promo codes can\'t be used on this booking');
+    }
+    {
       const giveBack = round2(minSubtotal - subtotal);
       const last = appliedPromos[appliedPromos.length - 1];
       last.discountAmount = round2(last.discountAmount - giveBack);

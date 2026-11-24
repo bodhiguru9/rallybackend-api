@@ -2,6 +2,7 @@ const PromoCode = require('../../models/PromoCode');
 const Event = require('../../models/Event');
 const { getPaginationParams, createPaginationResponse } = require('../../utils/pagination');
 const { getDB } = require('../../config/database');
+const pricingService = require('../../services/pricing.service');
 
 /**
  * @desc    Create a new promo code
@@ -601,7 +602,54 @@ const validatePromoCode = async (req, res, next) => {
   }
 };
 
+/**
+ * @desc    Server-side price quote for a checkout (event or package), with promo codes
+ * @route   POST /api/promo-codes/quote
+ * @access  Private
+ */
+const quotePromo = async (req, res, next) => {
+  try {
+    const {
+      targetType = 'event',
+      eventId,
+      occurrenceStart,
+      packageId,
+      guestsCount,
+      promoCodes,
+      promoCode,
+    } = req.body || {};
+
+    if (!['event', 'package'].includes(targetType)) {
+      return res.status(400).json({ success: false, message: 'targetType must be event or package', code: 'NOT_APPLICABLE' });
+    }
+    if (promoCodes !== undefined && !Array.isArray(promoCodes)) {
+      return res.status(400).json({ success: false, message: 'promoCodes must be an array', code: 'INVALID' });
+    }
+
+    // Accept the legacy single "promoCode" string too
+    const codes = Array.isArray(promoCodes) ? promoCodes : (promoCode ? [promoCode] : []);
+
+    const quote = await pricingService.quote({
+      targetType,
+      eventId,
+      occurrenceStart,
+      packageId,
+      guestsCount: guestsCount === undefined ? 1 : Number(guestsCount),
+      userId: req.user.id,
+      codes,
+    });
+
+    return res.status(200).json({ success: true, data: { quote } });
+  } catch (error) {
+    if (error instanceof pricingService.PromoError) {
+      return res.status(error.statusCode).json({ success: false, message: error.message, code: error.code });
+    }
+    next(error);
+  }
+};
+
 module.exports = {
+  quotePromo,
   createPromoCode,
   getAllPromoCodes,
   getPromoCodeById,

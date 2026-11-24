@@ -393,6 +393,7 @@ async function startServer({ runCron = false } = {}) {
       if (runCron) {
         const { startReminderCronJob } = require('./services/eventReminderCron.service');
         startReminderCronJob();
+        require('./services/promoRedemption.service').startSweeper();
       }
     });
   } catch (error) {
@@ -411,6 +412,7 @@ async function startReminderCronInPrimary() {
     initializePushService();
     const { startReminderCronJob } = require('./services/eventReminderCron.service');
     startReminderCronJob();
+    require('./services/promoRedemption.service').startSweeper();
     console.log(`🕒 Reminder cron started in primary (pid ${process.pid})`);
   } catch (error) {
     console.error('❌ Failed to start reminder cron in primary:', error.message);

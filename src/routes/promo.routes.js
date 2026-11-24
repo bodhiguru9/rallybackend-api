@@ -31,6 +31,14 @@ const { parseFormData } = require('../middleware/formDataParser');
 router.post('/', protect, organiserOnly, promoCodeController.createPromoCode);
 
 /**
+ * Server-side price quote (event or package) with promo codes
+ * POST /api/promo-codes/quote
+ * Body: { targetType, eventId, occurrenceStart, packageId, guestsCount, promoCodes: [] }
+ * See PROMO_API.md section 2.
+ */
+router.post('/quote', protect, promoCodeController.quotePromo);
+
+/**
  * Get all promo codes
  * GET /api/promo-codes?isActive=true&eventId=xxx&limit=50&skip=0
  */

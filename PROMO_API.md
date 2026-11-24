@@ -4,7 +4,7 @@ Status: **skeleton (milestone 1)**. Shapes below are the contract the app builds
 
 All routes need `Authorization: Bearer <token>` unless marked admin. Money is in **AED, 2 decimal places**. VAT is 5%, charged on the discounted subtotal. Dates are ISO 8601 UTC strings.
 
-Implementation status: `quote` M2 · checkout fields M3 · organiser API M4 · admin API M5.
+Implementation status: `quote` **implemented (M2)** · checkout fields M3 · organiser API M4 · admin API M5.
 
 ---
 

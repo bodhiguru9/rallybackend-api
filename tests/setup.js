@@ -15,6 +15,8 @@ jest.mock('stripe', () => {
           status: 'requires_payment_method',
           description: data.description,
         })),
+        cancel: jest.fn().mockImplementation((id) => Promise.resolve({ id, status: 'canceled' })),
+        update: jest.fn().mockImplementation((id, data) => Promise.resolve({ id, status: 'requires_payment_method', ...data })),
         retrieve: jest.fn().mockImplementation((id) => Promise.resolve({
           id: id,
           client_secret: 'pi_mock_secret_retrieved',

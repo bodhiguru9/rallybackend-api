@@ -5,6 +5,12 @@
 const { ObjectId } = require('mongodb');
 const { getDB } = require('../config/database');
 
+/**
+ * Name to use in $lookup. $lookup bypasses the sandbox that suffixes collection names in the test environment,
+ * so ask the driver for the real name instead of hard-coding it.
+ */
+const collectionName = (name) => getDB().collection(name).collectionName;
+
 const escapeRegex = (text) => String(text).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 const toObjectId = (id) => {
@@ -138,8 +144,8 @@ async function summaryForCodeIds(codeIds) {
   };
 }
 
-const JOINS = [
-  { $lookup: { from: 'users', localField: 'userId', foreignField: '_id', as: 'user' } },
+const joins = () => [
+  { $lookup: { from: collectionName('users'), localField: 'userId', foreignField: '_id', as: 'user' } },
   { $unwind: { path: '$user', preserveNullAndEmptyArrays: true } },
 ];
 
@@ -164,7 +170,7 @@ async function groupedPurchases(promoCodeId, { search, gender, sort = 'recent', 
   const pipeline = [
     { $match: { promoCodeId, status: 'confirmed' } },
     { $group: { _id: '$userId', uses: { $sum: 1 }, lastUsedAt: { $max: '$confirmedAt' } } },
-    { $lookup: { from: 'users', localField: '_id', foreignField: '_id', as: 'user' } },
+    { $lookup: { from: collectionName('users'), localField: '_id', foreignField: '_id', as: 'user' } },
     { $unwind: { path: '$user', preserveNullAndEmptyArrays: true } },
     ...(userFilters.length ? [{ $match: { $and: userFilters } }] : []),
     { $sort: sortStage },
@@ -201,12 +207,12 @@ async function redemptionRows(match, { sort = { createdAt: -1 }, skip = 0, limit
     { $sort: sort },
     { $skip: skip },
     { $limit: limit },
-    ...JOINS,
-    { $lookup: { from: 'bookings', localField: 'bookingId', foreignField: '_id', as: 'booking' } },
+    ...joins(),
+    { $lookup: { from: collectionName('bookings'), localField: 'bookingId', foreignField: '_id', as: 'booking' } },
     { $unwind: { path: '$booking', preserveNullAndEmptyArrays: true } },
-    { $lookup: { from: 'events', localField: 'eventId', foreignField: '_id', as: 'event' } },
+    { $lookup: { from: collectionName('events'), localField: 'eventId', foreignField: '_id', as: 'event' } },
     { $unwind: { path: '$event', preserveNullAndEmptyArrays: true } },
-    { $lookup: { from: 'payments', localField: 'paymentId', foreignField: '_id', as: 'payment' } },
+    { $lookup: { from: collectionName('payments'), localField: 'paymentId', foreignField: '_id', as: 'payment' } },
     { $unwind: { path: '$payment', preserveNullAndEmptyArrays: true } },
   ];
   const docs = await getDB().collection('promoRedemptions').aggregate(pipeline).toArray();

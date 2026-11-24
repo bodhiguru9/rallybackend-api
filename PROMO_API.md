@@ -188,3 +188,13 @@ Redemption row:
   "originalAmount": 100, "discountAmount": 20, "paidAmount": 80, "vatAmount": 4, "rallyDueAmount": 20,
   "reservedAt": "...", "confirmedAt": "...", "releasedAt": null, "updatedAt": "..." }
 ```
+
+---
+
+## 6. Runbook: migration (run on staging first, never on production without a backup)
+
+1. `node scripts/migratePromoCodes.js` — dry run; prints how many codes lack each new field.
+2. `node scripts/migratePromoCodes.js --apply` — fills defaults (never overwrites existing values) and drops the old unique `code_1` index.
+3. Optional: add `--archive-existing` to archive every code that exists today (leftover test codes). **Archiving is opt-in**; there are no live codes today (decision 11), so skip it unless old test codes should disappear.
+4. `npm run indexes` — creates the partial-unique `code_active_unique` index and the `promoRedemptions` indexes.
+Run step 4 only after step 2, otherwise the partial index can't coexist cleanly with old data.

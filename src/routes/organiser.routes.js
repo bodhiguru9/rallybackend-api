@@ -8,6 +8,7 @@ const organiserAnalyticsController = require('../controllers/organiser/organiser
 const organiserMembersController = require('../controllers/organiser/organiserMembers.controller');
 const organiserTransactionsController = require('../controllers/organiser/organiserTransactions.controller');
 const organiserAttendeesController = require('../controllers/organiser/organiserAttendees.controller');
+const organiserPromoDuesController = require('../controllers/organiser/organiserPromoDues.controller');
 
 /**
  * ORGANISER BANK DETAILS ROUTES
@@ -321,6 +322,12 @@ router.get('/attendees', protect, organiserOnly, organiserAttendeesController.ge
  * Headers: Authorization: Bearer <token>
  */
 router.get('/transactions', protect, organiserOnly, organiserTransactionsController.getOrganiserTransactions);
+
+/**
+ * Rally-funded promo discounts used on this organiser's events (read-only)
+ * GET /api/organizers/promo-dues?page=1&perPage=20
+ */
+router.get('/promo-dues', protect, organiserOnly, organiserPromoDuesController.getPromoDues);
 
 module.exports = router;
 

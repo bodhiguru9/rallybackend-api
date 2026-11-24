@@ -140,6 +140,8 @@ const getOrganiserTransactions = async (req, res, next) => {
         discountAmount: payment.discountAmount || 0,
         finalAmount: payment.finalAmount || 0,
         promoCode: payment.promoCode || null,
+        appliedPromos: (payment.appliedPromos || []).map((p) => ({ code: p.code, fundedBy: p.fundedBy, discountAmount: p.discountAmount })),
+        rallyFundedDiscount: payment.rallyFundedDiscount || 0,
         status: payment.status,
         paymentMethod: payment.paymentMethod || null,
         createdAt: payment.createdAt,

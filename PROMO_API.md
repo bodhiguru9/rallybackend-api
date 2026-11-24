@@ -4,7 +4,7 @@ Status: **skeleton (milestone 1)**. Shapes below are the contract the app builds
 
 All routes need `Authorization: Bearer <token>` unless marked admin. Money is in **AED, 2 decimal places**. VAT is 5%, charged on the discounted subtotal. Dates are ISO 8601 UTC strings.
 
-Implementation status: `quote` **implemented (M2)** · checkout fields **implemented (M3)** · organiser API M4 · admin API M5.
+Implementation status: `quote` **implemented (M2)** · checkout fields **implemented (M3)** · organiser API **implemented (M4)** · admin API M5.
 
 ---
 
@@ -120,7 +120,7 @@ All of these accept the new body field `promoCodes: string[]` and still accept l
 
 ---
 
-## 4. Organiser API  (M4)  — `/api/promo-codes` (organisers see only codes they own)
+## 4. Organiser API  (M4, implemented)  — `/api/promo-codes` (organisers see only codes they own)
 
 | Method | Path | Notes |
 |---|---|---|
@@ -160,11 +160,19 @@ All of these accept the new body field `promoCodes: string[]` and still accept l
 { "userId": "...", "name": "Sara K", "photo": "https://...", "phone": "+9715...", "email": "s@x.com",
   "gender": "female", "uses": 2, "lastUsedAt": "2026-11-20T10:00:00.000Z" }
 ```
-Response: `{ purchases: [...], pagination: { page, perPage, total, totalPages } }`.
+Response: `{ success: true, data: { purchases: [...], pagination } }`.
+
+**Pagination object** (all list endpoints): `{ totalCount, totalPages, currentPage, perPage, hasNextPage, hasPreviousPage }`.
+
+**Responses** (all wrapped as `{ success: true, data }`): `GET /summary` -> `{ discountedTotal, activeCount, redeemedCount }`; `GET /` -> `{ promoCodes: [PromoCode], pagination }`; `POST /` (201) -> `{ promoCode, notified? }`; `GET /:id` -> `{ promoCode, stats: { discounted, collected, redeemed } }`; `PUT /:id` and `PATCH /:id/status` -> `{ promoCode }`; `DELETE /:id` -> `{ success: true, message }`; `POST /:id/notify` -> `{ notified: { totalSubscribers, pushSentCount, inAppCount }, lastNotifiedAt }`.
+
+**Errors**: 404 `NOT_FOUND` for a code that doesn't exist *or belongs to someone else*; 400 `VALIDATION`; 409 `CODE_EXISTS`, `CODE_LOCKED`, `ARCHIVED`, `NOT_ACTIVE`; 429 `NOTIFY_COOLDOWN` (one announcement per code per 24h).
+
+**CSV** (`/:id/purchases/export`): one row per redemption (confirmed or refunded) with Redemption id, Status, Date, Player, Phone, Email, Gender, Booking number, Event number (E#), Event name, Occurrence, Original / Discount / Paid (excl. VAT) / VAT in AED. Cells starting with `= + - @` are prefixed with `'`.
 
 **Organiser reporting**
 - Transactions/analytics rows add `appliedPromos[]` and `rallyFundedDiscount`.
-- `GET /api/organizers/promo-dues` -> `{ redemptions: [...], totals: { rallyDue } }` (read-only; Rally-funded redemptions on this organiser's events).
+- `GET /api/organizers/promo-dues?page&perPage` -> `{ rallyFundedDiscounts: [{ redemptionId, code, playerName, bookingNumber, eventNumber, eventName, occurrenceStart, originalAmount, rallyFundedDiscount, confirmedAt }], totals: { rallyFundedDiscountTotal, count }, pagination }`. Read-only record of Rally-funded (admin code) discounts used on this organiser's events. It is **not** an amount owed or a payout; how payouts use it is undecided.
 
 ---
 

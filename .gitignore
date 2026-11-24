@@ -121,3 +121,5 @@ dist/
 .elasticbeanstalk/*
 !.elasticbeanstalk/*.cfg.yml
 !.elasticbeanstalk/*.global.yml
+.handoff/logs/
+.handoff/wt/

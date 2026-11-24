@@ -1,0 +1,21 @@
+{
+  "model": "gemini-3.8-flash-high",
+  "allowedModelPrefix": "gemini-",
+  "effort": null,
+  "timeout": "20m",
+  "autonomy": "milestone",
+  "maxFixRounds": 2,
+  "maxCommands": 30,
+  "maxParallel": 3,
+  "sharedReadOnly": [
+    "node_modules/"
+  ],
+  "verify": [
+    "npm run lint",
+    "npm run test"
+  ],
+  "protectedPaths": [],
+  "secretPaths": [],
+  "extraAllow": [],
+  "extraDeny": []
+}

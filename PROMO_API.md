@@ -4,7 +4,7 @@ Status: **skeleton (milestone 1)**. Shapes below are the contract the app builds
 
 All routes need `Authorization: Bearer <token>` unless marked admin. Money is in **AED, 2 decimal places**. VAT is 5%, charged on the discounted subtotal. Dates are ISO 8601 UTC strings.
 
-Implementation status: `quote` **implemented (M2)** · checkout fields M3 · organiser API M4 · admin API M5.
+Implementation status: `quote` **implemented (M2)** · checkout fields **implemented (M3)** · organiser API M4 · admin API M5.
 
 ---
 
@@ -108,7 +108,7 @@ Kept for older app builds. Wrapper over `quote`. Request `{ "code", "eventId", "
 
 ---
 
-## 3. Checkout changes (M3)
+## 3. Checkout changes (M3, implemented)
 
 All of these accept the new body field `promoCodes: string[]` and still accept legacy `?promoCode=CODE`.
 
@@ -198,3 +198,16 @@ Redemption row:
 3. Optional: add `--archive-existing` to archive every code that exists today (leftover test codes). **Archiving is opt-in**; there are no live codes today (decision 11), so skip it unless old test codes should disappear.
 4. `npm run indexes` — creates the partial-unique `code_active_unique` index and the `promoRedemptions` indexes.
 Run step 4 only after step 2, otherwise the partial index can't coexist cleanly with old data.
+
+---
+
+## 7. Checkout behaviour notes (M3)
+
+- **Request**: `promoCodes: string[]` in the body (max 1 today), or the legacy `promoCode` / `promo_code` (query or body). Both can be sent; codes are upper-cased and de-duplicated.
+- **Errors** from checkout use the same stable `code` values as `/quote` (response also carries `error` and `message`). `409 PAYMENT_IN_PROGRESS`: the player changed codes on a pending booking whose payment is already underway.
+- **Lifecycle**: a code use is *reserved* (30 min) when the booking/payment is created, *confirmed* when the payment succeeds (webhook or verify, claim winner only), and *released* on payment failure/cancel, expiry, or when the player changes codes. A cancelled booking whose refund is processed (or that had nothing to refund, e.g. a 100% code) is *refunded*: the use is given back and `rallyDueAmount` becomes 0. A late payment for a reservation the sweeper already released is re-confirmed (the player paid), so `usedCount` can end up one above `usageLimit`.
+- **Free (0 AED) with a code**: no Stripe. A Payment is written with `paymentMethod: "promo_free"`, `status: "success"`, and a synthetic `stripePaymentIntentId` (`free_<bookingId>` / `free_pkg_<purchaseId>`), so reporting joins stay consistent. A free event with no code is unchanged (no Payment).
+- **Bookings/payments/package purchases** now also carry `appliedPromos[{promoCodeId, code, fundedBy, discountAmount, redemptionId}]`, `vatAmount`, `rallyFundedDiscount`, `organiserFundedDiscount`; legacy `promoCode` (first) and `discountAmount` (sum) are still set.
+- **Stripe metadata** (events and packages): `organiserId, originalAmount, discountAmount, rallyFundedDiscount, organiserFundedDiscount, promoCodes (comma-separated), promoFundedBy (rally|organiser|mixed), promoCode (legacy)`.
+- **Refund** on cancellation is unchanged in formula: amount paid minus 5% VAT (`amount - discountAmount`).
+- **POST /api/promo-codes/validate** (legacy) now applies the same rules as `/quote` for signed-in callers and keeps its old response shape (discount on the client-sent pre-VAT amount).

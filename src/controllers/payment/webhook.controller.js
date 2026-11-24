@@ -1,6 +1,7 @@
 const stripe = require('stripe');
 const Payment = require('../../models/Payment');
-const PromoCode = require('../../models/PromoCode');
+const promoRedemption = require('../../services/promoRedemption.service');
+const { confirmPromoForPayment, promoFieldsFromPayment } = require('../../services/promoCheckout.service');
 const Event = require('../../models/Event');
 const Booking = require('../../models/Booking');
 const EventJoin = require('../../models/EventJoin');
@@ -63,7 +64,10 @@ const stripeWebhook = async (req, res) => {
       case 'payment_intent.payment_failed':
       case 'payment_intent.canceled':
         const failedIntent = event.data.object;
-        await handlePaymentIntentFailed(failedIntent);
+        await handlePaymentIntentFailed(
+          failedIntent,
+          event.type === 'payment_intent.canceled' ? 'payment_canceled' : 'payment_failed'
+        );
         break;
         
       default:
@@ -105,6 +109,9 @@ const handlePaymentIntentSucceeded = async (paymentIntent) => {
 
   console.log(`✅ [PAYMENT CLAIMED] By WEBHOOK — PI: ${payment_intent_id}, PaymentID: ${payment.paymentId || payment._id}`);
 
+  // Confirm promo redemption(s) (replaces the old usage-count increment)
+  await confirmPromoForPayment(payment, payment_intent_id);
+
   // If payment is for a package, activate package purchase
   if (payment.type === 'package' || payment.packageId) {
     try {
@@ -122,7 +129,9 @@ const handlePaymentIntentSucceeded = async (paymentIntent) => {
           organiserId: pkg.organiserId,
           validityMonths: pkg.validityMonths || 1,
           maxEvents: (pkg.maxEvents !== undefined && pkg.maxEvents !== null) ? pkg.maxEvents : 0,
+          ...promoFieldsFromPayment(payment),
         });
+        await promoRedemption.linkPackagePurchase(payment.stripePaymentIntentId, purchase._id);
 
         const query = payment._id ? { _id: payment._id } : { paymentId: payment.paymentId };
         await db.collection('payments').updateOne(
@@ -149,11 +158,6 @@ const handlePaymentIntentSucceeded = async (paymentIntent) => {
       console.error('Webhook: Error processing package purchase:', packageErr);
     }
     return;
-  }
-
-  // Increment promo code usage if used (safe — only one caller reaches here)
-  if (payment.promoCodeId) {
-    await PromoCode.incrementUsage(payment.promoCodeId);
   }
 
   let isNewlyBooked = false;
@@ -226,6 +230,7 @@ const handlePaymentIntentSucceeded = async (paymentIntent) => {
                 refundedAt: new Date(),
                 refundReason: 'Event filled up before payment completed',
               });
+              await promoRedemption.refund({ stripePaymentIntentId: payment_intent_id }, 'event_full_auto_refund');
               await Notification.create(
                 payment.userId,
                 'refund_initiated',
@@ -333,6 +338,7 @@ const handlePaymentIntentSucceeded = async (paymentIntent) => {
                   refundedAt: new Date(),
                   refundReason: 'Event filled up before payment completed',
                 });
+                await promoRedemption.refund({ stripePaymentIntentId: payment_intent_id }, 'event_full_auto_refund');
                 await Notification.create(
                   payment.userId,
                   'refund_initiated',
@@ -387,8 +393,11 @@ const handlePaymentIntentSucceeded = async (paymentIntent) => {
   }
 };
 
-const handlePaymentIntentFailed = async (paymentIntent) => {
+const handlePaymentIntentFailed = async (paymentIntent, reason = 'payment_failed') => {
   const payment_intent_id = paymentIntent.id;
+
+  // Give the promo use(s) back (no-op when there are none, idempotent)
+  await promoRedemption.release({ stripePaymentIntentId: payment_intent_id }, reason);
 
   const payment = await Payment.findByStripePaymentIntentId(payment_intent_id);
   if (!payment) {
@@ -398,6 +407,15 @@ const handlePaymentIntentFailed = async (paymentIntent) => {
 
   // Update payment status to failed
   await Payment.updateStatus(payment.paymentId || payment._id, 'failed');
+
+  // A cancelled PaymentIntent (abandoned checkout or expired promo reservation) can't be paid any more:
+  // close its still-pending booking so the player starts a fresh checkout.
+  if (reason === 'payment_canceled') {
+    const pendingBooking = await Booking.findByPaymentIntentId(payment_intent_id);
+    if (pendingBooking && pendingBooking.status === 'pending') {
+      await Booking.updateStatus(pendingBooking.bookingId, 'failed');
+    }
+  }
 
   // We leave the booking as pending so user can retry, or mark it failed?
   // Existing logic just leaves it pending for user to retry.

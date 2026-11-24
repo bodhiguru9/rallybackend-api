@@ -1,6 +1,15 @@
 const stripe = require('stripe');
 const Payment = require('../../models/Payment');
-const PromoCode = require('../../models/PromoCode');
+const pricingService = require('../../services/pricing.service');
+const promoRedemption = require('../../services/promoRedemption.service');
+const {
+  extractCodes,
+  respondIfPromoError,
+  buildPromoFields,
+  buildPromoMetadata,
+  confirmPromoForPayment,
+  promoFieldsFromPayment,
+} = require('../../services/promoCheckout.service');
 const Event = require('../../models/Event');
 const Booking = require('../../models/Booking');
 const EventJoin = require('../../models/EventJoin');
@@ -37,7 +46,7 @@ const createPaymentOrder = async (req, res, next) => {
   try {
     // Support both camelCase and snake_case field names
     const eventId = req.body.eventId || req.body.event_id;
-    const promoCode = req.body.promoCode || req.body.promo_code;
+    const promoCodesRequested = extractCodes(req); // promoCodes[] (new) or promoCode / promo_code (legacy)
     const userId = req.user.id;
 
     // Better validation with detailed error message
@@ -93,40 +102,30 @@ const createPaymentOrder = async (req, res, next) => {
     const guestsCount = parseInt(req.body.guestsCount || req.body.guests_count || 1, 10);
     const safeGuestsCount = isNaN(guestsCount) || guestsCount < 1 ? 1 : guestsCount;
 
-    // Get original price (multiplied by guests count)
-    let originalAmount = (event.gameJoinPrice || 0) * safeGuestsCount;
-    let discountAmount = 0;
-    let finalAmount = originalAmount;
-    let promoCodeId = null;
-    let promoCodeString = null;
-
-    // Validate and apply promo code if provided
-    const trimmedPromoCode = promoCode ? (typeof promoCode === 'string' ? promoCode.trim() : promoCode) : null;
-    if (trimmedPromoCode && trimmedPromoCode !== '') {
-      try {
-        const validation = await PromoCode.validateAndApply(
-          trimmedPromoCode,
-          event._id.toString(),
-          userId,
-          originalAmount
-        );
-
-        discountAmount = validation.discountAmount;
-        finalAmount = validation.finalAmount;
-        promoCodeId = validation.promoCode._id;
-        promoCodeString = validation.promoCode.code;
-      } catch (error) {
-        return res.status(400).json({
-          success: false,
-          error: error.message || 'Invalid promo code',
-        });
+    // Price comes from the server-side quote (event price x guests, promo codes, 5% VAT)
+    let quoteResult;
+    try {
+      quoteResult = await pricingService.quoteDetailed({
+        targetType: 'event',
+        eventId: event._id,
+        occurrenceStart: req.body.occurrenceStart || null,
+        guestsCount: safeGuestsCount,
+        userId,
+        codes: promoCodesRequested,
+      });
+    } catch (quoteError) {
+      if (respondIfPromoError(res, quoteError)) {
+        return;
       }
+      throw quoteError;
     }
-
-    // Add 5% VAT
-    const vatRate = 0.05;
-    const vatAmount = Math.round(finalAmount * vatRate * 100) / 100;
-    finalAmount = finalAmount + vatAmount;
+    const { quote, validated, target } = quoteResult;
+    const originalAmount = quote.originalAmount;
+    const discountAmount = quote.discountAmount;
+    const finalAmount = quote.finalAmount;
+    const promoFields = buildPromoFields(quote, validated);
+    const promoCodeId = promoFields.promoCodeId;
+    const promoCodeString = promoFields.promoCode;
 
     // Convert amount to cents (Stripe uses smallest currency unit)
     const amountInCents = Math.round(finalAmount * 100);
@@ -210,31 +209,51 @@ const createPaymentOrder = async (req, res, next) => {
       paymentUser.stripeCustomerId = customerId;
     }
 
-    const paymentIntent = await stripeInstance.paymentIntents.create({
-      amount: amountInCents,
-      currency: 'aed', // Change to your preferred currency (usd, eur, inr, etc.)
-      customer: customerId || undefined,
-      metadata: {
-        eventId: event.eventId,
-        eventTitle: event.eventName || '',
-        eventName: event.eventName || '',
-        eventCategory: Array.isArray(event.eventSports) && event.eventSports.length > 0 ? event.eventSports[0] : '',
-        eventType: event.eventType || '',
-        userId: userId,
-        promoCode: promoCodeString || 'none',
-        // Customer / Player details
-        customerName: paymentUser?.fullName || '',
-        mobileNumber: paymentUser?.mobileNumber || '',
-        playerId: paymentUser?.userId ? String(paymentUser.userId) : '',
-        playerName: paymentUser?.fullName || '',
-        // Organiser details
-        organiserId: organiserId,
-        organiserName: organiserName,
-        // Party size
-        partySize: String(safeGuestsCount),
-      },
-      description: `Payment for event: ${event.eventName || ''}`,
-    });
+    // Reserve the promo use(s); linked to the payment below, released if the PaymentIntent can't be created
+    let redemptions = [];
+    if (validated.length > 0) {
+      try {
+        redemptions = await promoRedemption.reserve({ quote, validated, target, userId, context: {} });
+      } catch (reserveError) {
+        if (respondIfPromoError(res, reserveError)) {
+          return;
+        }
+        throw reserveError;
+      }
+    }
+
+    let paymentIntent;
+    try {
+      paymentIntent = await stripeInstance.paymentIntents.create({
+        amount: amountInCents,
+        currency: 'aed', // Change to your preferred currency (usd, eur, inr, etc.)
+        customer: customerId || undefined,
+        metadata: {
+          eventId: event.eventId,
+          eventTitle: event.eventName || '',
+          eventName: event.eventName || '',
+          eventCategory: Array.isArray(event.eventSports) && event.eventSports.length > 0 ? event.eventSports[0] : '',
+          eventType: event.eventType || '',
+          userId: userId,
+          promoCode: 'none',
+          ...buildPromoMetadata(quote, event.creatorId),
+          // Customer / Player details
+          customerName: paymentUser?.fullName || '',
+          mobileNumber: paymentUser?.mobileNumber || '',
+          playerId: paymentUser?.userId ? String(paymentUser.userId) : '',
+          playerName: paymentUser?.fullName || '',
+          // Organiser details
+          organiserId: organiserId,
+          organiserName: organiserName,
+          // Party size
+          partySize: String(safeGuestsCount),
+        },
+        description: `Payment for event: ${event.eventName || ''}`,
+      });
+    } catch (piError) {
+      await promoRedemption.release({ redemptionIds: redemptions.map((r) => r._id) }, 'payment_intent_failed');
+      throw piError;
+    }
 
     // Create payment record
     const paymentData = {
@@ -245,11 +264,22 @@ const createPaymentOrder = async (req, res, next) => {
       finalAmount: finalAmount,
       promoCodeId: promoCodeId,
       promoCode: promoCodeString,
+      appliedPromos: buildPromoFields(quote, validated, redemptions).appliedPromos,
+      vatAmount: promoFields.vatAmount,
+      rallyFundedDiscount: promoFields.rallyFundedDiscount,
+      organiserFundedDiscount: promoFields.organiserFundedDiscount,
       stripePaymentIntentId: paymentIntent.id,
       status: 'pending',
     };
 
     const payment = await Payment.create(paymentData);
+
+    if (redemptions.length > 0) {
+      await promoRedemption.attach(redemptions.map((r) => r._id), {
+        paymentId: payment._id,
+        stripePaymentIntentId: paymentIntent.id,
+      });
+    }
 
     res.status(200).json({
       success: true,
@@ -268,6 +298,10 @@ const createPaymentOrder = async (req, res, next) => {
           discountAmount: discountAmount,
           finalAmount: finalAmount,
           promoCode: promoCodeString,
+          appliedPromos: payment.appliedPromos,
+          vatAmount: promoFields.vatAmount,
+          rallyFundedDiscount: promoFields.rallyFundedDiscount,
+          organiserFundedDiscount: promoFields.organiserFundedDiscount,
         },
         publishableKey: process.env.STRIPE_PUBLISHABLE_KEY,
       },
@@ -343,8 +377,10 @@ const verifyPayment = async (req, res, next) => {
             organiserId: pkg.organiserId,
             validityMonths: pkg.validityMonths || 1,
             maxEvents: (pkg.maxEvents !== undefined && pkg.maxEvents !== null) ? pkg.maxEvents : 0,
+            ...promoFieldsFromPayment(currentPayment),
           });
         }
+        await promoRedemption.linkPackagePurchase(currentPayment.stripePaymentIntentId, purchase._id);
 
         const query = currentPayment._id ? { _id: currentPayment._id } : { paymentId: currentPayment.paymentId };
         await db.collection('payments').updateOne(
@@ -536,10 +572,8 @@ const verifyPayment = async (req, res, next) => {
           });
         }
 
-        // Increment promo code usage if used (safe — only one caller reaches here)
-        if (payment.promoCodeId) {
-          await PromoCode.incrementUsage(payment.promoCodeId);
-        }
+        // Confirm promo redemption(s) (safe: only the claimSuccess winner reaches here)
+        await confirmPromoForPayment(payment, paymentIntent.id);
 
         // Flag to prevent sending notifications if booking was already confirmed
         let isNewlyBooked = false;
@@ -644,20 +678,20 @@ const verifyPayment = async (req, res, next) => {
                 isNewlyBooked = true;
                 // Removed redundant age check and auto-refund
                 const bookingData = {
-  userId: payment.userId,
-  eventId: event._id,
-  parentEventId: payment.parentEventId || event.eventId || null,
-  occurrenceStart: payment.occurrenceStart || null,
-  occurrenceEnd: payment.occurrenceEnd || null,
-  paymentId: payment.paymentId,
-  paymentIntentId: payment_intent_id,
-  status: 'booked',
-  amount: payment.amount,
-  discountAmount: payment.discountAmount,
-  finalAmount: payment.finalAmount,
-  promoCode: payment.promoCode,
-  bookedAt: new Date(),
-};
+                  userId: payment.userId,
+                  eventId: event._id,
+                  parentEventId: payment.parentEventId || event.eventId || null,
+                  occurrenceStart: payment.occurrenceStart || null,
+                  occurrenceEnd: payment.occurrenceEnd || null,
+                  paymentId: payment.paymentId,
+                  paymentIntentId: payment_intent_id,
+                  status: 'booked',
+                  amount: payment.amount,
+                  discountAmount: payment.discountAmount,
+                  finalAmount: payment.finalAmount,
+                  promoCode: payment.promoCode,
+                  bookedAt: new Date(),
+                };
 
                 booking = await Booking.create(bookingData);
                 const fallbackMaxGuest = event?.eventMaxGuest !== undefined ? event.eventMaxGuest : (event?.gameSpots || 0);
@@ -757,18 +791,18 @@ const verifyPayment = async (req, res, next) => {
         // Add booking info if created
         if (booking) {
           const event = await findEventById(booking.eventId);
-         responseData.booking = {
-  bookingId: booking.bookingId,
-  eventId: event ? event.eventId : null,
-  eventTitle: event ? (event.eventName || null) : null,
-  eventName: event ? (event.eventName || null) : null,
-  eventCategory: event && Array.isArray(event.eventSports) && event.eventSports.length > 0 ? event.eventSports[0] : null,
-  eventType: event ? (event.eventType || null) : null,
-  occurrenceStart: booking.occurrenceStart || null,
-  occurrenceEnd: booking.occurrenceEnd || null,
-  status: booking.status,
-  bookedAt: booking.bookedAt,
-};
+          responseData.booking = {
+            bookingId: booking.bookingId,
+            eventId: event ? event.eventId : null,
+            eventTitle: event ? (event.eventName || null) : null,
+            eventName: event ? (event.eventName || null) : null,
+            eventCategory: event && Array.isArray(event.eventSports) && event.eventSports.length > 0 ? event.eventSports[0] : null,
+            eventType: event ? (event.eventType || null) : null,
+            occurrenceStart: booking.occurrenceStart || null,
+            occurrenceEnd: booking.occurrenceEnd || null,
+            status: booking.status,
+            bookedAt: booking.bookedAt,
+          };
         }
 
         // Fire-and-forget notifications — do NOT await.

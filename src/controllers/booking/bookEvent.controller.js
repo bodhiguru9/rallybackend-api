@@ -1,6 +1,15 @@
 const Booking = require('../../models/Booking');
 const Payment = require('../../models/Payment');
-const PromoCode = require('../../models/PromoCode');
+const pricingService = require('../../services/pricing.service');
+const promoRedemption = require('../../services/promoRedemption.service');
+const {
+  extractCodes,
+  respondIfPromoError,
+  buildPromoFields,
+  buildPromoMetadata,
+  sameCodeSet,
+  supersedePendingBooking,
+} = require('../../services/promoCheckout.service');
 const Event = require('../../models/Event');
 const EventJoin = require('../../models/EventJoin');
 const User = require('../../models/User');
@@ -45,7 +54,8 @@ const bookEvent = async (req, res, next) => {
   try {
     const userId = req.user.id;
     const eventId = req.params.eventId;
-    const promoCode = req.query.promoCode || req.body.promoCode || req.body.promo_code;
+    // New app builds send promoCodes[]; older builds send a single promoCode (query or body)
+    const promoCodesRequested = extractCodes(req);
 
     const requestedOccurrenceStart = req.body.occurrenceStart || req.query.occurrenceStart || null;
     const requestedOccurrenceEnd = req.body.occurrenceEnd || req.query.occurrenceEnd || null;
@@ -241,7 +251,22 @@ const bookEvent = async (req, res, next) => {
     // which is incompatible with Apple Pay tokens.
     const existingPendingBooking = await Booking.findExactPendingBooking(userId, event._id, occurrenceStart, safeGuestsCount);
 
-    if (existingPendingBooking && paymentMethod !== 'apple_pay') {
+    // The player changed their promo codes since the pending booking was created: close it and start fresh
+    if (existingPendingBooking && !sameCodeSet(existingPendingBooking, promoCodesRequested)) {
+      const superseded = await supersedePendingBooking(existingPendingBooking, stripeInstance);
+      if (!superseded) {
+        return res.status(409).json({
+          success: false,
+          error: 'A payment for this booking is already in progress. Please wait a moment and try again.',
+          code: 'PAYMENT_IN_PROGRESS',
+        });
+      }
+    }
+    const reusablePendingBooking = existingPendingBooking && sameCodeSet(existingPendingBooking, promoCodesRequested)
+      ? existingPendingBooking
+      : null;
+
+    if (reusablePendingBooking && paymentMethod !== 'apple_pay') {
       const payment = existingPendingBooking.paymentIntentId
         ? await Payment.findByStripePaymentIntentId(existingPendingBooking.paymentIntentId)
         : null;
@@ -329,6 +354,10 @@ const bookEvent = async (req, res, next) => {
                 discountAmount: existingPendingBooking.discountAmount,
                 finalAmount: existingPendingBooking.finalAmount,
                 promoCode: existingPendingBooking.promoCode,
+                appliedPromos: existingPendingBooking.appliedPromos || [],
+                vatAmount: existingPendingBooking.vatAmount || 0,
+                rallyFundedDiscount: existingPendingBooking.rallyFundedDiscount || 0,
+                organiserFundedDiscount: existingPendingBooking.organiserFundedDiscount || 0,
                 occurrenceStart: existingPendingBooking.occurrenceStart || null,
                 occurrenceEnd: existingPendingBooking.occurrenceEnd || null,
                 createdAt: existingPendingBooking.createdAt,
@@ -352,41 +381,36 @@ const bookEvent = async (req, res, next) => {
       }
     }
 
-    // guestsCount and safeGuestsCount are now declared above (after hasJoined check)
-    // Get original price (multiplied by guests count)
-    let originalAmount = safeEventPrice * safeGuestsCount;
-    let discountAmount = 0;
-    let finalAmount = originalAmount;
-    let promoCodeId = null;
-    let promoCodeString = null;
-
-    // Validate and apply promo code if provided
-    const trimmedPromoCode = promoCode ? (typeof promoCode === 'string' ? promoCode.trim() : promoCode) : null;
-    if (trimmedPromoCode && trimmedPromoCode !== '') {
-      try {
-        const validation = await PromoCode.validateAndApply(
-          trimmedPromoCode,
-          event._id.toString(),
-          userId,
-          originalAmount
-        );
-
-        discountAmount = validation.discountAmount;
-        finalAmount = validation.finalAmount;
-        promoCodeId = validation.promoCode._id;
-        promoCodeString = validation.promoCode.code;
-      } catch (error) {
-        return res.status(400).json({
-          success: false,
-          error: error.message || 'Invalid promo code',
-        });
-      }
+    // Falling through to a fresh booking: an older pending booking's reservation must not count against the player
+    if (existingPendingBooking) {
+      await promoRedemption.release({ bookingId: existingPendingBooking._id }, 'superseded');
     }
 
-    // Add 5% VAT
-    const vatRate = 0.05;
-    const vatAmount = Math.round(finalAmount * vatRate * 100) / 100;
-    finalAmount = finalAmount + vatAmount;
+    // Price comes from the server-side quote (event price x guests, promo codes, 5% VAT)
+    let quoteResult;
+    try {
+      quoteResult = await pricingService.quoteDetailed({
+        targetType: 'event',
+        eventId: event._id,
+        occurrenceStart,
+        guestsCount: safeGuestsCount,
+        userId,
+        codes: promoCodesRequested,
+        excludeBookingId: existingPendingBooking ? existingPendingBooking._id : null,
+      });
+    } catch (quoteError) {
+      if (respondIfPromoError(res, quoteError)) {
+        return;
+      }
+      throw quoteError;
+    }
+    const { quote, validated, target } = quoteResult;
+    const originalAmount = quote.originalAmount;
+    const discountAmount = quote.discountAmount;
+    const finalAmount = quote.finalAmount;
+    const promoFields = buildPromoFields(quote, validated);
+    const promoCodeId = promoFields.promoCodeId;
+    const promoCodeString = promoFields.promoCode;
 
     // Optional temporary debug log
     console.log('BOOK EVENT PRICE DEBUG:', {
@@ -415,12 +439,41 @@ const bookEvent = async (req, res, next) => {
       discountAmount: discountAmount,
       finalAmount: finalAmount,
       promoCode: promoCodeString,
+      appliedPromos: promoFields.appliedPromos,
+      vatAmount: promoFields.vatAmount,
+      rallyFundedDiscount: promoFields.rallyFundedDiscount,
+      organiserFundedDiscount: promoFields.organiserFundedDiscount,
       guestsCount: safeGuestsCount,
       guestInfo: guestInfo,
       bookedAt: isFreeEvent ? new Date() : null,
     };
 
     const booking = await Booking.create(bookingData);
+
+    // Reserve the promo use(s) for this booking (atomic; released on failure/expiry, confirmed on payment)
+    let redemptions = [];
+    if (validated.length > 0) {
+      try {
+        redemptions = await promoRedemption.reserve({
+          quote,
+          validated,
+          target,
+          userId,
+          context: { bookingId: booking._id, occurrenceStart },
+        });
+        promoFields.appliedPromos = buildPromoFields(quote, validated, redemptions).appliedPromos;
+        await getDB().collection('bookings').updateOne(
+          { _id: booking._id },
+          { $set: { appliedPromos: promoFields.appliedPromos } }
+        );
+      } catch (reserveError) {
+        await Booking.updateStatus(booking.bookingId, 'failed');
+        if (respondIfPromoError(res, reserveError)) {
+          return;
+        }
+        throw reserveError;
+      }
+    }
 
     // If it's a free event, skip Stripe payment and directly add user to event
     if (isFreeEvent) {
@@ -433,6 +486,7 @@ const bookEvent = async (req, res, next) => {
           capacityLimit: maxGuest,
         });
       } catch (joinError) {
+        await promoRedemption.release({ bookingId: booking._id }, 'join_failed');
         await Booking.updateStatus(booking.bookingId, 'failed');
         const isDuplicate = joinError.code === 11000 || joinError.message === 'Already joined this occurrence';
         return res.status(400).json({
@@ -440,6 +494,34 @@ const bookEvent = async (req, res, next) => {
           error: isDuplicate ? 'Already joined this occurrence' : 'Failed to join event',
           details: joinError.message,
         });
+      }
+
+      // A 100% code: confirm the use now and keep a 0 AED payment record so reporting stays consistent (no Stripe)
+      if (validated.length > 0) {
+        await promoRedemption.confirm({ bookingId: booking._id });
+        const freePayment = await Payment.create({
+          userId,
+          bookingId: booking.bookingId,
+          eventId: event._id.toString(),
+          parentEventId: event.eventId,
+          occurrenceStart,
+          occurrenceEnd,
+          amount: originalAmount,
+          discountAmount,
+          finalAmount,
+          promoCodeId,
+          promoCode: promoCodeString,
+          appliedPromos: promoFields.appliedPromos,
+          vatAmount: promoFields.vatAmount,
+          rallyFundedDiscount: promoFields.rallyFundedDiscount,
+          organiserFundedDiscount: promoFields.organiserFundedDiscount,
+          stripePaymentIntentId: `free_${booking.bookingId}`, // synthetic: keeps the unique index happy; not a Stripe id
+          paymentMethod: 'promo_free',
+          status: 'success',
+          metadata: buildPromoMetadata(quote, event.creatorId),
+        });
+        await promoRedemption.attach(redemptions.map((r) => r._id), { paymentId: freePayment._id });
+        await Booking.updateStatus(booking.bookingId, 'booked', { paymentId: freePayment.paymentId });
       }
 
       const updatedBooking = await Booking.findById(booking._id);// or Booking.findByBookingId(booking.bookingId)
@@ -530,6 +612,10 @@ const bookEvent = async (req, res, next) => {
             discountAmount: updatedBooking.discountAmount,
             finalAmount: updatedBooking.finalAmount,
             promoCode: updatedBooking.promoCode,
+            appliedPromos: updatedBooking.appliedPromos || [],
+            vatAmount: updatedBooking.vatAmount || 0,
+            rallyFundedDiscount: updatedBooking.rallyFundedDiscount || 0,
+            organiserFundedDiscount: updatedBooking.organiserFundedDiscount || 0,
             occurrenceStart: updatedBooking.occurrenceStart || occurrenceStart,
             occurrenceEnd: updatedBooking.occurrenceEnd || occurrenceEnd,
             bookedAt: updatedBooking.bookedAt,
@@ -574,9 +660,7 @@ const bookEvent = async (req, res, next) => {
       GuestCount: String(safeGuestsCount),
     };
 
-    if (promoCodeString) {
-      metadata.promoCode = promoCodeString;
-    }
+    Object.assign(metadata, buildPromoMetadata(quote, event.creatorId));
 
     try {
       // NOTE: Do NOT set setup_future_usage here.
@@ -593,6 +677,7 @@ const bookEvent = async (req, res, next) => {
         idempotencyKey: booking.bookingId
       });
     } catch (stripeError) {
+      await promoRedemption.release({ bookingId: booking._id }, 'payment_intent_failed');
       await Booking.updateStatus(booking.bookingId, 'failed');
       const errorMessage = stripeError.message || 'Failed to create payment intent';
       return res.status(400).json({
@@ -617,12 +702,24 @@ const bookEvent = async (req, res, next) => {
       finalAmount: finalAmount,
       promoCodeId: promoCodeId,
       promoCode: promoCodeString,
+      appliedPromos: promoFields.appliedPromos,
+      vatAmount: promoFields.vatAmount,
+      rallyFundedDiscount: promoFields.rallyFundedDiscount,
+      organiserFundedDiscount: promoFields.organiserFundedDiscount,
       stripePaymentIntentId: paymentIntent.id,
       status: 'pending',
       metadata: metadata,
     };
 
     const payment = await Payment.create(paymentData);
+
+    // Link the reservation(s) to the payment and PaymentIntent so the webhook can confirm them
+    if (redemptions.length > 0) {
+      await promoRedemption.attach(redemptions.map((r) => r._id), {
+        paymentId: payment._id,
+        stripePaymentIntentId: paymentIntent.id,
+      });
+    }
 
     // STEP 4: Update booking with payment info
     await Booking.updateStatus(booking.bookingId, 'pending', {
@@ -662,6 +759,10 @@ const bookEvent = async (req, res, next) => {
       finalAmountInCents: amountInCents,
       currency: 'aed',
       promoCode: promoCodeString,
+      appliedPromos: promoFields.appliedPromos,
+      vatAmount: promoFields.vatAmount,
+      rallyFundedDiscount: promoFields.rallyFundedDiscount,
+      organiserFundedDiscount: promoFields.organiserFundedDiscount,
       stripePaymentIntentId: paymentIntent.id,
     };
 
@@ -697,6 +798,10 @@ const bookEvent = async (req, res, next) => {
           discountAmount: updatedBooking.discountAmount,
           finalAmount: updatedBooking.finalAmount,
           promoCode: updatedBooking.promoCode,
+          appliedPromos: updatedBooking.appliedPromos || [],
+          vatAmount: updatedBooking.vatAmount || 0,
+          rallyFundedDiscount: updatedBooking.rallyFundedDiscount || 0,
+          organiserFundedDiscount: updatedBooking.organiserFundedDiscount || 0,
           occurrenceStart: updatedBooking.occurrenceStart || occurrenceStart,
           occurrenceEnd: updatedBooking.occurrenceEnd || occurrenceEnd,
           createdAt: updatedBooking.createdAt,

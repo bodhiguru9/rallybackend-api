@@ -3,6 +3,14 @@ const PackagePurchase = require('../../../models/PackagePurchase');
 const Payment = require('../../../models/Payment');
 const User = require('../../../models/User');
 const stripe = require('stripe');
+const pricingService = require('../../../services/pricing.service');
+const promoRedemption = require('../../../services/promoRedemption.service');
+const {
+  extractCodes,
+  respondIfPromoError,
+  buildPromoFields,
+  buildPromoMetadata,
+} = require('../../../services/promoCheckout.service');
 
 // Initialize Stripe lazily
 let stripeInstance = null;
@@ -68,12 +76,39 @@ const purchasePackage = async (req, res, next) => {
       });
     }
 
-    // Pricing calculation with 5% VAT
-    const basePrice = parseFloat(package.packagePrice) || 0;
-    const vatRate = 0.05;
-    const vatAmount = Math.round(basePrice * vatRate * 100) / 100;
-    const finalAmount = basePrice + vatAmount;
+    // Price comes from the server-side quote (package price, promo codes, 5% VAT)
+    let quoteResult;
+    try {
+      quoteResult = await pricingService.quoteDetailed({
+        targetType: 'package',
+        packageId: package._id,
+        userId,
+        codes: extractCodes(req),
+      });
+    } catch (quoteError) {
+      if (respondIfPromoError(res, quoteError)) {
+        return;
+      }
+      throw quoteError;
+    }
+    const { quote, validated, target } = quoteResult;
+    const basePrice = quote.originalAmount;
+    const finalAmount = quote.finalAmount;
     const amountInCents = Math.round(finalAmount * 100);
+
+    // Reserve the promo use(s); confirmed when the payment succeeds (or right away for a free package)
+    let redemptions = [];
+    if (validated.length > 0) {
+      try {
+        redemptions = await promoRedemption.reserve({ quote, validated, target, userId, context: {} });
+      } catch (reserveError) {
+        if (respondIfPromoError(res, reserveError)) {
+          return;
+        }
+        throw reserveError;
+      }
+    }
+    const promoFields = buildPromoFields(quote, validated, redemptions);
 
     // If free package (0 AED)
     if (amountInCents <= 0) {
@@ -83,9 +118,51 @@ const purchasePackage = async (req, res, next) => {
         organiserId: package.organiserId,
         validityMonths: package.validityMonths || 1,
         maxEvents: package.maxEvents || 0,
+        promoCode: promoFields.promoCode,
+        discountAmount: promoFields.discountAmount,
+        appliedPromos: promoFields.appliedPromos,
+        vatAmount: promoFields.vatAmount,
+        rallyFundedDiscount: promoFields.rallyFundedDiscount,
+        organiserFundedDiscount: promoFields.organiserFundedDiscount,
       };
 
-      const purchase = await PackagePurchase.create(purchaseData);
+      let purchase;
+      try {
+        purchase = await PackagePurchase.create(purchaseData);
+      } catch (purchaseError) {
+        await promoRedemption.release({ redemptionIds: redemptions.map((r) => r._id) }, 'purchase_failed');
+        throw purchaseError;
+      }
+
+      // A 100% code: confirm the use now and keep a 0 AED payment record (no Stripe)
+      if (redemptions.length > 0) {
+        const freePayment = await Payment.create({
+          userId,
+          packageId: package._id,
+          organiserId: package.organiserId,
+          purchaseId: purchase._id,
+          type: 'package',
+          amount: basePrice,
+          discountAmount: promoFields.discountAmount,
+          finalAmount: 0,
+          currency: 'aed',
+          promoCodeId: promoFields.promoCodeId,
+          promoCode: promoFields.promoCode,
+          appliedPromos: promoFields.appliedPromos,
+          vatAmount: promoFields.vatAmount,
+          rallyFundedDiscount: promoFields.rallyFundedDiscount,
+          organiserFundedDiscount: promoFields.organiserFundedDiscount,
+          stripePaymentIntentId: `free_pkg_${purchase._id}`, // synthetic: not a Stripe id
+          paymentMethod: 'promo_free',
+          status: 'success',
+          metadata: buildPromoMetadata(quote, package.organiserId),
+        });
+        await promoRedemption.attach(redemptions.map((r) => r._id), {
+          paymentId: freePayment._id,
+          packagePurchaseId: purchase._id,
+        });
+        await promoRedemption.confirm({ redemptionIds: redemptions.map((r) => r._id) });
+      }
 
       // Send notifications (in-app + FCM push) for package acquisition
       try {
@@ -167,16 +244,23 @@ const purchasePackage = async (req, res, next) => {
       playerId: user.userId ? String(user.userId) : '',
       playerName: user.fullName || '',
       organiserId: package.organiserId ? String(package.organiserId) : '',
+      ...buildPromoMetadata(quote, package.organiserId),
     };
 
     // Create Stripe payment intent
-    const paymentIntent = await stripeInstance.paymentIntents.create({
-      amount: amountInCents,
-      currency: 'aed',
-      customer: customerId,
-      metadata: metadata,
-      description: `Purchase of ${package.packageName} by ${user.fullName || user.email}`,
-    });
+    let paymentIntent;
+    try {
+      paymentIntent = await stripeInstance.paymentIntents.create({
+        amount: amountInCents,
+        currency: 'aed',
+        customer: customerId,
+        metadata: metadata,
+        description: `Purchase of ${package.packageName} by ${user.fullName || user.email}`,
+      });
+    } catch (piError) {
+      await promoRedemption.release({ redemptionIds: redemptions.map((r) => r._id) }, 'payment_intent_failed');
+      throw piError;
+    }
 
     // Create pending Payment record
     const paymentData = {
@@ -185,15 +269,28 @@ const purchasePackage = async (req, res, next) => {
       organiserId: package.organiserId,
       type: 'package',
       amount: basePrice,
-      discountAmount: 0,
+      discountAmount: promoFields.discountAmount,
       finalAmount: finalAmount,
       currency: 'aed',
+      promoCodeId: promoFields.promoCodeId,
+      promoCode: promoFields.promoCode,
+      appliedPromos: promoFields.appliedPromos,
+      vatAmount: promoFields.vatAmount,
+      rallyFundedDiscount: promoFields.rallyFundedDiscount,
+      organiserFundedDiscount: promoFields.organiserFundedDiscount,
       stripePaymentIntentId: paymentIntent.id,
       status: 'pending',
       metadata: metadata,
     };
 
     const payment = await Payment.create(paymentData);
+
+    if (redemptions.length > 0) {
+      await promoRedemption.attach(redemptions.map((r) => r._id), {
+        paymentId: payment._id,
+        stripePaymentIntentId: paymentIntent.id,
+      });
+    }
 
     return res.status(200).json({
       success: true,
@@ -209,6 +306,13 @@ const purchasePackage = async (req, res, next) => {
           paymentId: payment.paymentId,
           status: 'pending',
           originalAmount: basePrice,
+          discountAmount: promoFields.discountAmount,
+          subtotal: quote.subtotal,
+          vatAmount: promoFields.vatAmount,
+          rallyFundedDiscount: promoFields.rallyFundedDiscount,
+          organiserFundedDiscount: promoFields.organiserFundedDiscount,
+          appliedPromos: promoFields.appliedPromos,
+          promoCode: promoFields.promoCode,
           finalAmount: finalAmount,
           finalAmountInCents: amountInCents,
           currency: 'aed',

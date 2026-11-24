@@ -66,6 +66,13 @@ function orderFilter({ bookingId, paymentId, stripePaymentIntentId, packagePurch
  * @returns {Promise<object[]>} the created redemption documents
  */
 async function reserve({ quote, validated, target, userId, context = {} }) {
+  // A retry of the same order (same booking / package purchase / PaymentIntent) must not count its own
+  // earlier reservation against the player's limits: supersede it first.
+  const { bookingId, packagePurchaseId, stripePaymentIntentId } = context;
+  if (bookingId || packagePurchaseId || stripePaymentIntentId) {
+    await release({ bookingId, packagePurchaseId, stripePaymentIntentId }, 'superseded');
+  }
+
   const created = [];
   const now = new Date();
   const expiresAt = new Date(now.getTime() + RESERVATION_MINUTES * 60 * 1000);
@@ -165,6 +172,17 @@ async function attach(redemptionIds, ids) {
   await redemptions().updateMany({ _id: { $in: redemptionIds.map(toObjectId) } }, { $set: set });
 }
 
+/** Once a package purchase exists, link it to the redemption(s) of the payment that bought it. */
+async function linkPackagePurchase(stripePaymentIntentId, packagePurchaseId) {
+  if (!stripePaymentIntentId || !packagePurchaseId) {
+    return;
+  }
+  await redemptions().updateMany(
+    { stripePaymentIntentId },
+    { $set: { packagePurchaseId: toObjectId(packagePurchaseId), updatedAt: new Date() } }
+  );
+}
+
 /**
  * Confirm after payment success. Idempotent. Call only from the Payment.claimSuccess winner branch.
  * A redemption the sweeper already released (late payment) is re-claimed, because the player has paid.
@@ -247,27 +265,48 @@ async function reserveAndConfirm(args) {
 
 /**
  * Release reserved redemptions past expiresAt and cancel their still-pending PaymentIntents.
- * If a PaymentIntent can't be cancelled (e.g. it already succeeded) the reservation is left for the webhook.
- * @param {object} [opts] { now, cancelPaymentIntent: async (id) => void }
+ * If a PaymentIntent can't be cancelled it is looked up: canceled -> released; succeeded/processing/other -> the
+ * reservation is pushed back 15 minutes so the webhook (or verifyPayment) can confirm it.
+ * @param {object} [opts] { now, cancelPaymentIntent: async (id) => void, retrievePaymentIntent: async (id) => ({ status }) }
  */
-async function sweepExpired({ now = new Date(), cancelPaymentIntent } = {}) {
-  const stale = await redemptions().find({ status: 'reserved', expiresAt: { $lte: now } }).limit(200).toArray();
+async function sweepExpired({ now = new Date(), cancelPaymentIntent, retrievePaymentIntent } = {}) {
+  const stale = await redemptions().find({ status: 'reserved', expiresAt: { $lte: now } }).sort({ expiresAt: 1 }).limit(200).toArray();
   let released = 0;
-  let skipped = 0;
+  let deferred = 0;
+
+  const defer = async (row, minutes) => {
+    deferred++;
+    await redemptions().updateOne(
+      { _id: row._id, status: 'reserved' },
+      { $set: { expiresAt: new Date(now.getTime() + minutes * 60 * 1000), updatedAt: new Date() } }
+    );
+  };
 
   for (const row of stale) {
     if (row.stripePaymentIntentId && cancelPaymentIntent) {
       try {
         await cancelPaymentIntent(row.stripePaymentIntentId);
       } catch (err) {
-        skipped++;
-        console.warn(`[promo-sweeper] could not cancel ${row.stripePaymentIntentId}: ${err.message}`);
+        // Could not cancel: find out why, so a stuck row is never retried every minute forever
+        let status = null;
+        try {
+          status = retrievePaymentIntent ? (await retrievePaymentIntent(row.stripePaymentIntentId)).status : null;
+        } catch (e) {
+          status = null;
+        }
+        if (status === 'canceled') {
+          released += await release({ redemptionIds: [row._id] }, 'expired');
+        } else {
+          // succeeded (webhook/verify will confirm), processing, requires_action, or unknown: look again later
+          console.warn(`[promo-sweeper] ${row.stripePaymentIntentId} not cancellable (${status || err.message}); rechecking in 15 min`);
+          await defer(row, 15);
+        }
         continue;
       }
     }
     released += await release({ redemptionIds: [row._id] }, 'expired');
   }
-  return { released, skipped };
+  return { released, deferred };
 }
 
 let sweeperTimer = null;
@@ -277,17 +316,17 @@ function startSweeper(intervalMs = SWEEP_INTERVAL_MS) {
   if (sweeperTimer) {
     return sweeperTimer;
   }
+  const getStripe = () => require('stripe')(process.env.STRIPE_SECRET_KEY);
   const cancelPaymentIntent = async (id) => {
-    if (!process.env.STRIPE_SECRET_KEY) {
-      return;
+    if (process.env.STRIPE_SECRET_KEY) {
+      await getStripe().paymentIntents.cancel(id);
     }
-    const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
-    await stripe.paymentIntents.cancel(id);
   };
+  const retrievePaymentIntent = async (id) => getStripe().paymentIntents.retrieve(id);
   sweeperTimer = setInterval(async () => {
     try {
-      const r = await sweepExpired({ cancelPaymentIntent });
-      if (r.released > 0 || r.skipped > 0) {
+      const r = await sweepExpired({ cancelPaymentIntent, retrievePaymentIntent });
+      if (r.released > 0 || r.deferred > 0) {
         console.log('[promo-sweeper]', r);
       }
     } catch (err) {
@@ -311,6 +350,7 @@ module.exports = {
   RESERVATION_MINUTES,
   reserve,
   attach,
+  linkPackagePurchase,
   confirm,
   release,
   refund,

@@ -3,6 +3,7 @@ const Event = require('../../models/Event');
 const { getPaginationParams, createPaginationResponse } = require('../../utils/pagination');
 const { getDB } = require('../../config/database');
 const pricingService = require('../../services/pricing.service');
+const { findEventById } = require('../../utils/eventHelper');
 
 /**
  * @desc    Create a new promo code
@@ -577,7 +578,39 @@ const validatePromoCode = async (req, res, next) => {
     }
 
     const userId = req.user ? req.user.id : null;
-    const validation = await PromoCode.validateAndApply(code, eventId, userId, parseFloat(amount));
+    const numericAmount = parseFloat(amount);
+    let validation;
+
+    if (userId) {
+      // Same rules as /quote (owner, sport, eligibility, limits). The legacy response shape is kept:
+      // discount on the client-sent pre-VAT amount, no VAT line.
+      const event = await findEventById(eventId);
+      const unit = Number((event && (event.gameJoinPrice ?? event.eventPricePerGuest)) || 0);
+      const guestsCount = unit > 0 ? Math.max(1, Math.round(numericAmount / unit)) : 1;
+      try {
+        const { validated } = await pricingService.quoteDetailed({
+          targetType: 'event',
+          eventId,
+          guestsCount,
+          userId,
+          codes: [code],
+        });
+        const discountAmount = pricingService.computeCodeDiscount(validated[0].promoCode, numericAmount);
+        validation = {
+          promoCode: validated[0].promoCode,
+          discountAmount,
+          finalAmount: pricingService.round2(numericAmount - discountAmount),
+        };
+      } catch (quoteError) {
+        if (quoteError instanceof pricingService.PromoError) {
+          return res.status(400).json({ success: false, error: quoteError.message, code: quoteError.code });
+        }
+        throw quoteError;
+      }
+    } else {
+      // Anonymous callers can't be checked for eligibility; keep the old behaviour
+      validation = await PromoCode.validateAndApply(code, eventId, userId, numericAmount);
+    }
 
     res.status(200).json({
       success: true,
@@ -589,7 +622,7 @@ const validatePromoCode = async (req, res, next) => {
           discountType: validation.promoCode.discountType,
           discountValue: validation.promoCode.discountValue,
         },
-        originalAmount: parseFloat(amount),
+        originalAmount: numericAmount,
         discountAmount: validation.discountAmount,
         finalAmount: validation.finalAmount,
       },

@@ -192,7 +192,7 @@ Behind the existing `adminKeyAuth` + `adminAudit` (every call is audit-logged). 
 | GET | `/promo-codes/:id/purchases/export` | CSV, one row per redemption |
 | GET | `/promo-redemptions` | tracking feed, below |
 
-**GET /promo-redemptions** filters: `code`, `organiserId` (Mongo id), `eventId` (Mongo id or `E#`), `packageId` (Mongo id or `PKG#`), `fundedBy` (`rally|organiser`), `status` (one or comma-separated of reserved, confirmed, released, refunded), `from`/`to` (reservedAt range), `updatedSince` (ISO date; returns rows with `updatedAt` after it, ordered by `updatedAt` ascending so a client can page forward; otherwise newest first). `perPage` max 100. `csv=true` downloads up to 5000 rows as CSV. Response: `{ redemptions: [Row], pagination }`.
+**GET /promo-redemptions** filters: `code`, `organiserId` (Mongo id), `eventId` (Mongo id or `E#`), `packageId` (Mongo id or `PKG#`), `fundedBy` (`rally|organiser`), `status` (one or comma-separated of reserved, confirmed, released, refunded), `from`/`to` (reservedAt range), `updatedSince` (ISO date; returns rows with `updatedAt` after it, ordered by `updatedAt` then `_id` ascending, so rows that share a timestamp keep a stable order; otherwise newest first). **A syncing client should page by calling again with `updatedSince` set to the `updatedAt` of the last row it received, not by page numbers**, because rows move while it syncs (an updated row jumps to the end of the order). Rows are never deleted, only their status changes. `perPage` max 100. `csv=true` downloads up to 5000 rows as CSV. Response: `{ redemptions: [Row], pagination }`.
 
 Row (every row carries ids for joins, plus readable numbers):
 ```json

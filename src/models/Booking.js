@@ -21,7 +21,12 @@ class Booking {
     this.amount = data.amount;
     this.discountAmount = data.discountAmount || 0;
     this.finalAmount = data.finalAmount;
-    this.promoCode = data.promoCode || null;
+    this.promoCode = data.promoCode || null; // legacy: first applied code
+    // Promo codes (additive; see PROMO_API.md)
+    this.appliedPromos = Array.isArray(data.appliedPromos) ? data.appliedPromos : [];
+    this.vatAmount = data.vatAmount || 0;
+    this.rallyFundedDiscount = data.rallyFundedDiscount || 0;
+    this.organiserFundedDiscount = data.organiserFundedDiscount || 0;
     // Party size: 1 = player only, 2 = player + 1 guest, etc.
     this.guestsCount = (data.guestsCount && Number.isInteger(data.guestsCount) && data.guestsCount >= 1)
       ? data.guestsCount

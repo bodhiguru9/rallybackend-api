@@ -1,6 +1,19 @@
 const { getDB } = require('../config/database');
 const { ObjectId } = require('mongodb');
 const Counter = require('./Counter');
+const { validatePromoCodeInput } = require('../utils/promoCodeValidation');
+
+function toObjectId(id) {
+  try {
+    return typeof id === 'string' ? new ObjectId(id) : id;
+  } catch (error) {
+    return null;
+  }
+}
+
+function toObjectIds(ids) {
+  return Array.isArray(ids) ? ids.map(toObjectId).filter((id) => id !== null) : [];
+}
 
 /**
  * PromoCode Model
@@ -16,13 +29,29 @@ class PromoCode {
     this.minPurchaseAmount = data.minPurchaseAmount || 0; // Minimum purchase amount to use this code
     this.maxDiscountAmount = data.maxDiscountAmount || null; // Maximum discount amount (for percentage discounts)
     this.eventIds = data.eventIds || []; // Array of event IDs this promo code applies to (empty = all events)
-    this.usageLimit = data.usageLimit || null; // Total usage limit (null = unlimited)
-    this.usedCount = data.usedCount || 0; // Current usage count
-    this.userUsageLimit = data.userUsageLimit || 1; // How many times a single user can use this code
+    this.usageLimit = data.usageLimit ?? null; // Total uses (null = no limit)
+    this.usedCount = data.usedCount || 0; // Current usage count (reserved + confirmed)
+    this.userUsageLimit = data.userUsageLimit === undefined ? 1 : data.userUsageLimit; // Uses per player (null = unlimited)
     this.validFrom = data.validFrom || new Date(); // Start date
     this.validUntil = data.validUntil || null; // End date (null = no expiry)
     this.isActive = data.isActive !== undefined ? data.isActive : true; // Active status
-    this.createdBy = data.createdBy; // Admin/organiser who created this code
+    this.createdBy = data.createdBy; // Admin/organiser who created this code (legacy; see ownerId)
+    // Funding / ownership
+    this.fundedBy = data.fundedBy || 'rally'; // 'rally' | 'organiser'
+    this.ownerType = data.ownerType || 'admin'; // 'admin' | 'organiser'
+    this.ownerId = data.ownerId || null; // organiser _id for organiser codes, null for admin codes
+    // Scope
+    this.sports = Array.isArray(data.sports) ? data.sports : []; // empty = all sports
+    this.appliesTo = data.appliesTo || 'events'; // 'events' | 'packages' | 'both'
+    this.packageIds = data.packageIds || []; // empty = all packages of the owner (or all, for admin codes)
+    this.eligibility = data.eligibility || 'everyone'; // 'everyone' | 'first_booking' | 'subscribers'
+    // Notifications
+    this.notifyOnCreate = !!data.notifyOnCreate;
+    this.lastNotifiedAt = data.lastNotifiedAt || null;
+    // Groundwork for multiple codes per order
+    this.stackable = false;
+    this.priority = data.priority || 0;
+    this.archivedAt = data.archivedAt || null; // soft delete; never hard-delete a code with redemptions
     this.createdAt = data.createdAt || new Date();
     this.updatedAt = data.updatedAt || new Date();
   }
@@ -34,9 +63,15 @@ class PromoCode {
     const db = getDB();
     const promoCodesCollection = db.collection('promoCodes');
 
-    // Check if code already exists
+    const errors = validatePromoCodeInput(promoCodeData);
+    if (errors.length > 0) {
+      throw new Error(errors.join('; '));
+    }
+
+    // Check if code already exists (archived codes free their code string)
     const existing = await promoCodesCollection.findOne({
       code: promoCodeData.code.toUpperCase(),
+      archivedAt: null,
     });
 
     if (existing) {
@@ -63,6 +98,8 @@ class PromoCode {
       promoCodeId: promoCodeId,
       code: promoCodeData.code.toUpperCase(),
       eventIds: eventIds,
+      packageIds: toObjectIds(promoCodeData.packageIds),
+      ownerId: promoCodeData.ownerId ? toObjectId(promoCodeData.ownerId) : null,
     });
 
     const result = await promoCodesCollection.insertOne(promoCode);
@@ -82,6 +119,7 @@ class PromoCode {
 
     return await promoCodesCollection.findOne({
       code: code.toUpperCase(),
+      archivedAt: null,
     });
   }
 
@@ -115,7 +153,7 @@ class PromoCode {
     const db = getDB();
     const promoCodesCollection = db.collection('promoCodes');
 
-    const query = {};
+    const query = { archivedAt: null };
 
     if (filters.isActive !== undefined) {
       query.isActive = filters.isActive;
@@ -189,7 +227,7 @@ class PromoCode {
 
     // Check minimum purchase amount
     if (amount < promoCode.minPurchaseAmount) {
-      throw new Error(`Minimum purchase amount of ₹${promoCode.minPurchaseAmount} required`);
+      throw new Error(`Minimum purchase amount of AED ${promoCode.minPurchaseAmount} required`);
     }
 
     // Check total usage limit

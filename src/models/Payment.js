@@ -20,7 +20,12 @@ class Payment {
     this.discountAmount = data.discountAmount || 0;
     this.finalAmount = data.finalAmount;
     this.promoCodeId = data.promoCodeId || null;
-    this.promoCode = data.promoCode || null;
+    this.promoCode = data.promoCode || null; // legacy: first applied code
+    // Promo codes (additive; see PROMO_API.md)
+    this.appliedPromos = Array.isArray(data.appliedPromos) ? data.appliedPromos : [];
+    this.vatAmount = data.vatAmount || 0;
+    this.rallyFundedDiscount = data.rallyFundedDiscount || 0;
+    this.organiserFundedDiscount = data.organiserFundedDiscount || 0;
     this.stripePaymentIntentId = data.stripePaymentIntentId;
     this.stripePaymentId = data.stripePaymentId || null;
     this.stripePaymentMethod = data.stripePaymentMethod || null;

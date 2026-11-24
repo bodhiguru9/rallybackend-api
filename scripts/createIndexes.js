@@ -66,9 +66,26 @@ const INDEX_SPEC = {
   ],
 
   promoCodes: [
-    { key: { code: 1 }, options: { unique: true } },
+    // Unique among non-archived codes only (archived codes free their code string).
+    // Requires scripts/migratePromoCodes.js to have set archivedAt:null and dropped the old code_1 index.
+    {
+      key: { code: 1 },
+      options: { unique: true, name: 'code_active_unique', partialFilterExpression: { archivedAt: { $type: 'null' } } },
+    },
     { key: { promoCodeId: 1 }, options: { unique: true } },
     { key: { isActive: 1, createdAt: -1 } },
+    { key: { ownerType: 1, ownerId: 1, archivedAt: 1, createdAt: -1 } },
+  ],
+
+  promoRedemptions: [
+    { key: { redemptionId: 1 }, options: { unique: true } },
+    { key: { promoCodeId: 1, status: 1 } },
+    { key: { userId: 1, promoCodeId: 1, status: 1 } },
+    { key: { organiserId: 1, fundedBy: 1, status: 1 } },
+    { key: { bookingId: 1 } },
+    { key: { stripePaymentIntentId: 1 } },
+    { key: { status: 1, expiresAt: 1 } }, // sweeper scan
+    { key: { updatedAt: 1 } }, // admin feed (updatedSince)
   ],
 
   favorites: [

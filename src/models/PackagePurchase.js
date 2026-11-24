@@ -18,6 +18,13 @@ class PackagePurchase {
     this.isActive = data.isActive !== undefined ? data.isActive : true; // Whether package is still valid
     this.joinedEventIds = data.joinedEventIds || []; // Array of event IDs that were joined using this package
     this.cancelledAt = data.cancelledAt || null; // When purchase was cancelled
+    // Promo codes (additive; see PROMO_API.md)
+    this.promoCode = data.promoCode || null; // legacy: first applied code
+    this.discountAmount = data.discountAmount || 0;
+    this.appliedPromos = Array.isArray(data.appliedPromos) ? data.appliedPromos : [];
+    this.vatAmount = data.vatAmount || 0;
+    this.rallyFundedDiscount = data.rallyFundedDiscount || 0;
+    this.organiserFundedDiscount = data.organiserFundedDiscount || 0;
     this.createdAt = data.createdAt || new Date();
     this.updatedAt = data.updatedAt || new Date();
   }

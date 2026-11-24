@@ -361,6 +361,28 @@ class Counter {
   }
 
   /**
+   * Get next promo redemption ID (returns PRD1, PRD2, PRD3 format)
+   * Atomic operation - thread-safe for high traffic
+   */
+  static async getNextPromoRedemptionId() {
+    const db = getDB();
+    const countersCollection = db.collection('counters');
+
+    const result = await countersCollection.findOneAndUpdate(
+      { _id: 'promoRedemptionId' },
+      { $inc: { sequence: 1 } },
+      {
+        upsert: true,
+        returnDocument: 'after',
+        writeConcern: { w: 'majority' }
+      }
+    );
+
+    const counter = result.value || result;
+    return `PRD${counter.sequence}`;
+  }
+
+  /**
    * Get current promo code ID (without incrementing)
    */
   static async getCurrentPromoCodeId() {

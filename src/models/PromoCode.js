@@ -65,7 +65,10 @@ class PromoCode {
 
     const errors = validatePromoCodeInput(promoCodeData);
     if (errors.length > 0) {
-      throw new Error(errors.join('; '));
+      const validationError = new Error(errors.join('; '));
+      validationError.code = 'VALIDATION';
+      validationError.errors = errors;
+      throw validationError;
     }
 
     // Check if code already exists (archived codes free their code string)

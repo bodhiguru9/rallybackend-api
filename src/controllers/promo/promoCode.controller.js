@@ -81,6 +81,11 @@ const createPromoCode = async (req, res, next) => {
       validUntil: validUntil ? new Date(validUntil) : null,
       isActive: isActive !== undefined ? isActive : true,
       createdBy: req.user.id,
+      // Organiser-created codes are always organiser-funded and owned by the caller.
+      // Only admin routes may create Rally-funded (rally/admin) codes.
+      fundedBy: 'organiser',
+      ownerType: 'organiser',
+      ownerId: req.user.id,
     };
 
     const promoCode = await PromoCode.create(promoCodeData);
@@ -110,6 +115,13 @@ const createPromoCode = async (req, res, next) => {
       },
     });
   } catch (error) {
+    if (error.code === 'VALIDATION') {
+      return res.status(400).json({
+        success: false,
+        error: error.message,
+        errors: error.errors,
+      });
+    }
     if (error.message === 'Promo code already exists') {
       return res.status(400).json({
         success: false,

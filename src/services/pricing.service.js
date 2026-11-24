@@ -16,6 +16,8 @@ const Package = require('../models/Package');
 const { findEventById } = require('../utils/eventHelper');
 
 const VAT_RATE = 0.05;
+// Stripe rejects AED charges below this (final amount including VAT)
+const STRIPE_MIN_AED = 2;
 const MAX_PROMO_CODES_PER_ORDER = Math.max(1, parseInt(process.env.MAX_PROMO_CODES_PER_ORDER, 10) || 1);
 
 /** Error with a stable code the app maps to a friendly message. */
@@ -83,10 +85,32 @@ function buildTotals(base, codes) {
   }
 
   const originalAmount = round2(base);
-  const subtotal = remaining;
+  let subtotal = remaining;
+  let vatAmount = round2(subtotal * VAT_RATE);
+  let finalAmount = round2(subtotal + vatAmount);
+
+  // A code must not leave a charge Stripe would reject (0 < total < STRIPE_MIN_AED): give back part of the
+  // last code's discount so the player pays exactly the minimum, and the quote matches the charge.
+  if (appliedPromos.length > 0 && finalAmount > 0 && finalAmount < STRIPE_MIN_AED) {
+    let minSubtotal = round2(STRIPE_MIN_AED / (1 + VAT_RATE));
+    while (round2(minSubtotal + round2(minSubtotal * VAT_RATE)) < STRIPE_MIN_AED) {
+      minSubtotal = round2(minSubtotal + 0.01);
+    }
+    if (minSubtotal <= originalAmount) {
+      const giveBack = round2(minSubtotal - subtotal);
+      const last = appliedPromos[appliedPromos.length - 1];
+      last.discountAmount = round2(last.discountAmount - giveBack);
+      if (last.fundedBy === 'rally') {
+        rallyFundedDiscount = round2(rallyFundedDiscount - giveBack);
+      } else {
+        organiserFundedDiscount = round2(organiserFundedDiscount - giveBack);
+      }
+      subtotal = minSubtotal;
+      vatAmount = round2(subtotal * VAT_RATE);
+      finalAmount = round2(subtotal + vatAmount);
+    }
+  }
   const discountAmount = round2(originalAmount - subtotal);
-  const vatAmount = round2(subtotal * VAT_RATE);
-  const finalAmount = round2(subtotal + vatAmount);
 
   return {
     originalAmount,
@@ -222,6 +246,10 @@ async function validateCode(promoCode, target, ctx) {
     }
   }
 
+  if (target.base <= 0) {
+    throw new PromoError('NOT_APPLICABLE', 'Promo codes cannot be used on free bookings');
+  }
+
   if (promoCode.minPurchaseAmount && target.base < promoCode.minPurchaseAmount) {
     throw new PromoError('MIN_PURCHASE', `Minimum purchase amount of AED ${promoCode.minPurchaseAmount} required`);
   }
@@ -292,6 +320,7 @@ module.exports = {
   PromoError,
   MAX_PROMO_CODES_PER_ORDER,
   VAT_RATE,
+  STRIPE_MIN_AED,
   // exported for unit tests
   round2,
   computeCodeDiscount,

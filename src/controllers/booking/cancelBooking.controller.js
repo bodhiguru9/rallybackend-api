@@ -79,6 +79,11 @@ const cancelBooking = async (req, res, next) => {
     let refundReason = 'No refund applicable';
     let refundData = null;
 
+    // Cancelling a booking that was never paid: give its promo reservation back now instead of waiting for the sweeper
+    if (booking.status === 'pending') {
+      await promoRedemption.release({ bookingId: booking._id }, 'booking_cancelled');
+    }
+
     if (booking.status === 'booked') {
       const event = await findEventById(booking.eventId);
 
@@ -138,7 +143,13 @@ const cancelBooking = async (req, res, next) => {
           }
 
           if (refundEligible) {
-            if (!payment.stripePaymentIntentId) {
+            if (payment.paymentMethod === 'promo_free') {
+              // 100% promo booking: no Stripe charge to refund. Inside the cancellation window the promo use is
+              // given back (and the Rally top-up owed drops to 0); outside it the redemption stays confirmed.
+              refundReason = 'Free booking (100% promo code) cancelled; no payment to refund';
+              await Payment.markRefundNotEligible(payment.paymentId || payment._id, refundReason);
+              await promoRedemption.refund({ bookingId: booking._id }, 'booking_cancelled');
+            } else if (!payment.stripePaymentIntentId) {
               refundReason = 'Refund eligible, but Stripe payment intent is missing';
               await Payment.markRefundFailed(
                 payment.paymentId || payment._id,

@@ -1,110 +1,146 @@
-const User = require('../../models/User');
 const Follow = require('../../models/Follow');
 const { getPaginationParams, createPaginationResponse } = require('../../utils/pagination');
 const { getDB } = require('../../config/database');
 const { getBookingStatsByUsers } = require('../../utils/bookingStats');
 
+const ADMIN_MAX_PER_PAGE = 100;
+
 /**
- * @desc    Get all users list with their details
- * @route   GET /api/users?page=1
- * @access  Public (or Private if needed)
- * 
- * Returns list of all users (both players and organisers) with pagination
- * Uses page-based pagination: 20 items per page
- * Query parameter: page (default: 1)
+ * Temporary switch for the public route while the Lovable admin panel moves
+ * to GET /api/admin/users. Set PUBLIC_USERS_EXPOSE_PII=true only for that
+ * transition window; unset (default) = public route returns no private data.
+ */
+const publicRouteExposesPrivateData = () => process.env.PUBLIC_USERS_EXPOSE_PII === 'true';
+
+/**
+ * Format one user. `includePrivate` adds contact details, verification
+ * flags, date of birth, gender and booking spend — admin-only data.
+ */
+const formatUser = async (user, bookingStatsMap, includePrivate) => {
+  const userData = {
+    id: user.userId,
+    userId: user.userId,
+    mongoId: user._id.toString(),
+    userType: user.userType,
+    fullName: user.fullName,
+    profilePic: user.profilePic,
+    sport1: user.sport1,
+    sport2: user.sport2,
+    sports: user.sports || [],
+    followingCount: user.followingCount || 0,
+    createdAt: user.createdAt,
+  };
+
+  if (user.userType === 'organiser') {
+    userData.yourBest = user.yourBest;
+    userData.communityName = user.communityName;
+    userData.yourCity = user.yourCity;
+    userData.bio = user.bio;
+    userData.instagramLink = user.instagramLink || null;
+    userData.profileVisibility = user.profileVisibility || 'private';
+    userData.followersCount = await Follow.getFollowerCount(user._id.toString());
+    userData.eventsCreated = user.eventsCreated || 0;
+    userData.totalAttendees = user.totalAttendees || 0;
+  }
+
+  if (includePrivate) {
+    userData.email = user.email;
+    userData.mobileNumber = user.mobileNumber;
+    userData.isEmailVerified = user.isEmailVerified || false;
+    userData.isMobileVerified = user.isMobileVerified || false;
+    userData.updatedAt = user.updatedAt;
+    if (user.userType === 'player') {
+      userData.dob = user.dob;
+      userData.gender = user.gender;
+    }
+    const bookingStats = bookingStatsMap.get(user._id.toString()) || { bookedCount: 0, totalSpent: 0 };
+    userData.totalBookedEvents = bookingStats.bookedCount;
+    userData.totalBookingAmount = bookingStats.totalSpent;
+  }
+
+  return userData;
+};
+
+/**
+ * Shared paginated user listing used by the public and admin routes.
+ */
+const listUsers = async ({ page: rawPage, perPage: rawPerPage, userType, includePrivate }) => {
+  const { page, perPage, skip } = getPaginationParams(rawPage, rawPerPage);
+
+  const usersCollection = getDB().collection('users');
+
+  const query = {};
+  if (userType && ['player', 'organiser'].includes(userType.toLowerCase())) {
+    query.userType = userType.toLowerCase();
+  }
+
+  const totalCount = await usersCollection.countDocuments(query);
+  const users = await usersCollection
+    .find(query)
+    .sort({ createdAt: -1 })
+    .skip(skip)
+    .limit(perPage)
+    .toArray();
+
+  const bookingStatsMap = includePrivate
+    ? await getBookingStatsByUsers(users.map((user) => user._id))
+    : new Map();
+
+  const usersList = await Promise.all(
+    users.map((user) => formatUser(user, bookingStatsMap, includePrivate))
+  );
+
+  return {
+    users: usersList,
+    pagination: createPaginationResponse(totalCount, page, perPage),
+    ...(query.userType && { filter: { userType: query.userType } }),
+  };
+};
+
+/**
+ * @desc    Public users list — public profile fields only
+ * @route   GET /api/users?page=1&userType=player
+ * @access  Public
+ *
+ * No email, phone, date of birth, gender, verification flags or booking
+ * spend (unless the temporary PUBLIC_USERS_EXPOSE_PII switch is on).
+ * Fixed 20 per page.
  */
 const getAllUsers = async (req, res, next) => {
   try {
-    const { page, perPage, skip } = getPaginationParams(req.query.page, 20);
-    const userType = req.query.userType; // Optional filter: 'player' or 'organiser'
-
-    const db = getDB();
-    const usersCollection = db.collection('users');
-
-    // Build query
-    const query = {};
-    if (userType && ['player', 'organiser'].includes(userType.toLowerCase())) {
-      query.userType = userType.toLowerCase();
-    }
-
-    // Get total count
-    const totalCount = await usersCollection.countDocuments(query);
-
-    // Get paginated users
-    const users = await usersCollection
-      .find(query)
-      .sort({ createdAt: -1 }) // Newest first
-      .skip(skip)
-      .limit(perPage)
-      .toArray();
-
-    const bookingStatsMap = await getBookingStatsByUsers(users.map((user) => user._id));
-
-    // Format users with their details
-    const usersList = await Promise.all(
-      users.map(async (user) => {
-        const userData = {
-          id: user.userId,
-          userId: user.userId,
-          mongoId: user._id.toString(),
-          userType: user.userType,
-          email: user.email,
-          mobileNumber: user.mobileNumber,
-          profilePic: user.profilePic,
-          isEmailVerified: user.isEmailVerified || false,
-          isMobileVerified: user.isMobileVerified || false,
-          createdAt: user.createdAt,
-          updatedAt: user.updatedAt,
-        };
-
-        // Add type-specific fields
-        if (user.userType === 'player') {
-          userData.fullName = user.fullName;
-          userData.dob = user.dob;
-          userData.gender = user.gender;
-          userData.sport1 = user.sport1;
-          userData.sport2 = user.sport2;
-          userData.sports = user.sports || [];
-          userData.followingCount = user.followingCount || 0;
-        } else if (user.userType === 'organiser') {
-          userData.fullName = user.fullName;
-          userData.yourBest = user.yourBest;
-          userData.communityName = user.communityName;
-          userData.yourCity = user.yourCity;
-          userData.sport1 = user.sport1;
-          userData.sport2 = user.sport2;
-          userData.sports = user.sports || [];
-          userData.bio = user.bio;
-          userData.instagramLink = user.instagramLink || null;
-          userData.profileVisibility = user.profileVisibility || 'private';
-          
-          // Get actual follower count from follows collection
-          const followerCount = await Follow.getFollowerCount(user._id.toString());
-          userData.followersCount = followerCount;
-          
-          userData.eventsCreated = user.eventsCreated || 0;
-          userData.totalAttendees = user.totalAttendees || 0;
-          userData.followingCount = user.followingCount || 0;
-        }
-
-        const bookingStats = bookingStatsMap.get(user._id.toString()) || { bookedCount: 0, totalSpent: 0 };
-        userData.totalBookedEvents = bookingStats.bookedCount;
-        userData.totalBookingAmount = bookingStats.totalSpent;
-
-        return userData;
-      })
-    );
-
-    const pagination = createPaginationResponse(totalCount, page, perPage);
-
-    res.status(200).json({
-      success: true,
-      data: {
-        users: usersList,
-        pagination,
-        ...(userType && { filter: { userType } }),
-      },
+    const data = await listUsers({
+      page: req.query.page,
+      perPage: 20,
+      userType: req.query.userType,
+      includePrivate: publicRouteExposesPrivateData(),
     });
+    res.status(200).json({ success: true, data });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * @desc    Admin users list — full details incl. contact data and booking stats
+ * @route   GET /api/admin/users?page=1&perPage=20&userType=player
+ * @access  Admin (X-Admin-Key, via admin.routes.js)
+ *
+ * Same response shape as the legacy public route. perPage 1-100 (default 20).
+ */
+const getAdminUsers = async (req, res, next) => {
+  try {
+    const requested = parseInt(req.query.perPage, 10);
+    const perPage = Number.isFinite(requested)
+      ? Math.min(Math.max(requested, 1), ADMIN_MAX_PER_PAGE)
+      : 20;
+
+    const data = await listUsers({
+      page: req.query.page,
+      perPage,
+      userType: req.query.userType,
+      includePrivate: true,
+    });
+    res.status(200).json({ success: true, data });
   } catch (error) {
     next(error);
   }
@@ -112,5 +148,5 @@ const getAllUsers = async (req, res, next) => {
 
 module.exports = {
   getAllUsers,
+  getAdminUsers,
 };
-

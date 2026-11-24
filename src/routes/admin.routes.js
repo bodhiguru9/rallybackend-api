@@ -18,6 +18,7 @@ const { listOrganisers, getOrganiserById, getOrganiserEvents, deleteOrganiser } 
 const { listAllEvents, getEventDetails } = require('../controllers/admin/events.controller');
 const { searchUsers, deleteUser } = require('../controllers/admin/userSearch.controller');
 const { createUser } = require('../controllers/admin/createUser.controller');
+const { getAdminUsers } = require('../controllers/user/getAllUsers.controller');
 
 router.use(adminKeyAuth, adminAudit);
 
@@ -88,6 +89,16 @@ router.get('/events/:eventId', getEventDetails);
  * and (for organisers) event stats to tell accounts apart.
  */
 router.get('/search-user', searchUsers);
+
+/**
+ * GET /api/admin/users?page=&perPage=&userType=player|organiser
+ *
+ * Full user list for the panel's user export and the empty-search view:
+ * same shape as the legacy public GET /api/users, including email,
+ * mobileNumber, dob, gender, verification flags and booking stats.
+ * perPage 1-100 (default 20). Newest first.
+ */
+router.get('/users', getAdminUsers);
 
 /**
  * DELETE /api/admin/users/:userId

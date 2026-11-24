@@ -37,7 +37,11 @@ router.patch('/me/push-token', protect, updatePushToken);
  * 
  * Returns list of all users (both players and organisers) with pagination
  * Uses page-based pagination: 20 items per page
- * 
+ *
+ * PUBLIC PROFILE FIELDS ONLY: no email, mobileNumber, dob, gender,
+ * verification flags or booking stats. Admin tools use
+ * GET /api/admin/users (X-Admin-Key) for those.
+ *
  * Query Parameters (all optional):
  * - page: Page number (default: 1)
  * - userType: Filter by user type - 'player' or 'organiser' (default: all users)
@@ -51,7 +55,6 @@ router.patch('/me/push-token', protect, updatePushToken);
  *         "userId": 1,
  *         "userType": "player",
  *         "fullName": "John Doe",
- *         "email": "john@example.com",
  *         "sport1": "Football",
  *         "sport2": "Basketball",
  *         ...

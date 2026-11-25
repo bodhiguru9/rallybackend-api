@@ -256,6 +256,22 @@ async function refund(ids, reason = 'refunded') {
   return changed;
 }
 
+/**
+ * True if any redemption row (any status) belongs to this order. Matches ANY of the given ids (unlike the
+ * other helpers, which AND them), so a row attached late to only the booking or only the PaymentIntent counts.
+ */
+async function existsForOrder({ bookingId, paymentId, stripePaymentIntentId, packagePurchaseId } = {}) {
+  const or = [];
+  if (bookingId) or.push({ bookingId: toObjectId(bookingId) });
+  if (paymentId) or.push({ paymentId: toObjectId(paymentId) });
+  if (stripePaymentIntentId) or.push({ stripePaymentIntentId });
+  if (packagePurchaseId) or.push({ packagePurchaseId: toObjectId(packagePurchaseId) });
+  if (or.length === 0) {
+    return false;
+  }
+  return (await redemptions().countDocuments({ $or: or }, { limit: 1 })) > 0;
+}
+
 /** Free (0 AED) checkout: reserve and confirm in one go. */
 async function reserveAndConfirm(args) {
   const created = await reserve(args);
@@ -354,6 +370,7 @@ module.exports = {
   confirm,
   release,
   refund,
+  existsForOrder,
   reserveAndConfirm,
   sweepExpired,
   startSweeper,

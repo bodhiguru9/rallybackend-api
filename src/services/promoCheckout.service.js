@@ -136,9 +136,33 @@ async function confirmPromoForPayment(payment, paymentIntentId) {
   const changed = await promoRedemption.confirm({ stripePaymentIntentId: paymentIntentId });
   const hasNewFields = Array.isArray(payment.appliedPromos) && payment.appliedPromos.length > 0;
   if (changed === 0 && payment.promoCodeId && !hasNewFields) {
-    await PromoCode.incrementUsage(payment.promoCodeId);
+    // The legacy counter must never run for an order that has redemption rows (by payment, PaymentIntent or
+    // booking): that would add a second use for the same booking.
+    const hasRows = await promoRedemption.existsForOrder({
+      paymentId: payment._id,
+      stripePaymentIntentId: paymentIntentId,
+    });
+    if (!hasRows) {
+      await PromoCode.incrementUsage(payment.promoCodeId);
+    }
   }
   return changed;
+}
+
+/**
+ * Self-heal for payments that are already 'success' (another path claimed them first, or the confirm failed
+ * after the claim): confirm any redemption still 'reserved'. Safe to repeat; the player has paid. Never throws.
+ */
+async function ensurePromoConfirmed(payment) {
+  try {
+    if (!payment || !payment.stripePaymentIntentId || payment.type === 'package' || payment.packageId) {
+      return 0;
+    }
+    return await promoRedemption.confirm({ stripePaymentIntentId: payment.stripePaymentIntentId });
+  } catch (err) {
+    console.error('ensurePromoConfirmed failed:', err.message);
+    return 0;
+  }
 }
 
 /** Promo fields of a Payment, as stored on a PackagePurchase. */
@@ -153,4 +177,4 @@ function promoFieldsFromPayment(payment) {
   };
 }
 
-module.exports = { promoFieldsFromPayment, confirmPromoForPayment, supersedePendingBooking, extractCodes, respondIfPromoError, buildPromoFields, buildPromoMetadata, sameCodeSet };
+module.exports = { promoFieldsFromPayment, confirmPromoForPayment, ensurePromoConfirmed, supersedePendingBooking, extractCodes, respondIfPromoError, buildPromoFields, buildPromoMetadata, sameCodeSet };

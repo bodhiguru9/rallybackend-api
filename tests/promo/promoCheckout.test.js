@@ -10,6 +10,8 @@ const cancelBooking = require('../../src/controllers/booking/cancelBooking.contr
 const { stripeWebhook } = require('../../src/controllers/payment/webhook.controller');
 const promoRoutes = require('../../src/routes/promo.routes');
 const Payment = require('../../src/models/Payment');
+const promoQueries = require('../../src/services/promoQueries.service');
+const { confirmPromoForPayment, ensurePromoConfirmed } = require('../../src/services/promoCheckout.service');
 const { createOrganiser, createPlayer, createPaidEvent, createCode, tokenFor, col } = require('./helpers');
 
 const app = express();
@@ -235,6 +237,40 @@ describe('promo codes at checkout', () => {
       const rows = await redemptionsOf(promo._id);
       expect(rows).toHaveLength(1);
       expect(rows[0].status).toBe('confirmed');
+      expect(await usedCount(promo._id)).toBe(1);
+    });
+
+    it('one paid booking with a code: usedCount 1, one confirmed redemption, stats.redeemed 1, the player listed', async () => {
+      const { player, promo, pi } = await paidBooking();
+      await sendWebhook('payment_intent.succeeded', pi);
+
+      expect(await usedCount(promo._id)).toBe(1);
+      const rows = await redemptionsOf(promo._id);
+      expect(rows).toHaveLength(1);
+      expect(rows[0].status).toBe('confirmed');
+      expect(await promoQueries.codeStats(promo._id)).toMatchObject({ redeemed: 1 });
+      const purchases = await promoQueries.groupedPurchases(promo._id);
+      expect(JSON.stringify(purchases)).toContain(String(player._id));
+    });
+
+    it('a payment already marked success whose redemption is still reserved is healed (no webhook, or confirm lost)', async () => {
+      const { promo, pi } = await paidBooking();
+      await Payment.claimSuccess((await Payment.findByStripePaymentIntentId(pi))._id, pi, 'pm_test'); // claimed, never confirmed
+      expect((await redemptionsOf(promo._id))[0].status).toBe('reserved');
+
+      const payment = await Payment.findByStripePaymentIntentId(pi);
+      expect(await ensurePromoConfirmed(payment)).toBe(1);
+      expect(await ensurePromoConfirmed(payment)).toBe(0); // idempotent
+      expect((await redemptionsOf(promo._id))[0].status).toBe('confirmed');
+      expect(await usedCount(promo._id)).toBe(1);
+    });
+
+    it('the legacy usage counter never runs when redemption rows exist for the payment', async () => {
+      const { promo, pi } = await paidBooking();
+      const payment = await Payment.findByStripePaymentIntentId(pi);
+      await sendWebhook('payment_intent.succeeded', pi); // confirms the row; usedCount stays 1
+      // A payment without appliedPromos (as if the fields were lost) and nothing left to confirm:
+      await confirmPromoForPayment({ ...payment, appliedPromos: [] }, pi);
       expect(await usedCount(promo._id)).toBe(1);
     });
 

@@ -8,6 +8,7 @@ const {
   buildPromoFields,
   buildPromoMetadata,
   confirmPromoForPayment,
+  ensurePromoConfirmed,
   promoFieldsFromPayment,
 } = require('../../services/promoCheckout.service');
 const Event = require('../../models/Event');
@@ -410,6 +411,7 @@ const verifyPayment = async (req, res, next) => {
     // If payment is already successful (e.g., processed by webhook), return early
     // to avoid duplicate database updates and duplicate notifications.
     if (payment.status === 'success') {
+      await ensurePromoConfirmed(payment);
       if (payment.type === 'package' || payment.packageId) {
         const result = await activatePackagePurchase(payment);
         const updatedPayment = await Payment.findById(payment.paymentId || payment._id);
@@ -501,6 +503,7 @@ const verifyPayment = async (req, res, next) => {
         if (!claimed) {
           // Already processed by webhook — return the existing success state
           console.log(`⚠️ [DUPLICATE IGNORED] Verify ignored for PI: ${payment_intent_id} (already claimed by webhook)`);
+          await ensurePromoConfirmed(payment);
 
           if (payment.type === 'package' || payment.packageId) {
             const result = await activatePackagePurchase(payment);

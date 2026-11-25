@@ -160,9 +160,11 @@ async function buildEditUpdate(code, body, ownerId) {
   // Validate the merged result so cross-field rules hold (percentage range, validUntil > validFrom...).
   // The code string is only checked when it is being changed (older codes may not match the new format).
   const merged = { ...code, ...input };
+  // Discount fields are only validated when the edit touches them, so an old fixed/100% code can still have
+  // unrelated fields (usage limit, expiry...) edited.
+  const touchesDiscount = 'discountType' in input || 'discountValue' in input;
   const toValidate = {
-    discountType: merged.discountType,
-    discountValue: merged.discountValue,
+    ...(touchesDiscount ? { discountType: merged.discountType, discountValue: merged.discountValue } : {}),
     usageLimit: merged.usageLimit,
     userUsageLimit: merged.userUsageLimit,
     minPurchaseAmount: merged.minPurchaseAmount,

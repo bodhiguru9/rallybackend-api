@@ -57,8 +57,8 @@ Implementation status: `quote` **implemented (M2)** · checkout fields **impleme
   "promoCodeId": "PRO12",
   "code": "SAVE20",
   "description": null,
-  "discountType": "percentage|fixed",
-  "discountValue": 20,
+  "discountType": "percentage",  // always "percentage" for new codes; an old record may still say "fixed"
+  "discountValue": 20,           // 1-99 (percent) for new codes
   "minPurchaseAmount": 0,
   "maxDiscountAmount": null,
   "usageLimit": 60,              // null = no limit
@@ -113,7 +113,7 @@ Kept for older app builds. Wrapper over `quote`. Request `{ "code", "eventId", "
 All of these accept the new body field `promoCodes: string[]` and still accept legacy `?promoCode=CODE`.
 
 - `POST /api/bookings/...` (bookEvent) and `POST /api/payments/create-order` (createPaymentOrder) — body gains `promoCodes`. The amount is always recomputed on the server.
-- Free result (`finalAmount == 0`): response has `"free": true`, no Stripe client secret; the booking is confirmed immediately.
+- Free result (`finalAmount == 0`; no longer reachable with new codes since 100% is rejected, kept for old records): response has `"free": true`, no Stripe client secret; the booking is confirmed immediately.
 - Booking / payment / package purchase responses add: `appliedPromos[]`, `vatAmount`, `rallyFundedDiscount`, `organiserFundedDiscount`. Legacy `promoCode` (first code) and `discountAmount` (sum) are still returned.
 - Refund on cancel = `amount actually paid − VAT`; the redemption is released.
 - Stripe PaymentIntent metadata gains: `organiserId, originalAmount, discountAmount, rallyFundedDiscount, organiserFundedDiscount, promoCodes (comma separated), promoFundedBy` (plus legacy `promoCode`).
@@ -151,6 +151,13 @@ All of these accept the new body field `promoCodes: string[]` and still accept l
   "notifyOnCreate": true
 }
 ```
+**Discount rule (all create and edit calls, organiser and admin):** percentage only. `discountType` must be `"percentage"` and `discountValue` must be a number from 1 to 99. Fixed-AED codes and 100% codes are rejected with HTTP 400 and `code: "VALIDATION"`:
+```json
+{ "success": false, "code": "VALIDATION", "message": "Only percentage discounts are supported" }
+{ "success": false, "code": "VALIDATION", "message": "Discount must be between 1 and 99%" }
+```
+(Both messages are joined with `; ` if both rules fail.) Old records that are `fixed` or 100% are still priced correctly, display as before, and can have other fields edited; they just can't be created again or have their discount changed to those values.
+
 `usageLimit: null` = no limit; `userUsageLimit: null` = unlimited; `validUntil` omitted/null = no end date. The server forces `fundedBy: "organiser"`, `ownerType: "organiser"`, `ownerId` = caller. Validation errors: HTTP 400 with `message` (AED amounts).
 
 **Edit rules** (`PUT`): always editable — `description, usageLimit (null or >= usedCount), userUsageLimit, validUntil, eligibility, sports, eventIds, packageIds, minPurchaseAmount, maxDiscountAmount`. Editable only while there are 0 confirmed/reserved redemptions — `code, discountType, discountValue`. Otherwise HTTP 409 `{ "code": "CODE_LOCKED" }`.

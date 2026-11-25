@@ -75,6 +75,8 @@ describe('organiser promo API', () => {
     it.each([
       ['a bad code', { code: 'a b' }],
       ['a percentage above 100', { discountValue: 150 }],
+      ['a 100% code', { discountValue: 100 }],
+      ['a fixed AED code', { discountType: 'fixed', discountValue: 25 }],
       ['a zero usage limit', { usageLimit: 0 }],
       ['subscribers is fine for organisers but a bad eligibility is not', { eligibility: 'nobody' }],
     ])('returns 400 for %s', async (_name, override) => {

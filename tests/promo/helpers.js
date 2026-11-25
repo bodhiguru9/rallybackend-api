@@ -68,6 +68,16 @@ async function createCode(overrides = {}) {
   });
 }
 
+/**
+ * A pre-M7 style code (fixed AED or 100%). The API no longer lets these be created, so the discount fields are
+ * written straight to the collection. Used only to test the defensive pricing/free-booking paths and old records.
+ */
+async function createLegacyCode({ discountType = 'percentage', discountValue = 100, ...overrides } = {}) {
+  const created = await createCode(overrides);
+  await col('promoCodes').updateOne({ _id: created._id }, { $set: { discountType, discountValue } });
+  return { ...created, discountType, discountValue };
+}
+
 /** Build the {quote, validated, target} triple that pricing.quoteDetailed returns, without needing a real event. */
 function fakeQuoteInput(promoCode, { base = 100, organiserId } = {}) {
   const { buildTotals } = require('../../src/services/pricing.service');
@@ -86,4 +96,4 @@ function fakeQuoteInput(promoCode, { base = 100, organiserId } = {}) {
 
 const col = (name) => getDB().collection(name);
 
-module.exports = { uniq, tokenFor, createOrganiser, createPlayer, createPaidEvent, createCode, fakeQuoteInput, col };
+module.exports = { uniq, tokenFor, createOrganiser, createPlayer, createPaidEvent, createCode, createLegacyCode, fakeQuoteInput, col };

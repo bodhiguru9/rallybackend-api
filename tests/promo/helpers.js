@@ -69,8 +69,8 @@ async function createCode(overrides = {}) {
 }
 
 /**
- * A pre-M7 style code (fixed AED or 100%). The API no longer lets these be created, so the discount fields are
- * written straight to the collection. Used only to test the defensive pricing/free-booking paths and old records.
+ * A pre-M7 style Rally code (fixed AED or 100%). The admin API no longer lets these be created, so the discount
+ * fields are written straight to the collection. For testing old records and the defensive pricing paths.
  */
 async function createLegacyCode({ discountType = 'percentage', discountValue = 100, ...overrides } = {}) {
   const created = await createCode(overrides);

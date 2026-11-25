@@ -132,21 +132,11 @@ describe('promo code input validation', () => {
     expect(validatePromoCodeInput({ ...valid, code: 'HAS SPACE' })).not.toEqual([]);
     expect(validatePromoCodeInput({ ...valid, code: 'X'.repeat(21) })).not.toEqual([]);
   });
-  it('percentage only, 1-99: fixed and 100 are rejected, 1 and 99 are fine', () => {
-    expect(validatePromoCodeInput({ ...valid, discountValue: 1 })).toEqual([]);
-    expect(validatePromoCodeInput({ ...valid, discountValue: 99 })).toEqual([]);
-    expect(validatePromoCodeInput({ ...valid, discountValue: 100 })).toContain('Discount must be between 1 and 99%');
+  it('percentage must be 1-100, fixed must be > 0', () => {
     expect(validatePromoCodeInput({ ...valid, discountValue: 101 })).not.toEqual([]);
     expect(validatePromoCodeInput({ ...valid, discountValue: 0 })).not.toEqual([]);
-    expect(validatePromoCodeInput({ ...valid, discountType: 'fixed', discountValue: 10 })).toContain('Only percentage discounts are supported');
     expect(validatePromoCodeInput({ ...valid, discountType: 'fixed', discountValue: 0 })).not.toEqual([]);
-    expect(validatePromoCodeInput({ ...valid, discountType: undefined })).toContain('Only percentage discounts are supported');
-  });
-  it('an edit that does not touch the discount is not blocked by an old fixed/100% record', () => {
-    expect(validatePromoCodeInput({ usageLimit: 5 }, { partial: true })).toEqual([]);
-    expect(validatePromoCodeInput({ discountType: 'fixed', discountValue: 10 }, { partial: true })).not.toEqual([]);
-    expect(validatePromoCodeInput({ discountValue: 100 }, { partial: true })).not.toEqual([]);
-    expect(validatePromoCodeInput({ discountValue: 50 }, { partial: true })).toEqual([]);
+    expect(validatePromoCodeInput({ ...valid, discountType: 'fixed', discountValue: 10 })).toEqual([]);
   });
   it('limits are null or at least 1', () => {
     expect(validatePromoCodeInput({ ...valid, usageLimit: 0 })).not.toEqual([]);
@@ -159,6 +149,29 @@ describe('promo code input validation', () => {
   it('admin codes cannot use subscribers eligibility', () => {
     expect(validatePromoCodeInput({ ...valid, ownerType: 'admin', eligibility: 'subscribers' })).not.toEqual([]);
     expect(validatePromoCodeInput({ ...valid, ownerType: 'organiser', eligibility: 'subscribers' })).toEqual([]);
+  });
+  it('Rally-funded (admin) codes are percentage-only, 1-99', () => {
+    const rally = { ...valid, fundedBy: 'rally', ownerType: 'admin' };
+    expect(validatePromoCodeInput({ ...rally, discountValue: 1 })).toEqual([]);
+    expect(validatePromoCodeInput({ ...rally, discountValue: 99 })).toEqual([]);
+    expect(validatePromoCodeInput({ ...rally, discountValue: 100 })).toContain('Discount must be between 1 and 99%');
+    expect(validatePromoCodeInput({ ...rally, discountValue: 0 })).not.toEqual([]);
+    expect(validatePromoCodeInput({ ...rally, discountType: 'fixed', discountValue: 10 })).toContain('Only percentage discounts are supported');
+    // either marker alone is enough
+    expect(validatePromoCodeInput({ ...valid, fundedBy: 'rally', discountValue: 100 })).not.toEqual([]);
+    expect(validatePromoCodeInput({ ...valid, ownerType: 'admin', discountType: 'fixed', discountValue: 10 })).not.toEqual([]);
+  });
+  it('organiser codes keep % 1-100 and fixed > 0 (100% is allowed)', () => {
+    const org = { ...valid, fundedBy: 'organiser', ownerType: 'organiser' };
+    expect(validatePromoCodeInput({ ...org, discountValue: 100 })).toEqual([]);
+    expect(validatePromoCodeInput({ ...org, discountType: 'fixed', discountValue: 10 })).toEqual([]);
+    expect(validatePromoCodeInput({ ...org, discountValue: 101 })).not.toEqual([]);
+    expect(validatePromoCodeInput({ ...org, discountType: 'fixed', discountValue: 0 })).not.toEqual([]);
+  });
+  it('an edit only checks the discount when it is part of the edit (funding comes from the stored record)', () => {
+    expect(validatePromoCodeInput({ usageLimit: 5, ownerType: 'admin' }, { partial: true })).toEqual([]);
+    expect(validatePromoCodeInput({ discountValue: 100, ownerType: 'admin' }, { partial: true })).not.toEqual([]);
+    expect(validatePromoCodeInput({ discountValue: 100, ownerType: 'organiser' }, { partial: true })).toEqual([]);
   });
   it('partial mode only checks the fields present', () => {
     expect(validatePromoCodeInput({ usageLimit: 5 }, { partial: true })).toEqual([]);
@@ -216,7 +229,7 @@ describe('csv util', () => {
   it('escapes quotes, commas and newlines, and neutralises formulas', () => {
     const csv = toCsv(['a', 'b'], [['=SUM(A1)', 'x,"y"'], ['line\nbreak', null]]);
     expect(csv.charCodeAt(0)).toBe(0xfeff);
-    expect(csv).toContain('\'=SUM(A1)');
+    expect(csv).toContain(''=SUM(A1)');
     expect(csv).toContain('"x,""y"""');
     expect(csv).toContain('"line\nbreak"');
   });

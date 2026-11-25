@@ -1,6 +1,6 @@
 const redemption = require('../../src/services/promoRedemption.service');
 const { PromoError } = require('../../src/services/pricing.service');
-const { createOrganiser, createPlayer, createCode, createLegacyCode, fakeQuoteInput, col } = require('./helpers');
+const { createOrganiser, createPlayer, createCode, fakeQuoteInput, col } = require('./helpers');
 const { ObjectId } = require('mongodb');
 
 const usedCount = async (id) => (await col('promoCodes').findOne({ _id: id })).usedCount;
@@ -16,9 +16,7 @@ describe('promo redemption lifecycle', () => {
   });
 
   const setup = async (codeOverrides = {}, base = 100) => {
-    // 100% / fixed codes can't be created any more (M7), so they are written directly to test the defensive path
-    const make = codeOverrides.discountType || codeOverrides.discountValue === 100 ? createLegacyCode : createCode;
-    const promo = await make({ ownerId: organiser._id, ...codeOverrides });
+    const promo = await createCode({ ownerId: organiser._id, ...codeOverrides });
     return { promo, input: fakeQuoteInput(promo, { base, organiserId: organiser._id }) };
   };
 

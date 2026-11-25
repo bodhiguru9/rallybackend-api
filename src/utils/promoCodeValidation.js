@@ -5,9 +5,10 @@
  */
 
 const CODE_REGEX = /^[A-Z0-9]{3,20}$/;
-const DISCOUNT_TYPES = ['percentage', 'fixed']; // 'fixed' is still a valid STORED type for old records, but can't be created or edited to
-const MIN_PERCENT = 1;
-const MAX_PERCENT = 99;
+const DISCOUNT_TYPES = ['percentage', 'fixed'];
+// Rally-funded (admin) codes are percentage-only, 1-99% (client rule). Organiser codes keep % 1-100 or fixed > 0.
+const RALLY_MIN_PERCENT = 1;
+const RALLY_MAX_PERCENT = 99;
 const FUNDED_BY = ['rally', 'organiser'];
 const OWNER_TYPES = ['admin', 'organiser'];
 const ELIGIBILITY = ['everyone', 'first_booking', 'subscribers'];
@@ -35,18 +36,29 @@ function validatePromoCodeInput(data, opts = {}) {
     }
   }
 
-  // Business rule (M7): new and edited codes are percentage-only, 1-99%.
-  // Fixed-AED and 100% codes are rejected here; the pricing service still handles them defensively for old data.
-  if (check('discountType') && data.discountType !== 'percentage') {
-    errors.push('Only percentage discounts are supported');
+  // Funding comes from ownerType / fundedBy. On edits the caller passes them from the STORED record, never the request body.
+  const isRallyCode = data.ownerType === 'admin' || data.fundedBy === 'rally';
+
+  if (check('discountType')) {
+    if (isRallyCode && data.discountType !== 'percentage') {
+      errors.push('Only percentage discounts are supported');
+    } else if (!DISCOUNT_TYPES.includes(data.discountType)) {
+      errors.push('discountType must be \'percentage\' or \'fixed\'');
+    }
   }
 
   if (check('discountValue')) {
     const v = data.discountValue;
     if (typeof v !== 'number' || !Number.isFinite(v)) {
       errors.push('discountValue must be a number');
-    } else if (v < MIN_PERCENT || v > MAX_PERCENT) {
+    } else if (isRallyCode && (v < RALLY_MIN_PERCENT || v > RALLY_MAX_PERCENT)) {
       errors.push('Discount must be between 1 and 99%');
+    } else if (data.discountType === 'percentage' && (v < 1 || v > 100)) {
+      errors.push('Percentage discount must be between 1 and 100');
+    } else if (data.discountType === 'fixed' && v <= 0) {
+      errors.push('Fixed discount must be greater than 0 AED');
+    } else if (!data.discountType && v <= 0) {
+      errors.push('discountValue must be greater than 0');
     }
   }
 

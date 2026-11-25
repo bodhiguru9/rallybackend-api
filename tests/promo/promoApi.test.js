@@ -13,7 +13,7 @@ const express = require('express');
 const { ObjectId } = require('mongodb');
 const promoRoutes = require('../../src/routes/promo.routes');
 const adminRoutes = require('../../src/routes/admin.routes');
-const { createOrganiser, createPlayer, createPaidEvent, createCode, fakeQuoteInput, tokenFor, col } = require('./helpers');
+const { createOrganiser, createLegacyCode, createPlayer, createPaidEvent, createCode, fakeQuoteInput, tokenFor, col } = require('./helpers');
 const redemption = require('../../src/services/promoRedemption.service');
 
 const ADMIN_KEY = 'test-admin-key-not-a-real-secret';
@@ -75,14 +75,21 @@ describe('organiser promo API', () => {
     it.each([
       ['a bad code', { code: 'a b' }],
       ['a percentage above 100', { discountValue: 150 }],
-      ['a 100% code', { discountValue: 100 }],
-      ['a fixed AED code', { discountType: 'fixed', discountValue: 25 }],
       ['a zero usage limit', { usageLimit: 0 }],
       ['subscribers is fine for organisers but a bad eligibility is not', { eligibility: 'nobody' }],
     ])('returns 400 for %s', async (_name, override) => {
       const res = await createAs(orgA, validBody(override));
       expect(res.status).toBe(400);
       expect(res.body.code).toBe('VALIDATION');
+    });
+
+    it('organiser codes may still be 100% or a fixed AED amount (only Rally codes are limited to 1-99%)', async () => {
+      const full = await createAs(orgA, validBody({ discountValue: 100 }));
+      expect(full.status).toBe(201);
+      const fixed = await createAs(orgA, validBody({ discountType: 'fixed', discountValue: 25 }));
+      expect(fixed.status).toBe(201);
+      expect(fixed.body.data.promoCode).toMatchObject({ discountType: 'fixed', discountValue: 25 });
+      expect((await createAs(orgA, validBody({ discountType: 'fixed', discountValue: 0 }))).status).toBe(400);
     });
 
     it('rejects a duplicate code (409) but allows it again after the first is archived', async () => {
@@ -305,6 +312,38 @@ describe('admin promo API', () => {
       const res = await request(app).post('/api/admin/promo-codes').set(admin('boss@rally.test')).send(validBody({ notifyOnCreate: true }));
       expect(res.status).toBe(201);
       expect(res.body.data.promoCode).toMatchObject({ fundedBy: 'rally', ownerType: 'admin', ownerId: null, createdBy: 'boss@rally.test', notifyOnCreate: false });
+    });
+
+    it.each([
+      ['a fixed AED code', { discountType: 'fixed', discountValue: 25 }, 'Only percentage discounts are supported'],
+      ['a 100% code', { discountValue: 100 }, 'Discount must be between 1 and 99%'],
+      ['a 0% code', { discountValue: 0 }, 'Discount must be between 1 and 99%'],
+    ])('rejects %s on an admin code (400)', async (_name, override, message) => {
+      const res = await request(app).post('/api/admin/promo-codes').set(admin()).send(validBody(override));
+      expect(res.status).toBe(400);
+      expect(res.body.code).toBe('VALIDATION');
+      expect(res.body.message).toContain(message);
+    });
+
+    it('accepts 1% and 99% on an admin code', async () => {
+      for (const discountValue of [1, 99]) {
+        const res = await request(app).post('/api/admin/promo-codes').set(admin()).send(validBody({ discountValue }));
+        expect(res.status).toBe(201);
+      }
+    });
+
+    it('admin edit: a discount of fixed or 100 is rejected, 99 is fine, and old records can still have other fields edited', async () => {
+      const created = (await request(app).post('/api/admin/promo-codes').set(admin()).send(validBody())).body.data.promoCode;
+      const put = (body) => request(app).put(`/api/admin/promo-codes/${created.id}`).set(admin()).send(body);
+      expect((await put({ discountValue: 100 })).status).toBe(400);
+      expect((await put({ discountType: 'fixed', discountValue: 10 })).status).toBe(400);
+      expect((await put({ discountValue: 99 })).status).toBe(200);
+
+      // an old Rally record that is 100%: unrelated edits still work, changing the discount to another bad value does not
+      const legacy = await createLegacyCode({ fundedBy: 'rally', ownerType: 'admin', ownerId: null });
+      const putLegacy = (body) => request(app).put(`/api/admin/promo-codes/${legacy._id}`).set(admin()).send(body);
+      expect((await putLegacy({ usageLimit: 50 })).status).toBe(200);
+      expect((await putLegacy({ discountValue: 100 })).status).toBe(400);
     });
 
     it('rejects subscribers eligibility on an admin code', async () => {

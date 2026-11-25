@@ -57,8 +57,8 @@ Implementation status: `quote` **implemented (M2)** · checkout fields **impleme
   "promoCodeId": "PRO12",
   "code": "SAVE20",
   "description": null,
-  "discountType": "percentage",  // always "percentage" for new codes; an old record may still say "fixed"
-  "discountValue": 20,           // 1-99 (percent) for new codes
+  "discountType": "percentage|fixed",
+  "discountValue": 20,
   "minPurchaseAmount": 0,
   "maxDiscountAmount": null,
   "usageLimit": 60,              // null = no limit
@@ -113,7 +113,7 @@ Kept for older app builds. Wrapper over `quote`. Request `{ "code", "eventId", "
 All of these accept the new body field `promoCodes: string[]` and still accept legacy `?promoCode=CODE`.
 
 - `POST /api/bookings/...` (bookEvent) and `POST /api/payments/create-order` (createPaymentOrder) — body gains `promoCodes`. The amount is always recomputed on the server.
-- Free result (`finalAmount == 0`; no longer reachable with new codes since 100% is rejected, kept for old records): response has `"free": true`, no Stripe client secret; the booking is confirmed immediately.
+- Free result (`finalAmount == 0`): response has `"free": true`, no Stripe client secret; the booking is confirmed immediately.
 - Booking / payment / package purchase responses add: `appliedPromos[]`, `vatAmount`, `rallyFundedDiscount`, `organiserFundedDiscount`. Legacy `promoCode` (first code) and `discountAmount` (sum) are still returned.
 - Refund on cancel = `amount actually paid − VAT`; the redemption is released.
 - Stripe PaymentIntent metadata gains: `organiserId, originalAmount, discountAmount, rallyFundedDiscount, organiserFundedDiscount, promoCodes (comma separated), promoFundedBy` (plus legacy `promoCode`).
@@ -151,13 +151,6 @@ All of these accept the new body field `promoCodes: string[]` and still accept l
   "notifyOnCreate": true
 }
 ```
-**Discount rule (all create and edit calls, organiser and admin):** percentage only. `discountType` must be `"percentage"` and `discountValue` must be a number from 1 to 99. Fixed-AED codes and 100% codes are rejected with HTTP 400 and `code: "VALIDATION"`:
-```json
-{ "success": false, "code": "VALIDATION", "message": "Only percentage discounts are supported" }
-{ "success": false, "code": "VALIDATION", "message": "Discount must be between 1 and 99%" }
-```
-(Both messages are joined with `; ` if both rules fail.) Old records that are `fixed` or 100% are still priced correctly, display as before, and can have other fields edited; they just can't be created again or have their discount changed to those values.
-
 `usageLimit: null` = no limit; `userUsageLimit: null` = unlimited; `validUntil` omitted/null = no end date. The server forces `fundedBy: "organiser"`, `ownerType: "organiser"`, `ownerId` = caller. Validation errors: HTTP 400 with `message` (AED amounts).
 
 **Edit rules** (`PUT`): always editable — `description, usageLimit (null or >= usedCount), userUsageLimit, validUntil, eligibility, sports, eventIds, packageIds, minPurchaseAmount, maxDiscountAmount`. Editable only while there are 0 confirmed/reserved redemptions — `code, discountType, discountValue`. Otherwise HTTP 409 `{ "code": "CODE_LOCKED" }`.
@@ -185,7 +178,14 @@ Response: `{ success: true, data: { purchases: [...], pagination } }`.
 
 ## 5. Admin API  (M5, implemented)  — `/api/admin`, headers `X-Admin-Key` + `X-Admin-Email`
 
-Behind the existing `adminKeyAuth` + `adminAudit` (every call is audit-logged). Admin codes are **Rally-funded and app-wide**: `fundedBy: "rally"`, `ownerType: "admin"`, `createdBy` = the `X-Admin-Email` value. Same fields, validation and edit rules as the organiser API, except: `eligibility: "subscribers"` is rejected (400 `VALIDATION`), `notifyOnCreate` is ignored, and default scope = all events and players. Responses use the same `{ success: true, data }` wrapper; errors use the same codes as section 4, plus 403 `READ_ONLY`.
+Behind the existing `adminKeyAuth` + `adminAudit` (every call is audit-logged). Admin codes are **Rally-funded and app-wide**: `fundedBy: "rally"`, `ownerType: "admin"`, `createdBy` = the `X-Admin-Email` value. Same fields, validation and edit rules as the organiser API, except: **admin codes are percentage-only, 1 to 99%** (see below), `eligibility: "subscribers"` is rejected (400 `VALIDATION`), `notifyOnCreate` is ignored, and default scope = all events and players. Responses use the same `{ success: true, data }` wrapper; errors use the same codes as section 4, plus 403 `READ_ONLY`.
+
+**Discount rule for admin (Rally-funded) codes, on create and edit.** `discountType` must be `"percentage"` and `discountValue` must be from 1 to 99. A fixed-AED code or a 100% code returns HTTP 400 `{ "code": "VALIDATION" }` with one of:
+```json
+{ "success": false, "code": "VALIDATION", "message": "Only percentage discounts are supported" }
+{ "success": false, "code": "VALIDATION", "message": "Discount must be between 1 and 99%" }
+```
+This rule depends on the code being Rally-funded (taken from the stored record on edit, never from the request body). **Organiser codes are unchanged**: percentage 1 to 100, or fixed amount above 0, and a 100% code is allowed (free, 0 AED booking). An edit that does not touch `discountType` / `discountValue` is not blocked by an old record that no longer meets the rule.
 
 | Method | Path | Notes |
 |---|---|---|

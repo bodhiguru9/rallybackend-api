@@ -19,14 +19,14 @@ Test cards (Stripe test mode): success `4242 4242 4242 4242`, declined `4000 000
 **Create a code** (Settings > Promo Codes > + Create Promo Code)
 - [ ] Settings shows a "Promo Codes" row; the list opens with the three header numbers (Discounted / Active Codes / Redeemed).
 - [ ] Create `PADEL20`, 20%, Total uses 20, per player 1, no expiry, Everyone, notify ON. The code appears under **Active**.
-- [ ] A code with a space or under 3 characters is rejected on the form. Only percentage codes can be created, 1 to 99: 0, 100 and 150 are rejected, and so is any fixed-AED code (the form has no AED option; a direct API call with `discountType: "fixed"` or `discountValue: 100` returns 400).
+- [ ] A code with a space or under 3 characters is rejected on the form. A percentage over 100 is rejected. A fixed amount of 0 is rejected.
 - [ ] "No limit" turns the Total uses field off; the card then shows "N used . unlimited".
 - [ ] Blank "Usage per player" means unlimited. An expiry date in the past is rejected. "Clear expiry date" works.
 - [ ] Creating the same code twice shows an error (a code is unique among non-archived codes).
 - [ ] Notify ON: a subscriber receives a push and an in-app notification ("... has a promo code for you"). A non-subscriber does not. (A code that starts in the future cannot notify: you should see an error.)
 
 **List and card**
-- [ ] Card shows code with a copy button (copy works and says "Code copied"), "20% off" (an old fixed record, if any, shows "AED 25 off"), the sport tag ("All Sports" / "Padel only"), the eligibility tag only for First bookings / Subscribers, the usage bar, and the expiry text ("Ends 30 Nov", "No end date", "Ends in 2 days" in red when 3 days or less).
+- [ ] Card shows code with a copy button (copy works and says "Code copied"), "20% off" or "AED 25 off", the sport tag ("All Sports" / "Padel only"), the eligibility tag only for First bookings / Subscribers, the usage bar, and the expiry text ("Ends 30 Nov", "No end date", "Ends in 2 days" in red when 3 days or less).
 - [ ] The pause switch pauses and resumes; a paused code cannot be redeemed by a player (see section 2).
 - [ ] The **Past** tab shows expired, used-up and archived codes; the switch is disabled there.
 - [ ] Pull to refresh works; scrolling to the bottom loads more when there are more than 20 codes.
@@ -65,12 +65,13 @@ Use an event priced 100 AED, player A, code `PADEL20` (20% off).
 - [ ] Open the booking modal with a code, close the app without paying, wait 30+ minutes: the use is released by the expiry sweeper (and the PaymentIntent is cancelled).
 - [ ] Apply a code, then remove it and pay: the earlier reservation is released and you are charged the full 105.00.
 
-**Free bookings (100% codes) are no longer possible**
-- [ ] Admin and organiser create/edit both reject `discountValue: 100` and `discountType: "fixed"` with 400 `VALIDATION`.
-- [ ] A 99% code on an event works as a normal paid booking (see Small total below); there is no Stripe-skipping path in the app any more.
+**100% code (free booking)**
+- [ ] Create a 100% code. Apply it: Total shows 0.00. Booking completes **without the Stripe sheet** and lands on the confirmation screen with the breakdown.
+- [ ] In the database there is a Payment with `paymentMethod: "promo_free"`, `status: "success"`, `finalAmount: 0`, and a confirmed redemption.
+- [ ] Cancel that booking more than 24h before the event: the use is given back. Cancel under 24h before: the redemption stays confirmed.
 
 **Small total**
-- [ ] On a 10 AED event, apply a 99% code: the total is exactly **2.00 AED** (Stripe's minimum) and payment works.
+- [ ] On a 10 AED event, apply a fixed AED 9.50 code: the total is exactly **2.00 AED** (Stripe's minimum) and payment works.
 - [ ] On an event under about 1.91 AED a code is refused ("doesn't apply to this booking").
 
 **Cancel and refund**
@@ -80,7 +81,7 @@ Use an event priced 100 AED, player A, code `PADEL20` (20% off).
 - [ ] If an event fills up while a player is paying, the automatic refund also gives the use back.
 
 **Packages (backend only, no app UI)**
-- [ ] `POST /api/packages/:id/purchase` with `{ "promoCodes": ["CODE"] }` returns the discounted amount and Stripe metadata. (Use Postman or curl.)
+- [ ] `POST /api/packages/:id/purchase` with `{ "promoCodes": ["CODE"] }` returns the discounted amount and Stripe metadata, and a 100% code creates the purchase without Stripe. (Use Postman or curl.)
 
 **Older app builds**
 - [ ] An older build that sends `?promoCode=CODE` on `book-event` still gets the discount. The old `/api/promo-codes/validate` still answers in its old shape.
@@ -92,6 +93,7 @@ Replace `$KEY` and `$BASE`. In PowerShell use `curl.exe`.
 - [ ] No key: `curl.exe -i $BASE/api/admin/promo-codes` returns 401. Wrong key returns 401/403.
 - [ ] `GET /api/admin/promo-codes?fundedBy=organiser` lists organiser codes; `?fundedBy=rally` lists Rally codes.
 - [ ] `POST /api/admin/promo-codes` creates a Rally-funded app-wide code (`createdBy` is the admin email). `"eligibility":"subscribers"` is rejected.
+- [ ] Admin codes are percentage-only, 1 to 99: `POST` and `PUT` with `"discountType":"fixed"` or `"discountValue":100` return 400 (a 99 and a 1 are accepted). Organiser codes are not limited this way: 100% and fixed AED are still allowed in the app and API.
 - [ ] A Rally code works for any player on any event; a player using it shows `fundedBy: "rally"` in the redemption and the price is lowered (e.g. 100 AED, 20% -> player pays 84).
 - [ ] `PUT` and `DELETE` on an **organiser** code return 403 `READ_ONLY`; `PATCH .../status` pauses it. `DELETE` on a Rally code archives it (it never disappears from the database).
 - [ ] `GET /api/admin/promo-redemptions` filters work: `code`, `organiserId`, `eventId` (id or E-number), `packageId`, `fundedBy`, `status`, `from`/`to`, `updatedSince`; `perPage` stops at 100; `csv=true` downloads a CSV.

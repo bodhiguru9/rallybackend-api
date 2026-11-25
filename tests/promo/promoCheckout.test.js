@@ -10,7 +10,7 @@ const cancelBooking = require('../../src/controllers/booking/cancelBooking.contr
 const { stripeWebhook } = require('../../src/controllers/payment/webhook.controller');
 const promoRoutes = require('../../src/routes/promo.routes');
 const Payment = require('../../src/models/Payment');
-const { createOrganiser, createPlayer, createPaidEvent, createCode, createLegacyCode, tokenFor, col } = require('./helpers');
+const { createOrganiser, createPlayer, createPaidEvent, createCode, tokenFor, col } = require('./helpers');
 
 const app = express();
 // The Stripe webhook needs the raw body, so it is mounted before express.json()
@@ -162,7 +162,7 @@ describe('promo codes at checkout', () => {
     it('a code that leaves under 2 AED is lifted to exactly 2.00 so Stripe accepts it', async () => {
       const player = await createPlayer();
       const cheap = await createPaidEvent(organiser, { price: 10 });
-      const promo = await createCode({ ownerId: organiser._id, discountValue: 99 }); // the biggest allowed discount on a 10 AED event
+      const promo = await createCode({ ownerId: organiser._id, discountType: 'fixed', discountValue: 9.5 });
       const res = await book(player, cheap, { codes: [promo.code] });
       expect(res.status).toBe(201);
       expect(res.body.data.booking.finalAmount).toBe(2);
@@ -288,12 +288,10 @@ describe('promo codes at checkout', () => {
     });
   });
 
-  // 100% codes can't be created any more (M7). These tests keep the defensive free-booking path covered
-  // using a record written straight to the collection (e.g. an old code).
-  describe('100% code (free, 0 AED, no Stripe), defensive path for old records', () => {
+  describe('100% code (free, 0 AED, no Stripe)', () => {
     const freeBooking = async (eventForBooking) => {
       const player = await createPlayer();
-      const promo = await createLegacyCode({ ownerId: organiser._id, discountValue: 100 });
+      const promo = await ownCode({ discountValue: 100 });
       const res = await book(player, eventForBooking, { codes: [promo.code] });
       return { player, promo, res };
     };

@@ -53,12 +53,12 @@ describe('promo codes at checkout', () => {
     const quote = (player, body) =>
       request(app).post('/api/promo-codes/quote').set('Authorization', `Bearer ${tokenFor(player)}`).send(body);
 
-    it('prices an event with the code: 100 AED, 20% -> 84 AED', async () => {
+    it('prices an event with the code: 100 AED, 20% -> 80 + 5 VAT = 85 AED', async () => {
       const player = await createPlayer();
       const promo = await ownCode();
       const res = await quote(player, { targetType: 'event', eventId: event._id.toString(), guestsCount: 1, promoCodes: [promo.code] });
       expect(res.status).toBe(200);
-      expect(res.body.data.quote).toMatchObject({ originalAmount: 100, discountAmount: 20, subtotal: 80, vatAmount: 4, finalAmount: 84 });
+      expect(res.body.data.quote).toMatchObject({ originalAmount: 100, discountAmount: 20, subtotal: 80, vatAmount: 5, finalAmount: 85 });
     });
 
     it('multiplies by guests and prices with no code', async () => {
@@ -128,14 +128,15 @@ describe('promo codes at checkout', () => {
 
       expect(res.status).toBe(201);
       const { booking, payment, paymentIntent } = res.body.data;
-      expect(booking).toMatchObject({ amount: 100, discountAmount: 20, finalAmount: 84, vatAmount: 4, rallyFundedDiscount: 20, status: 'pending' });
+      expect(booking).toMatchObject({ amount: 100, discountAmount: 20, finalAmount: 85, vatAmount: 5, rallyFundedDiscount: 20, status: 'pending' });
       expect(booking.appliedPromos[0]).toMatchObject({ code: promo.code, fundedBy: 'rally', discountAmount: 20 });
-      expect(paymentIntent.amount).toBe(8400);
+      expect(paymentIntent.amount).toBe(8500);
 
       const stored = await Payment.findByStripePaymentIntentId(paymentIntent.id);
       expect(stored.metadata).toMatchObject({
         originalAmount: '100',
         discountAmount: '20',
+        vatAmount: '5',
         rallyFundedDiscount: '20',
         organiserFundedDiscount: '0',
         promoCodes: promo.code,
@@ -143,7 +144,7 @@ describe('promo codes at checkout', () => {
         promoCode: promo.code,
         organiserId: organiser._id.toString(),
       });
-      expect(payment.vatAmount).toBe(4);
+      expect(payment.vatAmount).toBe(5);
 
       const [r] = await redemptionsOf(promo._id);
       expect(r).toMatchObject({ status: 'reserved', stripePaymentIntentId: paymentIntent.id, rallyDueAmount: 20, fundedBy: 'rally' });
@@ -155,7 +156,7 @@ describe('promo codes at checkout', () => {
       const promo = await ownCode();
       const res = await book(player, event, { query: `?promoCode=${promo.code}` });
       expect(res.status).toBe(201);
-      expect(res.body.data.booking.finalAmount).toBe(84);
+      expect(res.body.data.booking.finalAmount).toBe(85);
       expect(res.body.data.booking.promoCode).toBe(promo.code);
     });
 
@@ -269,8 +270,8 @@ describe('promo codes at checkout', () => {
 
       expect(out.status).toBe(200);
       const payment = await Payment.findByStripePaymentIntentId(pi);
-      expect(payment.refundAmount).toBe(80); // paid 84 incl. 4 VAT: amount paid minus VAT
-      expect(payment.vatRetained).toBe(4);
+      expect(payment.refundAmount).toBe(80); // paid 85 incl. 5 VAT: amount paid minus VAT
+      expect(payment.vatRetained).toBe(5);
       expect((await redemptionsOf(promo._id))[0]).toMatchObject({ status: 'refunded', rallyDueAmount: 0 });
       expect(await usedCount(promo._id)).toBe(0);
     });

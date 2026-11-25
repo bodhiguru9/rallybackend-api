@@ -4,7 +4,7 @@
  * Pricing model:
  * - baseAmount = event price * guestsCount
  * - finalAmountBeforeVat = baseAmount - discountAmount
- * - vatAmount = Math.round(finalAmountBeforeVat * 0.05 * 100) / 100
+ * - vatAmount = 5% of baseAmount (the event price), not of the discounted price: e.g. 100 AED, 20% code -> 80 + 5 VAT = 85
  * - totalCharged (finalAmount) = finalAmountBeforeVat + vatAmount
  *
  * When refunding:

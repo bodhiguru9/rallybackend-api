@@ -9,6 +9,7 @@ const {
 const { validatePromoCodeInput } = require('../../src/utils/promoCodeValidation');
 const { buildPromoMetadata, buildPromoFields, sameCodeSet } = require('../../src/services/promoCheckout.service');
 const { toCsv } = require('../../src/utils/csv');
+const { calculateRefundWithoutVat } = require('../../src/utils/refundHelper');
 
 const code = (o = {}) => ({
   promoCode: { code: 'SAVE', fundedBy: 'organiser', discountType: 'percentage', discountValue: 20, ...o },
@@ -33,14 +34,14 @@ describe('pricing: computeCodeDiscount', () => {
 });
 
 describe('pricing: buildTotals', () => {
-  it('matches the plan example: 100 AED, 20% code -> 80 + 4 VAT = 84', () => {
+  it('matches the plan example: 100 AED, 20% code -> 80 + 5 VAT (5% of the event price) = 85', () => {
     const t = buildTotals(100, [code({ fundedBy: 'rally' })]);
     expect(t).toMatchObject({
       originalAmount: 100,
       discountAmount: 20,
       subtotal: 80,
-      vatAmount: 4,
-      finalAmount: 84,
+      vatAmount: 5,
+      finalAmount: 85,
       rallyFundedDiscount: 20,
       organiserFundedDiscount: 0,
     });
@@ -57,11 +58,22 @@ describe('pricing: buildTotals', () => {
     expect(t.rallyFundedDiscount).toBe(0);
   });
 
-  it('VAT is rounded to 2 decimals on the discounted subtotal', () => {
+  it('VAT is 5% of the event price (not the discounted price), rounded to 2 decimals', () => {
     const t = buildTotals(33.33, [code({ discountType: 'fixed', discountValue: 3.33 })]);
     expect(t.subtotal).toBe(30);
-    expect(t.vatAmount).toBe(1.5);
-    expect(t.finalAmount).toBe(31.5);
+    expect(t.vatAmount).toBe(1.67); // 33.33 x 5%
+    expect(t.finalAmount).toBe(31.67);
+  });
+
+  it('the same VAT is charged with or without a code (only the subtotal changes)', () => {
+    const none = buildTotals(100, []);
+    const withCode = buildTotals(100, [code({ discountValue: 40 })]);
+    expect(withCode.vatAmount).toBe(none.vatAmount);
+    expect(withCode.finalAmount).toBe(round2(none.finalAmount - 40));
+  });
+
+  it('a discount capped at the base (fixed 500 on a 50 AED booking) is free with no VAT', () => {
+    expect(buildTotals(50, [code({ discountType: 'fixed', discountValue: 500 })])).toMatchObject({ subtotal: 0, vatAmount: 0, finalAmount: 0 });
   });
 
   it('a 100% code gives a free booking (final 0, no VAT)', () => {
@@ -101,6 +113,44 @@ describe('pricing: buildTotals', () => {
       }
     });
 
+    it('lift with the fixed VAT: 10 AED + 99% -> subtotal 1.50 + VAT 0.50 = 2.00, discount 8.50', () => {
+      const t = buildTotals(10, [code({ discountValue: 99 })]);
+      expect(t).toMatchObject({ originalAmount: 10, discountAmount: 8.5, subtotal: 1.5, vatAmount: 0.5, finalAmount: 2, organiserFundedDiscount: 8.5, rallyFundedDiscount: 0 });
+      expect(t.appliedPromos[0].discountAmount).toBe(8.5);
+    });
+
+    it('lift moves the funder split on a Rally code', () => {
+      const t = buildTotals(10, [code({ discountValue: 99, fundedBy: 'rally' })]);
+      expect(t).toMatchObject({ finalAmount: 2, rallyFundedDiscount: 8.5, organiserFundedDiscount: 0 });
+    });
+
+    it('NOT_APPLICABLE only when the plain price plus VAT is below 2 AED', () => {
+      // 1.5 x 1.05 = 1.575 < 2
+      expect(() => buildTotals(1.5, [code({ discountValue: 50 })])).toThrow(PromoError);
+      // 1.9 + 0.10 VAT = 2.00 is payable: the code applies with its discount given back
+      const t = buildTotals(1.9, [code({ discountValue: 50 })]);
+      expect(t).toMatchObject({ vatAmount: 0.1, subtotal: 1.9, finalAmount: 2, discountAmount: 0 });
+    });
+
+    it('the quote always equals the charge: never in (0, 2), and subtotal + VAT = final', () => {
+      for (const base of [1.91, 2, 3, 5, 10, 19.99, 40, 100]) {
+        for (const d of [1, 50, 95, 99, 100]) {
+          let t;
+          try {
+            t = buildTotals(base, [code({ discountValue: d })]);
+          } catch (e) {
+            expect(e).toBeInstanceOf(PromoError);
+            continue;
+          }
+          if (t.finalAmount > 0) {
+            expect(t.finalAmount).toBeGreaterThanOrEqual(2);
+          }
+          expect(round2(t.subtotal + t.vatAmount)).toBe(t.finalAmount);
+          expect(round2(t.originalAmount - t.discountAmount)).toBe(t.subtotal);
+        }
+      }
+    });
+
     it('a booking too small to ever reach 2 AED is NOT_APPLICABLE for a code', () => {
       expect(() => buildTotals(1.5, [code({ discountType: 'fixed', discountValue: 1 })])).toThrow(PromoError);
       try {
@@ -112,7 +162,7 @@ describe('pricing: buildTotals', () => {
 
     it('does not touch totals that are free or already above 2 AED', () => {
       expect(buildTotals(100, [code({ discountValue: 100 })]).finalAmount).toBe(0);
-      expect(buildTotals(100, [code({ discountValue: 20 })]).finalAmount).toBe(84);
+      expect(buildTotals(100, [code({ discountValue: 20 })]).finalAmount).toBe(85);
     });
   });
 
@@ -179,6 +229,28 @@ describe('promo code input validation', () => {
   });
 });
 
+describe('refund with the fixed VAT (5% of the event price)', () => {
+  it('100 AED, 20% code: charged 85, refund 80, VAT kept 5', () => {
+    const t = buildTotals(100, [code()]);
+    const r = calculateRefundWithoutVat({ amount: t.originalAmount, discountAmount: t.discountAmount, finalAmount: t.finalAmount });
+    expect(r).toMatchObject({ totalCharged: 85, refundAmount: 80, vatAmount: 5, refundAmountInCents: 8000 });
+  });
+  it('a lifted 2.00 charge refunds 1.50 and keeps 0.50 VAT', () => {
+    const t = buildTotals(10, [code({ discountValue: 99 })]);
+    const r = calculateRefundWithoutVat({ amount: t.originalAmount, discountAmount: t.discountAmount, finalAmount: t.finalAmount });
+    expect(r).toMatchObject({ totalCharged: 2, refundAmount: 1.5, vatAmount: 0.5 });
+  });
+  it('a free (100%) booking refunds nothing', () => {
+    const t = buildTotals(100, [code({ discountValue: 100 })]);
+    const r = calculateRefundWithoutVat({ amount: t.originalAmount, discountAmount: t.discountAmount, finalAmount: t.finalAmount });
+    expect(r).toMatchObject({ refundAmount: 0, vatAmount: 0, refundAmountInCents: 0 });
+  });
+  it('no code is unchanged: 105 charged, 100 refunded, 5 VAT kept', () => {
+    const r = calculateRefundWithoutVat({ amount: 100, discountAmount: 0, finalAmount: 105 });
+    expect(r).toMatchObject({ refundAmount: 100, vatAmount: 5 });
+  });
+});
+
 describe('checkout helpers: Stripe metadata and stored fields', () => {
   const quote = buildTotals(100, [code({ fundedBy: 'rally' })]);
 
@@ -187,6 +259,7 @@ describe('checkout helpers: Stripe metadata and stored fields', () => {
     expect(meta).toEqual({
       originalAmount: '100',
       discountAmount: '20',
+      vatAmount: '5',
       rallyFundedDiscount: '20',
       organiserFundedDiscount: '0',
       promoCodes: 'SAVE',
@@ -210,7 +283,7 @@ describe('checkout helpers: Stripe metadata and stored fields', () => {
       promoCode: 'SAVE',
       promoCodeId: 'id1',
       discountAmount: 20,
-      vatAmount: 4,
+      vatAmount: 5,
       rallyFundedDiscount: 20,
       organiserFundedDiscount: 0,
     });

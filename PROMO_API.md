@@ -2,7 +2,7 @@
 
 Status: **skeleton (milestone 1)**. Shapes below are the contract the app builds against. Each milestone marks its endpoints as implemented. Source of truth for the product rules: `promo-code-plan.md` (§1 decisions).
 
-All routes need `Authorization: Bearer <token>` unless marked admin. Money is in **AED, 2 decimal places**. VAT is 5%, charged on the discounted subtotal. Dates are ISO 8601 UTC strings.
+All routes need `Authorization: Bearer <token>` unless marked admin. Money is in **AED, 2 decimal places**. VAT is 5% of the **event price** (`originalAmount`), NOT of the discounted price (see 1.2 Quote). Dates are ISO 8601 UTC strings.
 
 Implementation status: `quote` **implemented (M2)** · checkout fields **implemented (M3)** · organiser API **implemented (M4)** · admin API **implemented (M5)**.
 
@@ -39,13 +39,24 @@ Implementation status: `quote` **implemented (M2)** · checkout fields **impleme
   "originalAmount": 100.00,      // price x guests (pre-VAT)
   "discountAmount": 20.00,       // total discount
   "subtotal": 80.00,             // originalAmount - discountAmount
-  "vatAmount": 4.00,             // round(subtotal x 0.05, 2)
-  "finalAmount": 84.00,          // subtotal + vatAmount; 0 => free booking, Stripe skipped
+  "vatAmount": 5.00,             // round(originalAmount x 0.05, 2) when subtotal > 0 (VAT does not shrink with the discount); 0 when subtotal = 0
+  "finalAmount": 85.00,          // subtotal + vatAmount; 0 => free booking, Stripe skipped
   "appliedPromos": [ /* AppliedPromo */ ],
   "rallyFundedDiscount": 20.00,
   "organiserFundedDiscount": 0.00
 }
 ```
+**VAT convention (M8).** On a promo booking VAT is 5% of the event price, not of the discounted price. Examples (AED):
+
+| Booking | subtotal | vatAmount | finalAmount |
+|---|---|---|---|
+| 100, no code | 100.00 | 5.00 | 105.00 |
+| 100, 20% code | 80.00 | 5.00 | **85.00** |
+| 100, 100% organiser code | 0.00 | 0.00 | **0.00** (free, no Stripe) |
+| 50, fixed 500 code (discount capped at the price) | 0.00 | 0.00 | 0.00 |
+| 10, 99% code (total would be 0.60, under Stripe's minimum) | 1.50 | 0.50 | **2.00** (part of the discount is given back, `discountAmount` 8.50) |
+
+If a code would leave a charge between 0 and 2.00 AED, the discount is reduced so the subtotal becomes `2.00 - vatAmount` and the total is exactly 2.00 AED; the quote equals the charge. A code is refused with `NOT_APPLICABLE` only when the price plus its VAT is itself below 2.00 AED (about AED 1.90). `collected` in code stats and the redemption `paidAmount` stay the discounted subtotal excluding VAT.
 
 **State** (computed on promo code cards): `active` | `paused` | `expired` | `used_up` | `archived`.
 `past` tab = `expired`, `used_up` or `archived`.
@@ -209,7 +220,7 @@ Row (every row carries ids for joins, plus readable numbers):
   "occurrenceStart": "...", "packageId": null,
   "bookingId": "<Mongo _id>", "bookingNumber": "booking12", "paymentId": "<Mongo _id>", "paymentNumber": "PAY5",
   "stripePaymentIntentId": "pi_...",
-  "originalAmount": 100, "discountAmount": 20, "paidAmount": 80, "vatAmount": 4, "rallyDueAmount": 20,
+  "originalAmount": 100, "discountAmount": 20, "paidAmount": 80, "vatAmount": 5, "rallyDueAmount": 20,
   "reservedAt": "...", "confirmedAt": "...", "releasedAt": null, "updatedAt": "..." }
 ```
 `stripePaymentIntentId` is null for free (0 AED) bookings. `rallyDueAmount` is the Rally-funded discount recorded for that use (0 once refunded or released); it is a record only, how payouts use it is undecided.
@@ -236,5 +247,6 @@ Run step 4 only after step 2, otherwise the partial index can't coexist cleanly 
 - **Free (0 AED) with a code**: no Stripe. A Payment is written with `paymentMethod: "promo_free"`, `status: "success"`, and a synthetic `stripePaymentIntentId` (`free_<bookingId>` / `free_pkg_<purchaseId>`), so reporting joins stay consistent. A free event with no code is unchanged (no Payment).
 - **Bookings/payments/package purchases** now also carry `appliedPromos[{promoCodeId, code, fundedBy, discountAmount, redemptionId}]`, `vatAmount`, `rallyFundedDiscount`, `organiserFundedDiscount`; legacy `promoCode` (first) and `discountAmount` (sum) are still set.
 - **Stripe metadata** (events and packages): `organiserId, originalAmount, discountAmount, rallyFundedDiscount, organiserFundedDiscount, promoCodes (comma-separated), promoFundedBy (rally|organiser|mixed), promoCode (legacy)`.
-- **Refund** on cancellation is unchanged in formula: amount paid minus 5% VAT (`amount - discountAmount`).
+- **Refund** on cancellation is unchanged in formula: amount paid minus VAT (`amount - discountAmount`). With VAT on the event price: 100 AED with a 20% code is charged 85, refunds 80 and keeps 5 VAT.
+- **Stripe metadata** also carries `vatAmount` (string).
 - **POST /api/promo-codes/validate** (legacy) now applies the same rules as `/quote` for signed-in callers and keeps its old response shape (discount on the client-sent pre-VAT amount).

@@ -46,9 +46,9 @@ Test cards (Stripe test mode): success `4242 4242 4242 4242`, declined `4000 000
 Use an event priced 100 AED, player A, code `PADEL20` (20% off).
 
 **Paid booking with a code**
-- [ ] In the booking modal, enter the code and tap the arrow: the summary shows Reservation 100.00, Promo -20.00, VAT 4.00, **Total 84.00** (all from the server). Removing the code returns to 105.00.
+- [ ] In the booking modal, enter the code and tap the arrow: the summary shows Reservation 100.00, Promo -20.00, VAT 5.00 (5% of the 100.00 price, not of the discounted price), **Total 85.00** (all from the server). Removing the code returns to 105.00.
 - [ ] Pay with `4242...`. The booking confirms and the confirmation screen shows the discount and VAT rows.
-- [ ] In Stripe (test) the PaymentIntent is 84.00 AED with metadata: `originalAmount, discountAmount, rallyFundedDiscount, organiserFundedDiscount, promoCodes, promoFundedBy, organiserId`.
+- [ ] In Stripe (test) the PaymentIntent is 85.00 AED with metadata: `originalAmount, discountAmount, vatAmount, rallyFundedDiscount, organiserFundedDiscount, promoCodes, promoFundedBy, organiserId`.
 - [ ] The organiser's list now shows the code "1 used"; View Code shows Discounted 20, Collected 80, Redeemed 1.
 - [ ] No code typed or an unapplied code: the app never sends unvalidated text.
 
@@ -71,11 +71,11 @@ Use an event priced 100 AED, player A, code `PADEL20` (20% off).
 - [ ] Cancel that booking more than 24h before the event: the use is given back. Cancel under 24h before: the redemption stays confirmed.
 
 **Small total**
-- [ ] On a 10 AED event, apply a fixed AED 9.50 code: the total is exactly **2.00 AED** (Stripe's minimum) and payment works.
-- [ ] On an event under about 1.91 AED a code is refused ("doesn't apply to this booking").
+- [ ] On a 10 AED event, apply a fixed AED 9.50 code (or a 99% code on a Rally code): the total is exactly **2.00 AED** (Stripe's minimum: subtotal 1.50 + VAT 0.50) and payment works.
+- [ ] On an event under about AED 1.90 (price plus VAT below 2.00) a code is refused ("doesn't apply to this booking").
 
 **Cancel and refund**
-- [ ] Cancel a paid booking more than 24h before: the refund is **amount paid minus VAT** (84 paid, 80 refunded, 4 VAT kept) and the code use is given back (usedCount goes down by 1).
+- [ ] Cancel a paid booking more than 24h before: the refund is **amount paid minus VAT** (85 paid, 80 refunded, 5 VAT kept) and the code use is given back (usedCount goes down by 1).
 - [ ] Cancel under 24h before: no refund and the redemption stays confirmed.
 - [ ] Cancel a booking you have not paid for yet: the code use is released immediately.
 - [ ] If an event fills up while a player is paying, the automatic refund also gives the use back.
@@ -94,7 +94,7 @@ Replace `$KEY` and `$BASE`. In PowerShell use `curl.exe`.
 - [ ] `GET /api/admin/promo-codes?fundedBy=organiser` lists organiser codes; `?fundedBy=rally` lists Rally codes.
 - [ ] `POST /api/admin/promo-codes` creates a Rally-funded app-wide code (`createdBy` is the admin email). `"eligibility":"subscribers"` is rejected.
 - [ ] Admin codes are percentage-only, 1 to 99: `POST` and `PUT` with `"discountType":"fixed"` or `"discountValue":100` return 400 (a 99 and a 1 are accepted). Organiser codes are not limited this way: 100% and fixed AED are still allowed in the app and API.
-- [ ] A Rally code works for any player on any event; a player using it shows `fundedBy: "rally"` in the redemption and the price is lowered (e.g. 100 AED, 20% -> player pays 84).
+- [ ] A Rally code works for any player on any event; a player using it shows `fundedBy: "rally"` in the redemption and the price is lowered (e.g. 100 AED, 20% -> player pays 85: subtotal 80 + VAT 5).
 - [ ] `PUT` and `DELETE` on an **organiser** code return 403 `READ_ONLY`; `PATCH .../status` pauses it. `DELETE` on a Rally code archives it (it never disappears from the database).
 - [ ] `GET /api/admin/promo-redemptions` filters work: `code`, `organiserId`, `eventId` (id or E-number), `packageId`, `fundedBy`, `status`, `from`/`to`, `updatedSince`; `perPage` stops at 100; `csv=true` downloads a CSV.
 - [ ] Rows show `rallyDueAmount` equal to the discount for a Rally code, and 0 after the booking is cancelled and refunded. (This is a record only; payouts are not changed.)

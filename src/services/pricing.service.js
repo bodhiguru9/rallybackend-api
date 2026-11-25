@@ -7,7 +7,9 @@
  * Rules (promo-code-plan.md section 4.1):
  *   base      = (gameJoinPrice ?? eventPricePerGuest) x guests, or packagePrice
  *   discount  = capped at base; percentage codes honour maxDiscountAmount; rounded to 2 dp
- *   VAT       = round((base - discount) x 5%, 2); final = base - discount + VAT
+ *   VAT       = 5% of the EVENT PRICE (originalAmount), not of the discounted price: round(base x 5%, 2).
+ *               A booking that ends up free (subtotal 0) has no VAT. final = subtotal + VAT
+ *               (e.g. 100 AED, 20% code -> subtotal 80, VAT 5, final 85)
  */
 const { ObjectId } = require('mongodb');
 const { getDB } = require('../config/database');
@@ -86,33 +88,29 @@ function buildTotals(base, codes) {
 
   const originalAmount = round2(base);
   let subtotal = remaining;
-  let vatAmount = round2(subtotal * VAT_RATE);
+  // VAT is charged on the event price, not on the discounted price. A fully discounted (free) booking has no VAT.
+  const vatAmount = subtotal > 0 ? round2(originalAmount * VAT_RATE) : 0;
   let finalAmount = round2(subtotal + vatAmount);
 
   // A code must not leave a charge Stripe would reject (0 < total < STRIPE_MIN_AED): give back part of the
   // last code's discount so the player pays exactly the minimum, and the quote matches the charge.
+  // VAT is fixed (5% of the price), so the subtotal that makes the total exactly 2.00 is 2 - VAT.
   if (appliedPromos.length > 0 && finalAmount > 0 && finalAmount < STRIPE_MIN_AED) {
-    let minSubtotal = round2(STRIPE_MIN_AED / (1 + VAT_RATE));
-    while (round2(minSubtotal + round2(minSubtotal * VAT_RATE)) < STRIPE_MIN_AED) {
-      minSubtotal = round2(minSubtotal + 0.01);
-    }
-    if (minSubtotal > originalAmount) {
+    if (round2(originalAmount + vatAmount) < STRIPE_MIN_AED) {
       // The booking itself is below what Stripe accepts once VAT is added: a code can't make it payable
       throw new PromoError('NOT_APPLICABLE', 'Promo codes can\'t be used on this booking');
     }
-    {
-      const giveBack = round2(minSubtotal - subtotal);
-      const last = appliedPromos[appliedPromos.length - 1];
-      last.discountAmount = round2(last.discountAmount - giveBack);
-      if (last.fundedBy === 'rally') {
-        rallyFundedDiscount = round2(rallyFundedDiscount - giveBack);
-      } else {
-        organiserFundedDiscount = round2(organiserFundedDiscount - giveBack);
-      }
-      subtotal = minSubtotal;
-      vatAmount = round2(subtotal * VAT_RATE);
-      finalAmount = round2(subtotal + vatAmount);
+    const minSubtotal = Math.max(0.01, round2(STRIPE_MIN_AED - vatAmount));
+    const giveBack = round2(minSubtotal - subtotal);
+    const last = appliedPromos[appliedPromos.length - 1];
+    last.discountAmount = round2(last.discountAmount - giveBack);
+    if (last.fundedBy === 'rally') {
+      rallyFundedDiscount = round2(rallyFundedDiscount - giveBack);
+    } else {
+      organiserFundedDiscount = round2(organiserFundedDiscount - giveBack);
     }
+    subtotal = minSubtotal;
+    finalAmount = round2(subtotal + vatAmount);
   }
   const discountAmount = round2(originalAmount - subtotal);
 

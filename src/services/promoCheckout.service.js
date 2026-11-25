@@ -72,6 +72,7 @@ function buildPromoMetadata(quote, organiserId) {
   const meta = {
     originalAmount: String(quote.originalAmount),
     discountAmount: String(quote.discountAmount),
+    vatAmount: String(quote.vatAmount),
     rallyFundedDiscount: String(quote.rallyFundedDiscount),
     organiserFundedDiscount: String(quote.organiserFundedDiscount),
     promoCodes: quote.appliedPromos.map((p) => p.code).join(','),

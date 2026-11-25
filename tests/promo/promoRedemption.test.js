@@ -27,7 +27,7 @@ describe('promo redemption lifecycle', () => {
 
       expect(r.status).toBe('reserved');
       expect(r.redemptionId).toMatch(/^PRD\d+$/);
-      expect(r).toMatchObject({ originalAmount: 100, discountAmount: 20, paidAmount: 80, vatAmount: 4, fundedBy: 'organiser', rallyDueAmount: 0 });
+      expect(r).toMatchObject({ originalAmount: 100, discountAmount: 20, paidAmount: 80, vatAmount: 5, fundedBy: 'organiser', rallyDueAmount: 0 });
       expect(r.expiresAt.getTime()).toBeGreaterThan(Date.now() + 25 * 60 * 1000);
       expect(await usedCount(promo._id)).toBe(1);
     });

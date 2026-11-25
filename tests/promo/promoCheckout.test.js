@@ -274,6 +274,29 @@ describe('promo codes at checkout', () => {
       expect(await usedCount(promo._id)).toBe(1);
     });
 
+    it('refunding an order whose redemption is still reserved gives the use back (FOOTBALL20 case)', async () => {
+      const { promo, pi, bookingId } = await paidBooking();
+      const booking = await col('bookings').findOne({ bookingId });
+      expect((await redemptionsOf(promo._id))[0].status).toBe('reserved');
+      expect(await usedCount(promo._id)).toBe(1);
+
+      // The player's payment is marked success but the confirm never ran; they cancel and are refunded
+      await Payment.claimSuccess((await Payment.findByStripePaymentIntentId(pi))._id, pi, 'pm_test');
+      await col('bookings').updateOne({ _id: booking._id }, { $set: { status: 'booked' } });
+      await Payment.markRefunded((await Payment.findByStripePaymentIntentId(pi))._id, {
+        refundId: 're_test', refundStatus: 'succeeded', refundAmount: 1, vatRetained: 0, refundedAt: new Date(), refundReason: 'test',
+      });
+      const player = await col('users').findOne({ _id: booking.userId });
+      const res = await request(app)
+        .post(`/api/bookings/${bookingId}/cancel`)
+        .set('Authorization', `Bearer ${tokenFor(player)}`)
+        .send({});
+      expect(res.status).toBe(200);
+
+      expect((await redemptionsOf(promo._id))[0].status).toBe('released');
+      expect(await usedCount(promo._id)).toBe(0);
+    });
+
     it('payment_intent.payment_failed releases the use', async () => {
       const { promo, pi } = await paidBooking();
       await sendWebhook('payment_intent.payment_failed', pi);

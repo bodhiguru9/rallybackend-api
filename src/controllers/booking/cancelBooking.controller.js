@@ -14,6 +14,13 @@ const {
 const Waitlist = require('../../models/Waitlist');
 const promoRedemption = require('../../services/promoRedemption.service');
 
+// A cancelled paid booking must not keep its promo use: refund a confirmed redemption, and release one whose
+// confirm never landed (still 'reserved'), otherwise the code's usedCount stays up with nothing in its stats.
+const giveBackPromo = async (bookingId) => {
+  await promoRedemption.refund({ bookingId }, 'booking_cancelled');
+  await promoRedemption.release({ bookingId }, 'booking_cancelled');
+};
+
 // Initialize Stripe lazily
 let stripeInstance = null;
 
@@ -121,7 +128,7 @@ const cancelBooking = async (req, res, next) => {
         if (payment.status === 'refunded') {
           refundReason = 'Payment was already refunded earlier';
           refundEligible = true;
-          await promoRedemption.refund({ bookingId: booking._id }, 'booking_cancelled');
+          await giveBackPromo(booking._id);
         } else if (payment.status === 'success') {
           // Check refund policy and window
           const occurrenceStart = booking.occurrenceStart ? new Date(booking.occurrenceStart) : null;
@@ -148,7 +155,7 @@ const cancelBooking = async (req, res, next) => {
               // given back (and the Rally top-up owed drops to 0); outside it the redemption stays confirmed.
               refundReason = 'Free booking (100% promo code) cancelled; no payment to refund';
               await Payment.markRefundNotEligible(payment.paymentId || payment._id, refundReason);
-              await promoRedemption.refund({ bookingId: booking._id }, 'booking_cancelled');
+              await giveBackPromo(booking._id);
             } else if (!payment.stripePaymentIntentId) {
               refundReason = 'Refund eligible, but Stripe payment intent is missing';
               await Payment.markRefundFailed(
@@ -162,7 +169,7 @@ const cancelBooking = async (req, res, next) => {
                 refundReason = 'No refundable booking amount (after 5% VAT deduction)';
                 await Payment.markRefundNotEligible(payment.paymentId || payment._id, refundReason);
                 // Nothing to pay back (e.g. a 100% promo booking cancelled in time): the promo use is given back
-                await promoRedemption.refund({ bookingId: booking._id }, 'booking_cancelled');
+                await giveBackPromo(booking._id);
               } else {
                 try {
                   const stripeClient = getStripeInstance();
@@ -185,7 +192,7 @@ const cancelBooking = async (req, res, next) => {
 
                   refundProcessed = true;
                   // Give the promo use back; the Rally top-up owed to the organiser drops to 0
-                  await promoRedemption.refund({ bookingId: booking._id }, 'booking_cancelled');
+                  await giveBackPromo(booking._id);
                   refundReason = `Booking refund of AED ${refundAmount} processed successfully (5% VAT of AED ${vatAmount} is non-refundable)`;
 
                   // Send in-app notification to player

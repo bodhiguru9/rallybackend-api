@@ -229,7 +229,7 @@ describe('csv util', () => {
   it('escapes quotes, commas and newlines, and neutralises formulas', () => {
     const csv = toCsv(['a', 'b'], [['=SUM(A1)', 'x,"y"'], ['line\nbreak', null]]);
     expect(csv.charCodeAt(0)).toBe(0xfeff);
-    expect(csv).toContain(''=SUM(A1)');
+    expect(csv).toContain('\'=SUM(A1)');
     expect(csv).toContain('"x,""y"""');
     expect(csv).toContain('"line\nbreak"');
   });

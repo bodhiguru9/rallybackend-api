@@ -121,5 +121,6 @@ dist/
 .elasticbeanstalk/*
 !.elasticbeanstalk/*.cfg.yml
 !.elasticbeanstalk/*.global.yml
+scripts/checkPackages.js
 .handoff/logs/
 .handoff/wt/
